@@ -1,0 +1,16 @@
+[package]
+name = "top_drluo_luo9_ai_chat"
+version = "1.0.0"
+edition = "2024"
+description = "AI Chat plugin for Luo9 Bot - 记忆/人格/情绪/主动对话"
+authors = ["drluo"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+luo9_sdk = "0.5.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+ureq = "3.3"
