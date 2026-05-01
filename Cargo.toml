@@ -1,6 +1,6 @@
 [package]
 name = "top_drluo_luo9_ai_chat"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "AI Chat plugin for Luo9 Bot - 记忆/人格/情绪/主动对话"
 authors = ["drluo"]
