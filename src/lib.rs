@@ -421,6 +421,7 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 fn process_expired_batches() {
     let timeout = config::get().conversation.batch_timeout_ms;
 
+    // 收集所有过期批次
     let expired: Vec<(u64, u64, String)> = with_state(|s| {
         s.batches.iter()
             .filter(|(_, batch)| batch.last_update.elapsed().as_millis() >= timeout as u128)
@@ -428,24 +429,60 @@ fn process_expired_batches() {
             .collect()
     });
 
-    for (user_id, group_id, messages) in expired {
-        with_state(|s| { s.batches.remove(&user_id); });
+    if expired.is_empty() {
+        return;
+    }
 
-        // 群聊非@消息: 用 AI 决定是否回复
-        if group_id > 0 && !messages.contains(&format!("[CQ:at,qq={}]", config::get().self_qq)) {
-            if !decide_reply(group_id, user_id, &messages) {
+    // 按群组聚合: 同一群的所有消息一起做 AI 决策
+    let self_qq = config::get().self_qq;
+    let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
+
+    // 收集 (user_id, group_id, messages) 用于决策
+    let mut group_msgs: std::collections::HashMap<u64, Vec<(u64, String)>> = std::collections::HashMap::new();
+    let mut private_batches: Vec<(u64, String)> = Vec::new();
+
+    for (user_id, group_id, messages) in &expired {
+        with_state(|s| { s.batches.remove(user_id); });
+        if *group_id > 0 {
+            group_msgs.entry(*group_id).or_default().push((*user_id, messages.clone()));
+        } else {
+            private_batches.push((*user_id, messages.clone()));
+        }
+    }
+
+    // 处理私聊批次 (直接回复)
+    for (user_id, messages) in private_batches {
+        process_message(user_id, 0, &messages);
+    }
+
+    // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
+    for (group_id, user_msgs) in group_msgs {
+        // 拼接整个群最近的消息流作为决策上下文
+        let group_context: Vec<String> = user_msgs.iter()
+            .map(|(uid, msg)| format!("[{}] {}", uid, msg))
+            .collect();
+        let context_str = group_context.join("\n");
+
+        for (user_id, messages) in user_msgs {
+            // @消息直接回复
+            if self_qq > 0 && messages.contains(&at_pattern) {
+                process_message(user_id, group_id, &messages);
                 continue;
             }
-        }
 
-        process_message(user_id, group_id, &messages);
+            // 非@消息: AI 决策 (传入整个群的上下文)
+            if decide_reply(group_id, user_id, &messages, &context_str) {
+                process_message(user_id, group_id, &messages);
+            }
+        }
     }
 }
 
 /// AI 驱动的群聊回复决策
 ///
 /// 综合记忆、对话上下文、人格特质和消息内容，判断是否需要回复
-fn decide_reply(group_id: u64, user_id: u64, message: &str) -> bool {
+/// group_context: 同一群中所有待处理消息的拼接，用于理解连续对话
+fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str) -> bool {
     let cfg = config::get();
 
     // self_qq 未配置时，回复所有消息
@@ -463,9 +500,9 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str) -> bool {
     }
 
     // 2. 情绪状态
-    let emotion = emotion::get_prompt_context(user_id);
-    if !emotion.is_empty() {
-        context_parts.push(emotion);
+    let emotion_ctx = emotion::get_prompt_context(user_id);
+    if !emotion_ctx.is_empty() {
+        context_parts.push(emotion_ctx);
     }
 
     // 3. 相关记忆
@@ -474,7 +511,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str) -> bool {
         context_parts.push(memories);
     }
 
-    // 4. 最近群聊对话历史 (从批次或最近交互中获取)
+    // 4. 与该用户的历史对话
     let recent_history = with_state(|s| {
         s.get_or_create_context(user_id).history.iter()
             .rev()
@@ -483,7 +520,12 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str) -> bool {
             .collect::<Vec<_>>()
     });
     if !recent_history.is_empty() {
-        context_parts.push(format!("# 最近对话\n{}", recent_history.join("\n")));
+        context_parts.push(format!("# 与该用户的历史对话\n{}", recent_history.join("\n")));
+    }
+
+    // 5. 当前群的实时消息流 (包含多人对话上下文)
+    if !group_context.is_empty() {
+        context_parts.push(format!("# 当前群聊消息流\n{}", group_context));
     }
 
     let context = context_parts.join("\n\n");
@@ -498,7 +540,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str) -> bool {
     };
 
     let content = format!(
-        "你的性格倾向: {}\n\n当前群消息:\n[{}] {}",
+        "你的性格倾向: {}\n\n需要判断是否回复的当前消息:\n[{}] {}",
         weight_desc, user_id, message
     );
 
