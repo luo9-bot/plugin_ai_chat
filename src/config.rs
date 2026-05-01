@@ -105,6 +105,8 @@ pub struct MemoryConfig {
     pub important_fade_days: u64,
     #[serde(default = "default_auto_summarize_threshold")]
     pub auto_summarize_threshold: usize,
+    #[serde(default = "default_working_memory_expire_hours")]
+    pub working_memory_expire_hours: u64,
 }
 
 impl Default for MemoryConfig {
@@ -113,6 +115,7 @@ impl Default for MemoryConfig {
             normal_expire_days: default_normal_expire_days(),
             important_fade_days: default_important_fade_days(),
             auto_summarize_threshold: default_auto_summarize_threshold(),
+            working_memory_expire_hours: default_working_memory_expire_hours(),
         }
     }
 }
@@ -233,6 +236,7 @@ fn default_reply_style() -> String { "简短自然，一两句话即可，像朋
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
 fn default_auto_summarize_threshold() -> usize { 10 }
+fn default_working_memory_expire_hours() -> u64 { 6 }
 fn default_decay_rate() -> f32 { 0.15 }
 fn default_decay_delay() -> u64 { 60 }
 fn default_neutral_threshold() -> f32 { 0.15 }
@@ -306,6 +310,7 @@ memory:
   normal_expire_days: 30     # 普通记忆过期天数
   important_fade_days: 7     # 重要记忆降权天数
   auto_summarize_threshold: 10 # 自动摘要触发阈值
+  working_memory_expire_hours: 6 # 群聊工作记忆过期时间 (小时)
 
 # ── 情绪参数 ─────────────────────────────────────────────────────
 emotion:
@@ -411,10 +416,11 @@ fn load_all() {
     let snapshots = crate::personality::snapshot_count();
     let emo_count = crate::emotion::user_count();
     let proactive_count = crate::proactive::user_count();
+    let wm_groups = crate::working_memory::group_count();
 
     println!(
-        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states",
-        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count
+        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory",
+        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups
     );
 }
 

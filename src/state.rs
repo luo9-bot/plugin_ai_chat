@@ -29,6 +29,8 @@ pub struct State {
     /// 机器人上次回复时间 (group_id, user_id) → Instant，用于对话跟进判断
     /// group_id=0 表示私聊
     pub last_reply_times: HashMap<(u64, u64), Instant>,
+    /// 机器人在各群最近发出的消息 (group_id → [(message, time)])，用于 AI 回复决策
+    recent_bot_messages: HashMap<u64, Vec<(String, Instant)>>,
 }
 
 impl State {
@@ -39,6 +41,7 @@ impl State {
             contexts: HashMap::new(),
             batches: HashMap::new(),
             last_reply_times: HashMap::new(),
+            recent_bot_messages: HashMap::new(),
         }
     }
 
@@ -100,6 +103,24 @@ impl State {
         }
     }
 
+    /// 取出批次消息用于处理，但保留槽位
+    /// 在 AI 处理期间如果有新消息到来，会追加到同一个槽位
+    pub fn take_batch_for_processing(&mut self, user_id: u64) -> Option<String> {
+        self.batches.remove(&user_id).map(|batch| batch.messages)
+    }
+
+    /// 检查并取出处理期间新到达的消息
+    pub fn take_new_messages(&mut self, user_id: u64, timeout_ms: u64) -> Option<String> {
+        let should_take = self.batches.get(&user_id).map_or(false, |batch| {
+            batch.last_update.elapsed().as_millis() >= timeout_ms as u128
+        });
+        if should_take {
+            self.batches.remove(&user_id).map(|batch| batch.messages)
+        } else {
+            None
+        }
+    }
+
     /// 获取或创建用户上下文
     pub fn get_or_create_context(&mut self, user_id: u64) -> &mut UserContext {
         self.contexts.entry(user_id).or_insert(UserContext {
@@ -116,6 +137,32 @@ impl State {
         while ctx.history.len() > max_pairs * 2 {
             ctx.history.remove(0);
         }
+    }
+
+    /// 记录机器人在群里发出的消息 (用于 AI 回复决策上下文)
+    pub fn record_bot_message(&mut self, group_id: u64, message: &str) {
+        if group_id == 0 { return; }
+        let entry = self.recent_bot_messages.entry(group_id).or_default();
+        entry.push((message.to_string(), Instant::now()));
+        // 只保留最近 10 条
+        if entry.len() > 10 {
+            entry.remove(0);
+        }
+    }
+
+    /// 获取机器人在某群最近的消息 (最多返回最近 N 条，时间在 max_age 秒内)
+    pub fn get_recent_bot_messages(&self, group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<&str> {
+        self.recent_bot_messages
+            .get(&group_id)
+            .map(|msgs| {
+                msgs.iter()
+                    .rev()
+                    .filter(|(_, t)| t.elapsed().as_secs() < max_age_secs)
+                    .take(max_count)
+                    .map(|(msg, _)| msg.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
     }
 
     /// 遗忘用户对话

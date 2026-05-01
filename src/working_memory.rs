@@ -1,0 +1,140 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::time::SystemTime;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Entry {
+    pub user_id: u64,
+    pub content: String,
+    pub timestamp: u64,
+    pub bot_replied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GroupMemory {
+    pub entries: Vec<Entry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct WorkingMemoryStore {
+    pub groups: HashMap<String, GroupMemory>,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn memory_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("working_memory.json")
+}
+
+impl WorkingMemoryStore {
+    fn load() -> Self {
+        let path = memory_path();
+        match fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    fn save(&self) {
+        let path = memory_path();
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            fs::write(path, json).ok();
+        }
+    }
+}
+
+/// 记录一条群聊消息 (无论是否回复)
+pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) {
+    if group_id == 0 { return; }
+    let mut store = WorkingMemoryStore::load();
+    let group = store.groups.entry(group_id.to_string()).or_default();
+    group.entries.push(Entry {
+        user_id,
+        content: content.to_string(),
+        timestamp: now_secs(),
+        bot_replied,
+    });
+    // 每群最多保留 200 条
+    if group.entries.len() > 200 {
+        let drain_count = group.entries.len() - 200;
+        group.entries.drain(0..drain_count);
+    }
+    store.save();
+}
+
+/// 标记某用户最近的消息为已回复
+pub fn mark_replied(group_id: u64, user_id: u64) {
+    if group_id == 0 { return; }
+    let mut store = WorkingMemoryStore::load();
+    if let Some(group) = store.groups.get_mut(&group_id.to_string()) {
+        // 标记该用户最近一条未回复的消息
+        if let Some(entry) = group.entries.iter_mut().rev().find(|e| e.user_id == user_id && !e.bot_replied) {
+            entry.bot_replied = true;
+        }
+    }
+    store.save();
+}
+
+/// 获取某群最近的消息
+pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Entry> {
+    let store = WorkingMemoryStore::load();
+    let now = now_secs();
+    store.groups
+        .get(&group_id.to_string())
+        .map(|group| {
+            group.entries.iter()
+                .rev()
+                .filter(|e| now.saturating_sub(e.timestamp) < max_age_secs)
+                .take(max_count)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 获取格式化的群聊工作记忆上下文 (用于 AI 决策)
+pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
+    let entries = get_recent(group_id, max_age_secs, 30);
+    if entries.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = entries.iter().map(|e| {
+        let tag = if e.bot_replied { "[已回复]" } else { "" };
+        format!("[{}]{} {}", e.user_id, tag, e.content)
+    }).collect();
+    format!("# 群聊工作记忆 (最近消息)\n{}", lines.join("\n"))
+}
+
+/// 清理过期的工作记忆
+pub fn cleanup(max_age_secs: u64) {
+    let mut store = WorkingMemoryStore::load();
+    let now = now_secs();
+    let mut changed = false;
+    for group in store.groups.values_mut() {
+        let before = group.entries.len();
+        group.entries.retain(|e| now.saturating_sub(e.timestamp) < max_age_secs);
+        if group.entries.len() != before {
+            changed = true;
+        }
+    }
+    // 移除空群
+    store.groups.retain(|_, g| !g.entries.is_empty());
+    if changed {
+        store.save();
+    }
+}
+
+/// 返回有工作记忆的群数量 (用于启动日志)
+pub fn group_count() -> usize {
+    let store = WorkingMemoryStore::load();
+    store.groups.len()
+}
