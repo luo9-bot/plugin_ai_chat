@@ -114,21 +114,30 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
     format!("# 群聊工作记忆 (最近消息)\n{}", lines.join("\n"))
 }
 
-/// 清理过期的工作记忆
+/// 清理过期的工作记忆 (归档后删除)
 pub fn cleanup(max_age_secs: u64) {
     let mut store = WorkingMemoryStore::load();
     let now = now_secs();
-    let mut changed = false;
-    for group in store.groups.values_mut() {
-        let before = group.entries.len();
-        group.entries.retain(|e| now.saturating_sub(e.timestamp) < max_age_secs);
-        if group.entries.len() != before {
-            changed = true;
+    let mut to_archive = Vec::new();
+
+    for (group_id_str, group) in store.groups.iter_mut() {
+        let group_id: u64 = group_id_str.parse().unwrap_or(0);
+        let mut remaining = Vec::new();
+        for entry in group.entries.drain(..) {
+            if now.saturating_sub(entry.timestamp) >= max_age_secs {
+                to_archive.push((group_id, entry));
+            } else {
+                remaining.push(entry);
+            }
         }
+        group.entries = remaining;
     }
+
     // 移除空群
     store.groups.retain(|_, g| !g.entries.is_empty());
-    if changed {
+
+    if !to_archive.is_empty() {
+        crate::archive::archive_working_memory(to_archive);
         store.save();
     }
 }

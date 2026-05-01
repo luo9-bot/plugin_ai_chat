@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod archive;
 pub mod config;
 pub mod cron;
 pub mod emotion;

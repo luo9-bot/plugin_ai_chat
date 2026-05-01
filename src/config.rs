@@ -417,10 +417,11 @@ fn load_all() {
     let emo_count = crate::emotion::user_count();
     let proactive_count = crate::proactive::user_count();
     let wm_groups = crate::working_memory::group_count();
+    let (archive_wm, archive_lt) = crate::archive::stats();
 
     println!(
-        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory",
-        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups
+        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, archive: {} working + {} long-term",
+        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, archive_wm, archive_lt
     );
 }
 

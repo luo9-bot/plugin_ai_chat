@@ -153,9 +153,20 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
 pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
     let mut store = MemoryStore::load();
     let user = store.get_user_mut(user_id);
-    let before = user.entries.len();
-    user.entries.retain(|e| !e.content.contains(pattern));
-    let removed = before - user.entries.len();
+    let mut archived = Vec::new();
+    let mut remaining = Vec::new();
+    for entry in user.entries.drain(..) {
+        if entry.content.contains(pattern) {
+            archived.push(entry);
+        } else {
+            remaining.push(entry);
+        }
+    }
+    user.entries = remaining;
+    let removed = archived.len();
+    if removed > 0 {
+        crate::archive::archive_long_term_memory(user_id, archived);
+    }
     store.save();
     if removed > 0 {
         vec![format!("已遗忘 {} 条记忆", removed)]
@@ -166,7 +177,11 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
 
 pub fn forget_all(user_id: u64) {
     let mut store = MemoryStore::load();
-    store.users.remove(&user_id.to_string());
+    if let Some(user) = store.users.remove(&user_id.to_string()) {
+        if !user.entries.is_empty() {
+            crate::archive::archive_long_term_memory(user_id, user.entries);
+        }
+    }
     store.save();
 }
 
@@ -358,7 +373,19 @@ pub fn check_forget_command(user_id: u64, message: &str) -> Option<String> {
             if content.is_empty() {
                 let mut store = MemoryStore::load();
                 let user = store.get_user_mut(user_id);
-                user.entries.retain(|e| e.importance == Importance::Permanent);
+                let mut archived = Vec::new();
+                let mut remaining = Vec::new();
+                for entry in user.entries.drain(..) {
+                    if entry.importance == Importance::Permanent {
+                        remaining.push(entry);
+                    } else {
+                        archived.push(entry);
+                    }
+                }
+                user.entries = remaining;
+                if !archived.is_empty() {
+                    crate::archive::archive_long_term_memory(user_id, archived);
+                }
                 store.save();
                 return Some("已清除近期记忆".to_string());
             } else {
