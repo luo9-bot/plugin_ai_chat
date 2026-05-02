@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// 用户对话状态
@@ -22,9 +22,11 @@ pub type CtxKey = (u64, u64);
 /// 全局状态
 pub struct State {
     /// 私聊活跃用户集合 (user_id)
-    pub active: std::collections::HashSet<u64>,
+    pub active: HashSet<u64>,
     /// 群聊活跃群组集合 (group_id)，管理员开启后整个群可聊
-    pub active_groups: std::collections::HashSet<u64>,
+    pub active_groups: HashSet<u64>,
+    /// 黑名单用户集合 (user_id)，完全忽略消息和记忆
+    pub blacklist: HashSet<u64>,
     /// 用户对话上下文 (按 (group_id, user_id) 隔离)
     pub contexts: HashMap<CtxKey, UserContext>,
     /// 消息批次缓冲 (按 (group_id, user_id) 隔离)
@@ -39,13 +41,31 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            active: std::collections::HashSet::new(),
-            active_groups: std::collections::HashSet::new(),
+            active: HashSet::new(),
+            active_groups: HashSet::new(),
+            blacklist: crate::blocklist::load(),
             contexts: HashMap::new(),
             batches: HashMap::new(),
             last_reply_times: HashMap::new(),
             recent_bot_messages: HashMap::new(),
         }
+    }
+
+    /// 检查用户是否在黑名单中
+    pub fn is_blacklisted(&self, user_id: u64) -> bool {
+        self.blacklist.contains(&user_id)
+    }
+
+    /// 加入黑名单
+    pub fn add_blacklist(&mut self, user_id: u64) {
+        self.blacklist.insert(user_id);
+        crate::blocklist::save(&self.blacklist);
+    }
+
+    /// 移除黑名单
+    pub fn remove_blacklist(&mut self, user_id: u64) {
+        self.blacklist.remove(&user_id);
+        crate::blocklist::save(&self.blacklist);
     }
 
     /// 记录机器人回复了某用户 (group_id=0 表示私聊)

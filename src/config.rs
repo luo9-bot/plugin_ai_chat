@@ -449,10 +449,11 @@ fn load_all() {
     let wm_groups = crate::working_memory::group_count();
     let self_thoughts = crate::self_memory::load_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
+    let block_count = crate::blocklist::load_count();
 
     println!(
-        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, {} self-thoughts, archive: {} working + {} long-term",
-        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, self_thoughts, archive_wm, archive_lt
+        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, {} self-thoughts, {} blocked users, archive: {} working + {} long-term",
+        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, self_thoughts, block_count, archive_wm, archive_lt
     );
 }
 

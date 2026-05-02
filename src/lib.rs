@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod archive;
+pub mod blocklist;
 pub mod config;
 #[cfg(feature = "plugin")]
 pub mod cron;
@@ -246,6 +247,11 @@ fn is_admin(user_id: u64) -> bool {
 fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
 
+    // ── 黑名单拦截 (完全忽略) ──
+    if with_state(|s| s.is_blacklisted(user_id)) {
+        return;
+    }
+
     // ── 管理员专属控制命令 ──
     if is_admin(user_id) {
         match trimmed {
@@ -270,6 +276,12 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                 return;
             }
             _ => {}
+        }
+
+        // 通用管理员命令 (群聊/私聊均可使用)
+        if let Some(reply) = handle_admin_command(trimmed) {
+            sender::send_msg(group_id, user_id, &reply);
+            return;
         }
 
         // 人格/主动对话管理命令 (管理员专属)
@@ -307,10 +319,23 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
 
+    // ── 黑名单拦截 (完全忽略) ──
+    if with_state(|s| s.is_blacklisted(user_id)) {
+        return;
+    }
+
     // 控制命令
     if let Some(reply) = handle_control_command(0, user_id, trimmed) {
         sender::send_msg(0, user_id, &reply);
         return;
+    }
+
+    // 通用管理员命令
+    if is_admin(user_id) {
+        if let Some(reply) = handle_admin_command(trimmed) {
+            sender::send_msg(0, user_id, &reply);
+            return;
+        }
     }
 
     if let Some(reply) = memory::check_forget_command(user_id, trimmed) {
@@ -477,6 +502,120 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
             return Some(format!("已添加日期提醒: {} {}", parts[0], parts[1]));
         }
         return Some("格式: 提醒我:MM-DD 描述".into());
+    }
+
+    None
+}
+
+// ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
+
+fn handle_admin_command(msg: &str) -> Option<String> {
+    match msg {
+        "查看群聊" => {
+            let groups = with_state(|s| s.active_groups.iter().copied().collect::<Vec<u64>>());
+            if groups.is_empty() {
+                return Some("当前没有开启的群聊".into());
+            }
+            let list: Vec<String> = groups.iter().map(|g| g.to_string()).collect();
+            return Some(format!("已开启的群聊 ({}):\n{}", list.len(), list.join("\n")));
+        }
+        "查看用户" => {
+            let users = with_state(|s| s.active.iter().copied().collect::<Vec<u64>>());
+            if users.is_empty() {
+                return Some("当前没有开启私聊的用户".into());
+            }
+            let list: Vec<String> = users.iter().map(|u| u.to_string()).collect();
+            return Some(format!("已开启的用户 ({}):\n{}", list.len(), list.join("\n")));
+        }
+        "查看黑名单" => {
+            let blocked = with_state(|s| s.blacklist.iter().copied().collect::<Vec<u64>>());
+            if blocked.is_empty() {
+                return Some("黑名单为空".into());
+            }
+            let list: Vec<String> = blocked.iter().map(|u| u.to_string()).collect();
+            return Some(format!("黑名单用户 ({}):\n{}", list.len(), list.join("\n")));
+        }
+        _ => {}
+    }
+
+    if let Some(rest) = msg.strip_prefix("开启群聊:") {
+        if let Ok(group_id) = rest.trim().parse::<u64>() {
+            let already = with_state(|s| s.active_groups.contains(&group_id));
+            if already {
+                return Some(format!("群{}已经是开启状态", group_id));
+            }
+            with_state(|s| { s.active_groups.insert(group_id); });
+            return Some(format!("已开启群{}", group_id));
+        }
+        return Some("格式: 开启群聊:群号".into());
+    }
+
+    if let Some(rest) = msg.strip_prefix("关闭群聊:") {
+        if let Ok(group_id) = rest.trim().parse::<u64>() {
+            let active = with_state(|s| s.active_groups.contains(&group_id));
+            if !active {
+                return Some(format!("群{}未开启", group_id));
+            }
+            with_state(|s| { s.active_groups.remove(&group_id); });
+            return Some(format!("已关闭群{}", group_id));
+        }
+        return Some("格式: 关闭群聊:群号".into());
+    }
+
+    if let Some(rest) = msg.strip_prefix("开启用户:") {
+        if let Ok(uid) = rest.trim().parse::<u64>() {
+            let already = with_state(|s| s.active.contains(&uid));
+            if already {
+                return Some(format!("用户{}已开启", uid));
+            }
+            with_state(|s| { s.active.insert(uid); });
+            return Some(format!("已开启用户{}", uid));
+        }
+        return Some("格式: 开启用户:QQ号".into());
+    }
+
+    if let Some(rest) = msg.strip_prefix("关闭用户:") {
+        if let Ok(uid) = rest.trim().parse::<u64>() {
+            let active = with_state(|s| s.active.contains(&uid));
+            if !active {
+                return Some(format!("用户{}未开启", uid));
+            }
+            with_state(|s| {
+                s.active.remove(&uid);
+                s.batches.remove(&(0, uid));
+            });
+            return Some(format!("已关闭用户{}", uid));
+        }
+        return Some("格式: 关闭用户:QQ号".into());
+    }
+
+    if let Some(rest) = msg.strip_prefix("拉黑:") {
+        if let Ok(uid) = rest.trim().parse::<u64>() {
+            let already = with_state(|s| s.is_blacklisted(uid));
+            if already {
+                return Some(format!("用户{}已在黑名单中", uid));
+            }
+            with_state(|s| {
+                s.add_blacklist(uid);
+                // 同时关闭该用户的私聊和清理批次
+                s.active.remove(&uid);
+                s.forget_user(uid);
+            });
+            return Some(format!("已拉黑用户{}，该用户的所有消息将被忽略", uid));
+        }
+        return Some("格式: 拉黑:QQ号".into());
+    }
+
+    if let Some(rest) = msg.strip_prefix("移除黑名单:") {
+        if let Ok(uid) = rest.trim().parse::<u64>() {
+            let blocked = with_state(|s| s.is_blacklisted(uid));
+            if !blocked {
+                return Some(format!("用户{}不在黑名单中", uid));
+            }
+            with_state(|s| { s.remove_blacklist(uid); });
+            return Some(format!("已将用户{}移出黑名单", uid));
+        }
+        return Some("格式: 移除黑名单:QQ号".into());
     }
 
     None
