@@ -34,6 +34,7 @@ use luo9_sdk::payload::*;
 use std::cell::RefCell;
 use std::thread;
 use std::time::Duration;
+use tracing::debug;
 
 /// AI 群聊回复决策提示词
 pub const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判断是否要回复当前消息。
@@ -220,13 +221,11 @@ fn do_self_reflection() {
 
     // 如果反思产生了想分享的想法，主动发送
     if let Some((content, group_id)) = share {
-        eprintln!("[ai_chat] self_reflect: sharing thought to group {}", group_id);
+        debug!(group_id, content, "self_reflect: sharing thought");
         sender::send_msg(group_id, 0, &content);
     }
 
-    if count == 0 {
-        eprintln!("[ai_chat] self_reflect: no new thoughts generated");
-    }
+    debug!(count, "self_reflect completed");
 }
 
 fn now_secs() -> u64 {
@@ -249,6 +248,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
+        debug!(user_id, group_id, "blocked message from blacklisted user");
         return;
     }
 
@@ -321,6 +321,7 @@ fn handle_private_msg(user_id: u64, msg: &str) {
 
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
+        debug!(user_id, "blocked private message from blacklisted user");
         return;
     }
 
@@ -951,6 +952,16 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             };
             let analysis = ai::post_analyze(message, &cleaned_reply, &history, &analysis_context);
 
+            debug!(
+                user_id,
+                group_id,
+                memories_count = analysis.memories.len(),
+                emotion = %analysis.emotion,
+                intensity = analysis.intensity,
+                corrections_count = analysis.corrections.len(),
+                "post_analyze completed"
+            );
+
             // 保存提取的记忆
             for (content, importance_str) in &analysis.memories {
                 let importance = match importance_str.as_str() {
@@ -978,7 +989,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] AI error for user {}: {}", user_id, e);
+            debug!(user_id, group_id, error = %e, "AI chat error");
             sender::send_msg(group_id, user_id, "睡着了...");
         }
     }

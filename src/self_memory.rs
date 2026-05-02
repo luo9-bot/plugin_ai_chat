@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::SystemTime;
+use tracing::debug;
 
 use crate::config;
 use crate::emotion;
@@ -124,6 +125,7 @@ pub fn load_count() -> usize {
 pub fn add(content: &str, category: ThoughtCategory) {
     let mut store = SelfMemoryStore::load();
     let now = now_secs();
+    debug!(content, ?category, "self_memory: added thought");
     store.thoughts.push(SelfThought {
         content: content.to_string(),
         category,
@@ -159,7 +161,7 @@ pub fn correct(old: &str, new: &str) -> usize {
 
     if count > 0 {
         store.save();
-        eprintln!("[ai_chat] self_memory correct: '{}' → '{}' ({} entries)", old, new, count);
+        debug!(old, new, count, "self_memory: corrected entries");
     }
     count
 }
@@ -278,19 +280,19 @@ pub fn reflect(
                     });
 
                     if count > 0 {
-                        eprintln!("[ai_chat] self_reflect: added {} thoughts", count);
+                        debug!(count, "self_reflect: added thoughts");
                     }
 
                     (count, share)
                 }
                 Err(e) => {
-                    eprintln!("[ai_chat] self_reflect JSON parse error: {}", e);
+                    debug!(error = %e, "self_reflect: JSON parse error");
                     (0, None)
                 }
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] self_reflect AI error: {}", e);
+            debug!(error = %e, "self_reflect: AI error");
             (0, None)
         }
     }

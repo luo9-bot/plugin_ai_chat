@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use crate::config;
 
 /// 从 AI 响应中提取 JSON 对象 (处理 <think> 标签、markdown 代码块等)
@@ -131,6 +132,7 @@ pub fn chat(
         content: user_message.to_string(),
     });
 
+    debug!(model = %cfg.model, messages_count = messages.len(), "chat: sending API request");
     let req = ChatRequest {
         model: cfg.model.clone(),
         messages,
@@ -165,6 +167,7 @@ pub fn chat(
         .ok_or("API returned empty choices")?;
 
     let mut reply = choice.message.content;
+    debug!(reply_len = reply.len(), "chat: received response");
 
     // 去除 <think> 标签
     if let Some(pos) = reply.find("</think>") {
@@ -204,6 +207,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
+    debug!(model = %cfg.model, "analyze: sending API request");
     let mut resp = ureq::post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
@@ -225,6 +229,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
         .ok_or("API returned empty choices")?;
 
     let mut reply = choice.message.content;
+    debug!(reply_len = reply.len(), "analyze: received response");
 
     // 去除 <think> 标签
     if let Some(pos) = reply.find("</think>") {

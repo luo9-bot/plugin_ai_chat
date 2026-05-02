@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
+use tracing::debug;
 
 /// AI 记忆审查提示词
 const REVIEW_PROMPT: &str = r#"你是一个记忆管理助手。审查以下记忆列表和最近的对话，决定是否需要整理。
@@ -136,10 +137,12 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
         if importance == Importance::Permanent {
             entry.importance = Importance::Permanent;
         }
+        debug!(user_id, content, "memory: updated existing entry");
         store.save();
         return;
     }
 
+    debug!(user_id, content, ?importance, "memory: added new entry");
     user.entries.push(MemoryEntry {
         content: content.to_string(),
         importance,
@@ -212,7 +215,7 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
 
     if count > 0 {
         store.save();
-        eprintln!("[ai_chat] memory correct for user {}: '{}' → '{}' ({} entries)", user_id, old, new, count);
+        debug!(user_id, old, new, count, "memory: corrected entries");
     }
     count
 }
@@ -369,7 +372,7 @@ pub fn ai_extract(user_id: u64, user_message: &str, ai_reply: &str, history: &[(
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] memory AI extraction failed: {}, falling back to keyword", e);
+            debug!(user_id, error = %e, "memory: AI extraction failed, falling back to keyword");
             // fallback: 关键词提取
             extract_memory_from_keyword(user_id, user_message);
         }
@@ -647,11 +650,11 @@ pub fn ai_review_all() {
                     }
 
                     store.save();
-                    eprintln!("[ai_chat] memory review for user {}: action={}", user_id_str, action);
+                    debug!(user_id = user_id_str, action, "memory: review completed");
                 }
             }
             Err(e) => {
-                eprintln!("[ai_chat] memory review AI error for user {}: {}", user_id_str, e);
+                debug!(user_id = user_id_str, error = %e, "memory: review AI error");
             }
         }
     }

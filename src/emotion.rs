@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
+use tracing::debug;
 
 /// AI 情绪分析提示词
 const ANALYZE_PROMPT: &str = r#"分析以下对话中用户的情绪状态。根据用户的消息内容、语气和上下文判断情绪。
@@ -279,6 +280,7 @@ pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
     let now = now_secs();
 
     if detected != state.current {
+        debug!(user_id, from = ?state.current, to = ?detected, intensity, "emotion: state changed");
         state.history.push((state.current, now));
         if state.history.len() > 5 {
             state.history.remove(0);

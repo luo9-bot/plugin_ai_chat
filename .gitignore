@@ -4,3 +4,5 @@ data/
 *.dll
 *.so
 *.dylib
+
+.claude/
