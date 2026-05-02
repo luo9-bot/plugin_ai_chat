@@ -7,17 +7,6 @@ use tracing::debug;
 /// AI 记忆审查提示词
 const REVIEW_PROMPT: &str = r#"你是一个记忆管理助手。审查以下记忆列表和最近的对话，决定是否需要整理。
 
-返回 JSON（不要输出其他内容）:
-{
-  "action": "keep" | "consolidate" | "update",
-  "reason": "原因",
-  "updates": [
-    {"old_content": "原内容", "new_content": "新内容", "importance": "permanent|important|normal"}
-  ],
-  "removes": ["要删除的记忆内容"],
-  "adds": [{"content": "新记忆", "importance": "permanent|important|normal"}]
-}
-
 判断标准:
 - 重复或相似的记忆应该合并
 - 已经不正确的记忆应该更新或删除
@@ -579,79 +568,71 @@ pub fn ai_review_all() {
         }
         let context = context_parts.join("\n\n");
 
-        let result = crate::ai::analyze(REVIEW_PROMPT, &context);
+        let result = crate::ai::analyze_with_tools(REVIEW_PROMPT, &context, &[crate::ai::memory_review_tool()], None);
         match result {
-            Ok(raw) => {
-                let json_str = if let Some(start) = raw.find('{') {
-                    if let Some(end) = raw[start..].find('}') {
-                        &raw[start..start + end + 1]
-                    } else { continue; }
-                } else { continue; };
-
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");
-                    if action == "keep" {
-                        continue;
-                    }
-
-                    let mut store = MemoryStore::load();
-                    let user = store.get_user_mut(user_id);
-
-                    // 删除记忆
-                    if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
-                        for remove in removes {
-                            if let Some(content) = remove.as_str() {
-                                user.entries.retain(|e| !e.content.contains(content));
-                            }
-                        }
-                    }
-
-                    // 更新记忆
-                    if let Some(updates) = parsed.get("updates").and_then(|v| v.as_array()) {
-                        for update in updates {
-                            let old = update.get("old_content").and_then(|v| v.as_str()).unwrap_or("");
-                            let new = update.get("new_content").and_then(|v| v.as_str()).unwrap_or("");
-                            let imp_str = update.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
-                            if old.is_empty() || new.is_empty() { continue; }
-                            let importance = match imp_str {
-                                "permanent" => Importance::Permanent,
-                                "important" => Importance::Important,
-                                _ => Importance::Normal,
-                            };
-                            if let Some(entry) = user.entries.iter_mut().find(|e| e.content.contains(old)) {
-                                entry.content = new.to_string();
-                                entry.importance = importance;
-                            }
-                        }
-                    }
-
-                    // 添加新记忆
-                    if let Some(adds) = parsed.get("adds").and_then(|v| v.as_array()) {
-                        for item in adds {
-                            let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                            let imp_str = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
-                            if content.is_empty() { continue; }
-                            let importance = match imp_str {
-                                "permanent" => Importance::Permanent,
-                                "important" => Importance::Important,
-                                _ => Importance::Normal,
-                            };
-                            if !user.entries.iter().any(|e| e.content == content) {
-                                let now = now_secs();
-                                user.entries.push(MemoryEntry {
-                                    content: content.to_string(),
-                                    importance,
-                                    created: now,
-                                    last_accessed: now,
-                                    access_count: 1,
-                                });
-                            }
-                        }
-                    }
-
-                    store.save();
-                    debug!(user_id = user_id_str, action, "memory: review completed");
+            Ok(parsed) => {
+                let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");
+                if action == "keep" {
+                    continue;
                 }
+
+                let mut store = MemoryStore::load();
+                let user = store.get_user_mut(user_id);
+
+                // 删除记忆
+                if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
+                    for remove in removes {
+                        if let Some(content) = remove.as_str() {
+                            user.entries.retain(|e| !e.content.contains(content));
+                        }
+                    }
+                }
+
+                // 更新记忆
+                if let Some(updates) = parsed.get("updates").and_then(|v| v.as_array()) {
+                    for update in updates {
+                        let old = update.get("old_content").and_then(|v| v.as_str()).unwrap_or("");
+                        let new = update.get("new_content").and_then(|v| v.as_str()).unwrap_or("");
+                        let imp_str = update.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
+                        if old.is_empty() || new.is_empty() { continue; }
+                        let importance = match imp_str {
+                            "permanent" => Importance::Permanent,
+                            "important" => Importance::Important,
+                            _ => Importance::Normal,
+                        };
+                        if let Some(entry) = user.entries.iter_mut().find(|e| e.content.contains(old)) {
+                            entry.content = new.to_string();
+                            entry.importance = importance;
+                        }
+                    }
+                }
+
+                // 添加新记忆
+                if let Some(adds) = parsed.get("adds").and_then(|v| v.as_array()) {
+                    for item in adds {
+                        let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let imp_str = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
+                        if content.is_empty() { continue; }
+                        let importance = match imp_str {
+                            "permanent" => Importance::Permanent,
+                            "important" => Importance::Important,
+                            _ => Importance::Normal,
+                        };
+                        if !user.entries.iter().any(|e| e.content == content) {
+                            let now = now_secs();
+                            user.entries.push(MemoryEntry {
+                                content: content.to_string(),
+                                importance,
+                                created: now,
+                                last_accessed: now,
+                                access_count: 1,
+                            });
+                        }
+                    }
+                }
+
+                store.save();
+                debug!(user_id = user_id_str, action, "memory: review completed");
             }
             Err(e) => {
                 debug!(user_id = user_id_str, error = %e, "memory: review AI error");

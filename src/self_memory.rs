@@ -11,18 +11,6 @@ const REFLECT_PROMPT: &str = r#"现在是你的"独处时间"，你正在回想�
 
 你就是上面描述的那个"你"——有自己的性格、喜好、说话风格。根据你的人设和最近的对话、你的情绪状态，产生 1-3 条内心独白。
 
-返回 JSON（不要输出其他内容）:
-{
-  "thoughts": [
-    {"content": "内心想法", "category": "reflection|experience|plan|feeling"}
-  ],
-  "share": {
-    "should_share": true/false,
-    "content": "如果想分享，这里是要说的话（简短自然，像突然想到的）",
-    "target_group_id": 0
-  }
-}
-
 category 说明:
 - reflection: 对最近对话的感触（"刚那群人笑死我了"、"聊得我有点emo"）
 - experience: 自身经历（"今天煮了碗面 居然还挺好吃"、"追番追到凌晨三点"）
@@ -67,25 +55,6 @@ pub struct SelfThought {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SelfMemoryStore {
     pub thoughts: Vec<SelfThought>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReflectResult {
-    thoughts: Vec<ReflectThought>,
-    share: Option<ShareInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReflectThought {
-    content: String,
-    category: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ShareInfo {
-    should_share: bool,
-    content: String,
-    target_group_id: u64,
 }
 
 /// 群组画像：AI 用来判断往哪个群分享
@@ -250,59 +219,44 @@ pub fn reflect(
 
     let full_context = context_parts.join("\n\n");
 
-    match crate::ai::analyze(REFLECT_PROMPT, &full_context) {
-        Ok(raw) => {
-            let json_str = crate::ai::extract_json(&raw);
-            let json_str = match json_str {
-                Some(s) => s,
-                None => {
-                    debug!("self_reflect: no JSON in response");
-                    return (0, None);
-                }
-            };
-
-            match serde_json::from_str::<ReflectResult>(&json_str) {
-                Ok(result) => {
-                    let mut count = 0;
-                    for thought in &result.thoughts {
-                        if thought.content.is_empty() {
-                            continue;
-                        }
-                        let category = match thought.category.as_str() {
-                            "experience" => ThoughtCategory::Experience,
-                            "plan" => ThoughtCategory::Plan,
-                            "feeling" => ThoughtCategory::Feeling,
-                            _ => ThoughtCategory::Reflection,
-                        };
-                        add(&thought.content, category);
-                        count += 1;
+    match crate::ai::analyze_with_tools(REFLECT_PROMPT, &full_context, &[crate::ai::self_reflect_tool()], None) {
+        Ok(parsed) => {
+            // 解析 thoughts
+            let mut count = 0;
+            if let Some(thoughts) = parsed.get("thoughts").and_then(|v| v.as_array()) {
+                for thought in thoughts {
+                    let content = thought.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    if content.is_empty() {
+                        continue;
                     }
-
-                    // 处理主动分享：AI 自行选择最合适的群
-                    let share = result.share.and_then(|s| {
-                        if !s.should_share || s.content.is_empty() {
-                            return None;
-                        }
-                        if s.target_group_id > 0 {
-                            // AI 选了一个具体的群
-                            Some((s.content, s.target_group_id))
-                        } else {
-                            // AI 没选群，不分享
-                            None
-                        }
-                    });
-
-                    if count > 0 {
-                        debug!(count, "self_reflect: added thoughts");
-                    }
-
-                    (count, share)
-                }
-                Err(e) => {
-                    debug!(error = %e, "self_reflect: JSON parse error");
-                    (0, None)
+                    let category = match thought.get("category").and_then(|v| v.as_str()).unwrap_or("") {
+                        "experience" => ThoughtCategory::Experience,
+                        "plan" => ThoughtCategory::Plan,
+                        "feeling" => ThoughtCategory::Feeling,
+                        _ => ThoughtCategory::Reflection,
+                    };
+                    add(content, category);
+                    count += 1;
                 }
             }
+
+            // 处理主动分享
+            let share = parsed.get("share").and_then(|s| {
+                let should_share = s.get("should_share").and_then(crate::ai::parse_bool).unwrap_or(false);
+                let content = s.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let target = s.get("target_group_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                if should_share && !content.is_empty() && target > 0 {
+                    Some((content.to_string(), target))
+                } else {
+                    None
+                }
+            });
+
+            if count > 0 {
+                debug!(count, "self_reflect: added thoughts");
+            }
+
+            (count, share)
         }
         Err(e) => {
             debug!(error = %e, "self_reflect: AI error");

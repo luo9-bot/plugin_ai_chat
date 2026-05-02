@@ -128,21 +128,11 @@ fn test_decide_reply(group_id: u64, user_id: u64, message: &str, state: &mut Sta
         personality_hint, msg_lines.join("\n")
     );
 
-    match ai::analyze(&full_prompt, &content) {
-        Ok(raw) => {
-            match ai::extract_json(&raw) {
-                Some(json_str) => {
-                    match serde_json::from_str::<serde_json::Value>(&json_str) {
-                        Ok(v) => {
-                            let reply = v.get("reply").and_then(|r| r.as_bool()).unwrap_or(in_follow_up);
-                            let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
-                            (reply, reason)
-                        }
-                        Err(_) => (in_follow_up, "JSON parse failed".into()),
-                    }
-                }
-                None => (in_follow_up, "no JSON in response".into()),
-            }
+    match ai::analyze_with_tools(&full_prompt, &content, &[ai::decide_reply_tool()], None) {
+        Ok(parsed) => {
+            let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(in_follow_up);
+            let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("").to_string();
+            (reply, reason)
         }
         Err(e) => {
             eprintln!("[test_server] decide_reply AI error: {}, follow_up={}", e, in_follow_up);

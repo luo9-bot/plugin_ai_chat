@@ -44,9 +44,6 @@ static FILE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceL
 /// AI 群聊回复决策提示词
 pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一段对话，判断你想不想参与。
 
-返回 JSON（不要输出其他内容）:
-{"reply": true/false, "reason": "简短原因"}
-
 注意看完整的对话，不要只看最后一条。有时候一个人发了多条消息，前面的才是重点。
 
 想象你真的是群里的一个人，看到这些对话你会怎么反应：
@@ -349,9 +346,6 @@ fn do_post_conversation_reflection(group_id: u64) {
 const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记录，像翻聊天记录一样快速看一遍。消息标记了 [已回复] 和 [未回复]。
 你是有身份和人设的（见上方"你的身份"），以你的视角来审视这些对话。
 
-返回 JSON（不要输出其他内容）:
-{"relevant": [{"user_id": 数字, "memory": "值得记住的内容", "importance": "normal|important|permanent"}], "emotion": {"state": "neutral|happy|sad|...", "intensity": 0.0~1.0}}
-
 从你作为这个角色的视角出发，只提取和你有关的、你关心的、值得记住的信息。比如：
 - 有人提到你的名字、和你相关的事
 - 有人分享了重要的个人信息（生日、近况等）
@@ -365,7 +359,7 @@ const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记
 - 如果对话/记忆中用户自我介绍过（如"我是璃"），用那个名字
 - 如果没有办法得知用户的名字，可以考虑使用user_id替代
 
-完全无关的闲聊直接跳过，不要提取。返回空 relevant 数组表示没有值得记住的。"#;
+完全无关的闲聊直接跳过，不要提取。没有值得记住的就返回空数组。"#;
 
 /// 审查对话消息，只提取有关的记忆
 fn review_conversation_messages(group_id: u64, messages_text: &str) {
@@ -381,39 +375,28 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
 
     let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
 
-    match ai::analyze(REVIEW_CONVERSATION_PROMPT, &full_context) {
-        Ok(raw) => {
-            let json_str = ai::extract_json(&raw);
-            let json_str = match json_str {
-                Some(s) => s,
-                None => {
-                    debug!("review_conversation: no JSON in response");
-                    return;
+    match ai::analyze_with_tools(REVIEW_CONVERSATION_PROMPT, &full_context, &[ai::review_conversation_tool()], None) {
+        Ok(parsed) => {
+            if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
+                for item in relevant {
+                    let user_id = item.get("user_id").and_then(|u| u.as_u64()).unwrap_or(0);
+                    let memory_content = item.get("memory").and_then(|m| m.as_str()).unwrap_or("");
+                    let importance_str = item.get("importance").and_then(|i| i.as_str()).unwrap_or("normal");
+                    if memory_content.is_empty() || user_id == 0 { continue; }
+                    let importance = match importance_str {
+                        "permanent" => memory::Importance::Permanent,
+                        "important" => memory::Importance::Important,
+                        _ => memory::Importance::Normal,
+                    };
+                    memory::add(user_id, memory_content, importance);
                 }
-            };
+                debug!(group_id, count = relevant.len(), "review_conversation: memories extracted");
+            }
 
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
-                    for item in relevant {
-                        let user_id = item.get("user_id").and_then(|u| u.as_u64()).unwrap_or(0);
-                        let memory_content = item.get("memory").and_then(|m| m.as_str()).unwrap_or("");
-                        let importance_str = item.get("importance").and_then(|i| i.as_str()).unwrap_or("normal");
-                        if memory_content.is_empty() || user_id == 0 { continue; }
-                        let importance = match importance_str {
-                            "permanent" => memory::Importance::Permanent,
-                            "important" => memory::Importance::Important,
-                            _ => memory::Importance::Normal,
-                        };
-                        memory::add(user_id, memory_content, importance);
-                    }
-                    debug!(group_id, count = relevant.len(), "review_conversation: memories extracted");
-                }
-
-                if let Some(emotion_obj) = parsed.get("emotion") {
-                    let state = emotion_obj.get("state").and_then(|s| s.as_str()).unwrap_or("neutral");
-                    let intensity = emotion_obj.get("intensity").and_then(|i| i.as_f64()).unwrap_or(0.3) as f32;
-                    emotion::update_from_analysis(0, state, intensity);
-                }
+            if let Some(emotion_obj) = parsed.get("emotion") {
+                let state = emotion_obj.get("state").and_then(|s| s.as_str()).unwrap_or("neutral");
+                let intensity = emotion_obj.get("intensity").and_then(|i| i.as_f64()).unwrap_or(0.3) as f32;
+                emotion::update_from_analysis(0, state, intensity);
             }
         }
         Err(e) => {
@@ -449,7 +432,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     // ── 管理员专属控制命令 ──
     if is_admin(user_id) {
         match trimmed {
-            "start" | "开启对话" => {
+            "test_start" | "开启对话" => {
                 let already = with_state(|s| s.active_groups.contains(&group_id));
                 if already {
                     sender::send_msg(group_id, user_id, &config::get().messages.start.redo);
@@ -1113,27 +1096,14 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     debug!("{:?}", content);
 
-    match ai::analyze(&full_prompt, &content) {
-        Ok(raw) => {
-            let json_str = ai::extract_json(&raw);
-            match json_str {
-                Some(s) => {
-                    serde_json::from_str::<serde_json::Value>(&s)
-                        .map(|v| {
-                            let reply = v.get("reply").and_then(|r| r.as_bool()).unwrap_or(in_follow_up);
-                            let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("");
-                            if !reply {
-                                debug!(user_id, group_id, reason, "decided not to reply");
-                            }
-                            reply
-                        })
-                        .unwrap_or(in_follow_up) // JSON 解析失败 → follow-up 时回复
-                }
-                None => {
-                    debug!(in_follow_up, "decide_reply: no JSON in response");
-                    in_follow_up // follow-up 窗口内默认回复
-                }
+    match ai::analyze_with_tools(&full_prompt, &content, &[ai::decide_reply_tool()], None) {
+        Ok(parsed) => {
+            let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(in_follow_up);
+            let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+            if !reply {
+                debug!(user_id, group_id, reason, "decided not to reply");
             }
+            reply
         }
         Err(e) => {
             debug!(error = %e, in_follow_up, "decide_reply: AI error");
