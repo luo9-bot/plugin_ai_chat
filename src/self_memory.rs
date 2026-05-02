@@ -18,7 +18,7 @@ const REFLECT_PROMPT: &str = r#"你是一个有内心世界的群聊成员。现
   "share": {
     "should_share": true/false,
     "content": "如果想分享，这里是要说的话（简短自然，像突然想到的）",
-    "target_group": 0
+    "target_group_id": 0
   }
 }
 
@@ -34,8 +34,11 @@ category 说明:
 - 不要暴露你是 AI
 - 大部分时候 should_share 为 false（约70%的情况不分享）
 - 只有当想法很强烈、或者像人一样忍不住想说出来时，should_share 才为 true
-- share.content 是你想主动发到群里/私聊的话，简短自然，像自言自语
-- target_group: 如果想在某个群分享，填群号；0 表示私聊（不主动分享到私聊）"#;
+- share.content 是你想主动发到群里的话，简短自然，像自言自语
+- target_group_id: 选择最合适的群来分享。根据你的想法内容，选择话题最相关的群。
+  比如：想聊游戏就去游戏群，想聊工作就去工作群，心情不好想找人聊就去关系好的群。
+  如果没有合适的群，设为 0 表示不分享。
+- 你可以看到每个群的最近聊天记录，根据群的氛围和话题判断哪个群最适合"#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +77,13 @@ struct ReflectThought {
 struct ShareInfo {
     should_share: bool,
     content: String,
-    target_group: u64,
+    target_group_id: u64,
+}
+
+/// 群组画像：AI 用来判断往哪个群分享
+pub struct GroupProfile {
+    pub group_id: u64,
+    pub recent_messages: String,  // 格式化的最近消息摘要
 }
 
 fn now_secs() -> u64 {
@@ -156,12 +165,12 @@ pub fn get_context(max_count: usize) -> String {
 /// AI 驱动的自我反思
 ///
 /// recent_context: 最近的对话上下文文本
-/// active_groups: 最近活跃的群组列表
+/// group_profiles: 各群的画像 (群号 → 最近消息摘要)，AI 用来判断往哪个群分享
 ///
 /// 返回: (thoughts_added, share_info)
 pub fn reflect(
     recent_context: &str,
-    active_groups: &[u64],
+    group_profiles: &[GroupProfile],
 ) -> (usize, Option<(String, u64)>) {
     // 构建反思上下文
     let mut context_parts = Vec::new();
@@ -187,6 +196,14 @@ pub fn reflect(
     // 最近的对话
     if !recent_context.is_empty() {
         context_parts.push(format!("# 最近的对话\n{}", recent_context));
+    }
+
+    // 各群的画像 (让 AI 了解每个群是干什么的)
+    if !group_profiles.is_empty() {
+        let profiles_text: Vec<String> = group_profiles.iter().map(|p| {
+            format!("## 群{}\n{}", p.group_id, p.recent_messages)
+        }).collect();
+        context_parts.push(format!("# 你所在的群\n{}", profiles_text.join("\n\n")));
     }
 
     let full_context = context_parts.join("\n\n");
@@ -219,19 +236,16 @@ pub fn reflect(
                         count += 1;
                     }
 
-                    // 处理主动分享
+                    // 处理主动分享：AI 自行选择最合适的群
                     let share = result.share.and_then(|s| {
-                        if s.should_share && !s.content.is_empty() {
-                            let target = if s.target_group > 0 {
-                                s.target_group
-                            } else if !active_groups.is_empty() {
-                                // 默认分享到最近活跃的群
-                                active_groups[0]
-                            } else {
-                                return None;
-                            };
-                            Some((s.content, target))
+                        if !s.should_share || s.content.is_empty() {
+                            return None;
+                        }
+                        if s.target_group_id > 0 {
+                            // AI 选了一个具体的群
+                            Some((s.content, s.target_group_id))
                         } else {
+                            // AI 没选群，不分享
                             None
                         }
                     });

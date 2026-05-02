@@ -171,30 +171,15 @@ fn check_periodic() {
 
 /// 执行自我反思：收集最近对话上下文，调用 AI 生成内心想法
 fn do_self_reflection() {
-    // 收集最近有对话的用户上下文
-    let (recent_context, active_groups) = with_state(|s| {
+    // 收集群组列表和私聊上下文
+    let (recent_context, group_ids) = with_state(|s| {
         let mut context_parts = Vec::new();
         let mut groups = Vec::new();
 
-        // 从工作记忆中获取最近的群聊消息
-        for (&(gid, _), _) in &s.batches {
-            if gid > 0 && !groups.contains(&gid) {
-                groups.push(gid);
-            }
-        }
-
         // 从活跃群组中获取
         for &gid in &s.active_groups {
-            if !groups.contains(&gid) {
+            if gid > 0 {
                 groups.push(gid);
-            }
-        }
-
-        // 取最近的群聊工作记忆作为上下文
-        for &gid in &groups {
-            let wm = working_memory::get_context(gid, 3600);
-            if !wm.is_empty() {
-                context_parts.push(wm);
             }
         }
 
@@ -215,7 +200,21 @@ fn do_self_reflection() {
         (context_parts.join("\n\n"), groups)
     });
 
-    let (count, share) = self_memory::reflect(&recent_context, &active_groups);
+    // 构建群组画像：每个群的最近消息，让 AI 理解每个群是干什么的
+    let group_profiles: Vec<self_memory::GroupProfile> = group_ids.iter().map(|&gid| {
+        let entries = working_memory::get_recent(gid, 7200, 20);
+        let recent_messages = if entries.is_empty() {
+            "(最近没有消息)".to_string()
+        } else {
+            let lines: Vec<String> = entries.iter().map(|e| {
+                format!("[用户{}] {}", e.user_id, e.content)
+            }).collect();
+            lines.join("\n")
+        };
+        self_memory::GroupProfile { group_id: gid, recent_messages }
+    }).collect();
+
+    let (count, share) = self_memory::reflect(&recent_context, &group_profiles);
 
     // 如果反思产生了想分享的想法，主动发送
     if let Some((content, group_id)) = share {
