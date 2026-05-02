@@ -127,7 +127,7 @@ pub fn chat(
 
     // 禁用动作描述时追加规则
     if !cfg.conversation.action_descriptions {
-        full_system.push_str("\n\n# 输出格式\n不要用括号写动作或表情描述（如「笑了笑」「叹气」），只输出纯对话内容。");
+        full_system.push_str("\n\n# 输出格式\n完全不要用括号描述动作或描述表情（如（笑了笑）（叹气）），只输出纯对话内容。");
     }
 
     let mut messages = vec![ChatMessage {

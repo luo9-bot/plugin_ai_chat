@@ -101,6 +101,21 @@ pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Ent
         .unwrap_or_default()
 }
 
+/// 获取指定时间戳之后的群聊消息
+pub fn get_since(group_id: u64, since_timestamp: u64, max_count: usize) -> Vec<Entry> {
+    let store = WorkingMemoryStore::load();
+    store.groups
+        .get(&group_id.to_string())
+        .map(|group| {
+            group.entries.iter()
+                .filter(|e| e.timestamp > since_timestamp)
+                .take(max_count)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 获取格式化的群聊工作记忆上下文 (用于 AI 决策)
 pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
     let entries = get_recent(group_id, max_age_secs, 30);

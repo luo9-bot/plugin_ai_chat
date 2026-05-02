@@ -268,10 +268,15 @@ fn do_self_reflection() {
     debug!(count, "self_reflect completed");
 }
 
-/// 对话后反思：回顾刚结束的群对话 + 审查所有消息（已读+未读）
+/// 对话后反思：回顾刚结束的群对话 + 审查新消息（已读+未读）
 fn do_post_conversation_reflection(group_id: u64) {
-    // 取该群的最近工作记忆 (包含已回复和未回复的消息)
-    let entries = working_memory::get_recent(group_id, 3600, 30);
+    // 获取上次审查到的时间戳，只处理之后的新消息
+    let last_reviewed = with_state(|s| {
+        *s.last_reviewed_timestamps.get(&group_id).unwrap_or(&0)
+    });
+
+    // 取该群的新工作记忆 (上次审查之后的消息)
+    let entries = working_memory::get_since(group_id, last_reviewed, 50);
     if entries.is_empty() {
         return;
     }
@@ -281,6 +286,10 @@ fn do_post_conversation_reflection(group_id: u64) {
         format!("[用户{}]{} {}", e.user_id, tag, e.content)
     }).collect();
     let context_text = recent_context.join("\n");
+
+    // 记录最新消息的时间戳，下次只处理更新的
+    let max_timestamp = entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
+    with_state(|s| { s.last_reviewed_timestamps.insert(group_id, max_timestamp); });
 
     // 1. 自我反思
     let group_profiles = vec![self_memory::GroupProfile {

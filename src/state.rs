@@ -42,6 +42,8 @@ pub struct State {
     pub reflected_groups: HashSet<u64>,
     /// 各群组最近一次审查时间 (unix秒)，用于长时间对话的定期审查
     pub last_review_times: HashMap<u64, u64>,
+    /// 各群组最近审查到的工作记忆时间戳 (unix秒)，下次只处理更新的消息
+    pub last_reviewed_timestamps: HashMap<u64, u64>,
 }
 
 impl State {
@@ -57,6 +59,7 @@ impl State {
             last_conversation_times: HashMap::new(),
             reflected_groups: HashSet::new(),
             last_review_times: HashMap::new(),
+            last_reviewed_timestamps: HashMap::new(),
         }
     }
 
