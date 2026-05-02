@@ -324,11 +324,12 @@ fn do_post_conversation_reflection(group_id: u64) {
 
 /// 对话消息审查提示词
 const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记录，像翻聊天记录一样快速看一遍。消息标记了 [已回复] 和 [未回复]。
+你是有身份和人设的（见上方"你的身份"），以你的视角来审视这些对话。
 
 返回 JSON（不要输出其他内容）:
 {"relevant": [{"user_id": 数字, "memory": "值得记住的内容", "importance": "normal|important|permanent"}], "emotion": {"state": "neutral|happy|sad|...", "intensity": 0.0~1.0}}
 
-只提取和你有关的、值得记住的信息。比如：
+从你作为这个角色的视角出发，只提取和你有关的、你关心的、值得记住的信息。比如：
 - 有人提到你的名字、和你相关的事
 - 有人分享了重要的个人信息（生日、近况等）
 - 有人纠正了你说过的话
@@ -339,6 +340,10 @@ const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记
 /// 审查对话消息，只提取有关的记忆
 fn review_conversation_messages(group_id: u64, messages_text: &str) {
     let mut context_parts = Vec::new();
+    let user_prompt = config::prompt();
+    if !user_prompt.is_empty() {
+        context_parts.push(format!("# 你的身份\n{}", user_prompt));
+    }
     let personality = personality::get_prompt_context();
     if !personality.is_empty() { context_parts.push(personality); }
     let mem = memory::get_context(0);
@@ -1167,11 +1172,11 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
 fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
     let cfg = config::get();
 
-    // 优先按 |^| 分割，没有则按自然段落（双换行）分割
+    // 优先按 |^| 分割，没有则按自然段落（换行）分割
     let segments: Vec<&str> = if reply.contains("|^|") {
         reply.split("|^|").filter(|s| !s.trim().is_empty()).collect()
     } else {
-        reply.split("\n\n").filter(|s| !s.trim().is_empty()).collect()
+        reply.split("\n").filter(|s| !s.trim().is_empty()).collect()
     };
 
     for (i, segment) in segments.iter().enumerate() {

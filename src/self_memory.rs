@@ -6,10 +6,10 @@ use tracing::debug;
 use crate::config;
 use crate::emotion;
 
-/// 自我反思提示词
-const REFLECT_PROMPT: &str = r#"你是一个有内心世界的群聊成员。现在是你的"独处时间"，你正在回想最近发生的事情，产生一些内心想法。
+/// 自我反思提示词 (会动态拼接人设，这里只是核心部分)
+const REFLECT_PROMPT: &str = r#"现在是你的"独处时间"，你正在回想最近发生的事情，产生一些内心想法。
 
-根据最近的对话和你的情绪状态，产生 1-3 条内心独白。
+你就是上面描述的那个"你"——有自己的性格、喜好、说话风格。根据你的人设和最近的对话、你的情绪状态，产生 1-3 条内心独白。
 
 返回 JSON（不要输出其他内容）:
 {
@@ -210,6 +210,12 @@ pub fn reflect(
 ) -> (usize, Option<(String, u64)>) {
     // 构建反思上下文
     let mut context_parts = Vec::new();
+
+    // 用户 prompt (人设定义)
+    let user_prompt = config::prompt();
+    if !user_prompt.is_empty() {
+        context_parts.push(user_prompt.to_string());
+    }
 
     // 人格信息
     let personality = crate::personality::get_prompt_context();

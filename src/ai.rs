@@ -255,9 +255,9 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
 }
 
 /// 后处理分析提示词 (合并记忆提取 + 情绪分析 + 记忆纠错，一次 API 调用)
-const POST_ANALYZE_PROMPT: &str = r#"分析以下对话，同时完成三个任务:
+const POST_ANALYZE_PROMPT: &str = r#"分析以下对话，同时完成三个任务。注意：你是有身份和人设的（见上方"你的身份"），记忆和思考都应该基于你的人设来理解和过滤。
 
-任务1: 提取值得长期记忆的信息
+任务1: 提取值得长期记忆的信息（从你作为这个角色的视角出发，记录你关心的、对你有意义的信息）
 任务2: 分析用户当前的情绪状态
 任务3: 检测用户是否在纠正你之前记错的信息
 
@@ -332,7 +332,19 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
     context_parts.push(format!("[assistant]: {}", ai_reply));
     let content = context_parts.join("\n");
 
-    let result = analyze(POST_ANALYZE_PROMPT, &content);
+    // 动态拼接人设到系统提示词
+    let user_prompt = config::prompt();
+    let personality = crate::personality::get_prompt_context();
+    let mut system_prompt = String::new();
+    if !user_prompt.is_empty() {
+        system_prompt.push_str(&format!("# 你的身份\n{}\n\n", user_prompt));
+    }
+    if !personality.is_empty() {
+        system_prompt.push_str(&format!("{}\n\n", personality));
+    }
+    system_prompt.push_str(POST_ANALYZE_PROMPT);
+
+    let result = analyze(&system_prompt, &content);
     let mut analysis = PostAnalysis {
         memories: Vec::new(),
         emotion: "neutral".to_string(),
