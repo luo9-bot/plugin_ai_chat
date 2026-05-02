@@ -622,6 +622,27 @@ pub fn memory_review_tool() -> Tool {
     }
 }
 
+/// 主动消息生成工具
+pub fn proactive_message_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "proactive_message".to_string(),
+            description: "生成一条自然的主动消息".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "要发送的消息内容，简短口语化，像真人的自言自语"
+                    }
+                },
+                "required": ["message"]
+            }),
+        },
+    }
+}
+
 /// 后处理分析提示词 (合并记忆提取 + 情绪分析 + 记忆纠错，一次 API 调用)
 const POST_ANALYZE_PROMPT: &str = r#"分析以下对话，同时完成三个任务。注意：你是有身份和人设的（见上方"你的身份"），记忆和思考都应该基于你的人设来理解和过滤。
 
