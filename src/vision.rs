@@ -2,7 +2,7 @@ use tracing::debug;
 use crate::config;
 
 /// 识图提示词
-const VISION_PROMPT: &str = "用一句话简短描述画面内容。不要提及「表情包」「图片」「截图」这些词，只描述画面里的人或物在做什么、什么表情。";
+const VISION_PROMPT: &str = "判断这是表情包/贴图还是真实照片，然后用一句话描述。如果是表情包或贴图，开头用「[表情包]」标注，再描述画面内容（比如角色表情、动作）。如果是真实照片，开头用「[照片]」标注，再描述画面。";
 
 /// 从消息中提取 [CQ:image,...] 的图片 URL
 pub fn extract_image_urls(message: &str) -> Vec<String> {
@@ -53,7 +53,7 @@ pub fn strip_image_cq(message: &str) -> String {
 
 /// 调用识图 API，返回图片描述
 ///
-/// 使用 OpenAI chat completions API 格式：POST base_url
+/// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
 pub fn recognize(image_url: &str) -> Option<String> {
     let cfg = config::get();
@@ -66,23 +66,26 @@ pub fn recognize(image_url: &str) -> Option<String> {
 
     let request_body = serde_json::json!({
         "model": model,
-        "messages": [{
+        "input": [{
             "role": "user",
             "content": [
                 {
-                    "type": "image_url",
-                    "image_url": { "url": image_url }
+                    "type": "input_image",
+                    "image_url": image_url
                 },
                 {
-                    "type": "text",
+                    "type": "input_text",
                     "text": VISION_PROMPT
                 }
             ]
         }],
-        "max_tokens": max_tokens
+        "max_output_tokens": max_tokens
     });
 
-    let url = cfg.vision.base_url.trim_end_matches('/').to_string();
+    let url = format!(
+        "{}/responses",
+        cfg.vision.base_url.trim_end_matches('/')
+    );
 
     debug!(url = %url, model = %cfg.vision.model, image = %image_url, "vision: sending request");
 
@@ -114,14 +117,32 @@ pub fn recognize(image_url: &str) -> Option<String> {
         }
     };
 
-    // 解析 chat completions 格式: { "choices": [{ "message": { "content": "..." } }] }
+    // 解析 responses API 格式
+    // 标准格式: { "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "..." }] }] }
+    // 兼容 chat completions: { "choices": [{ "message": { "content": "..." } }] }
     let text = match serde_json::from_str::<serde_json::Value>(&resp_str) {
         Ok(v) => {
-            v.get("choices").and_then(|c| c.as_array()).and_then(|choices| {
+            // 尝试 responses 格式
+            if let Some(output) = v.get("output").and_then(|o| o.as_array()) {
+                output.iter().find_map(|item| {
+                    item.get("content").and_then(|c| c.as_array()).and_then(|contents| {
+                        contents.iter().find_map(|content| {
+                            content.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                        })
+                    })
+                })
+            }
+            // 兼容 chat completions 格式
+            else if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                 choices.first().and_then(|c| {
                     c.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|s| s.to_string())
                 })
-            })
+            }
+            // 兼容直接 text 字段
+            else {
+                v.get("output_text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    .or_else(|| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            }
         }
         Err(e) => {
             debug!(error = %e, "vision: response parse failed");
