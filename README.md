@@ -375,43 +375,5 @@ messages:
     ├── sender.rs           # 消息发送与打字模拟
     ├── cron.rs             # 定时任务处理
     ├── blocklist.rs        # 黑名单管理
-    ├── vision.rs           # 图像识别
-    └── bin/
-        └── test_server.rs  # 测试服务器
+    └── vision.rs           # 图像识别
 ```
-
-## 调试工具
-
-### 测试服务器
-
-`src/bin/test_server.rs` 是一个独立的 HTTP 测试服务器，无需完整 Bot 框架即可测试：
-
-```bash
-cargo run --bin test_server
-```
-
-服务器启动在 `127.0.0.1:18923`，提供以下接口：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/simulate` | 模拟消息（完整流程：决定回复、处理、后分析） |
-| GET | `/api/state` | 查看所有 JSON 状态数据 |
-| GET | `/api/log` | 查看测试日志 |
-| POST | `/api/reset` | 重置运行时状态 |
-| GET | `/api/config` | 查看当前配置 |
-| POST | `/api/generate_message` | AI 生成测试角色的下一条消息 |
-| POST | `/api/auto_play_step` | AI 编排多角色自动对话测试 |
-
-### 调试页面
-
-`test/debug.html` 是一个独立的调试页面，浏览器直接打开即可使用。
-
-#### 功能
-- **Data Viewer**: 加载 JSON 数据文件，可视化展示记忆、工作记忆、情绪、归档数据
-- **Simulator**: 模拟消息发送，查看 `decide_reply` 和 `process_message` 构建的完整上下文
-- **Raw JSON**: 查看原始 JSON 数据
-
-#### 使用方法
-1. 浏览器打开 `test/debug.html`
-2. 将 `data/plugin_ai_chat/` 下的 JSON 文件拖入页面，或点击 "Load Test Data" 加载示例数据
-3. 切换到 Simulator 标签页，输入群号/用户号/消息，点击 Simulate 查看上下文构建结果
