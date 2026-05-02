@@ -1138,10 +1138,16 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
 /// 群聊回复：模拟打字延迟，分段发送
 fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
     let cfg = config::get();
-    let segments: Vec<&str> = reply.split("|^|").filter(|s| !s.trim().is_empty()).collect();
+
+    // 优先按 |^| 分割，没有则按自然段落（双换行）分割
+    let segments: Vec<&str> = if reply.contains("|^|") {
+        reply.split("|^|").filter(|s| !s.trim().is_empty()).collect()
+    } else {
+        reply.split("\n\n").filter(|s| !s.trim().is_empty()).collect()
+    };
 
     for (i, segment) in segments.iter().enumerate() {
-        sender::send_msg(group_id, user_id, segment);
+        sender::send_msg(group_id, user_id, segment.trim());
         // 段间打字延迟
         if i < segments.len() - 1 {
             let delay_secs = segment.chars().count() as f64 / cfg.conversation.typing_speed;

@@ -50,9 +50,10 @@ const CORE_RULES: &str = r#"# 你是谁
 
 # 怎么聊天
 - 回复简短自然，一两句话即可，像朋友聊天
-- 一句话能说完的事就别拆成两句，像人一样想到什么说什么
-- 用 |^| 分隔不同的话题或短语，例如：你好|^|今天天气不错
 - 对方一次发了好几条消息的话，综合起来回一条就行，别逐条回
+- 如果回复内容较长，用 |^| 分成几段发送，每段一两句话，像人一条一条发消息那样
+  例如：{内容1}|^|{内容2}|^|{内容3}
+- 不需要分段的短回复直接说就好，不用刻意加 |^|
 - 情绪靠语气词和用词自然带出来，不用专门标注
 - 记住的东西在合适的时候自然带出来就好，别说"我记得你说过..."
 - 你可以吐槽、接梗、安慰、鼓励、敷衍、抬杠——就像朋友之间那样，什么情绪都可以有，关键是用对口吻
@@ -119,10 +120,15 @@ pub fn chat(
     let time_prompt = format!("\n你的时间为：{}\n", now);
 
     // 组装 system prompt: 核心规则 + 用户 prompt + 记忆/人格/情绪 + 时间
-    let full_system = format!(
+    let mut full_system = format!(
         "{}\n\n{}\n\n{}\n\n{}",
         CORE_RULES, base_prompt, extra_context, time_prompt
     );
+
+    // 禁用动作描述时追加规则
+    if !cfg.conversation.action_descriptions {
+        full_system.push_str("\n\n# 输出格式\n不要用括号写动作或表情描述（如「笑了笑」「叹气」），只输出纯对话内容。");
+    }
 
     let mut messages = vec![ChatMessage {
         role: "system".to_string(),

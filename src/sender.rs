@@ -10,11 +10,15 @@ const SEGMENT_SEP: &str = "|^|";
 /// 发送消息，带打字模拟延迟
 ///
 /// 将 AI 回复按 `|^|` 分割为多条消息，逐条发送
-/// 每条消息前根据消息长度计算延迟，模拟打字效果
+/// 没有 `|^|` 则按自然段落（双换行）分割
 pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
     let conv = &config::get().conversation;
 
-    let parts: Vec<&str> = reply.split(SEGMENT_SEP).collect();
+    let parts: Vec<&str> = if reply.contains(SEGMENT_SEP) {
+        reply.split(SEGMENT_SEP).filter(|s| !s.trim().is_empty()).collect()
+    } else {
+        reply.split("\n\n").filter(|s| !s.trim().is_empty()).collect()
+    };
 
     for (i, part) in parts.iter().enumerate() {
         let text = part.trim();

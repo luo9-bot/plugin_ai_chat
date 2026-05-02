@@ -84,6 +84,9 @@ pub struct ConversationConfig {
     pub reply_follow_up_secs: u64,
     #[serde(default = "default_intrusiveness_weight")]
     pub intrusiveness_weight: f32,
+    /// 是否允许括号内的动作/表情描述，如"（笑了笑）"，默认 true
+    #[serde(default = "default_action_descriptions")]
+    pub action_descriptions: bool,
 }
 
 impl Default for ConversationConfig {
@@ -95,6 +98,7 @@ impl Default for ConversationConfig {
             max_typing_delay_ms: default_max_typing_delay(),
             reply_follow_up_secs: default_reply_follow_up_secs(),
             intrusiveness_weight: default_intrusiveness_weight(),
+            action_descriptions: default_action_descriptions(),
         }
     }
 }
@@ -291,6 +295,7 @@ fn default_typing_speed() -> f64 { 5.0 }
 fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
+fn default_action_descriptions() -> bool { true }
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
 fn default_auto_summarize_threshold() -> usize { 10 }
@@ -375,6 +380,7 @@ conversation:
   max_typing_delay_ms: 4000 # 打字延迟上限 (毫秒)
   reply_follow_up_secs: 300 # 对话跟进超时 (秒)，超时后不再自动回复非@消息
   intrusiveness_weight: 0.3 # 主动插话权重 (0.0~1.0)，越低越容易回复无关消息
+  action_descriptions: true # 是否允许括号动作描述，如"（笑了笑）"
 
 # ── 记忆参数 ─────────────────────────────────────────────────────
 memory:
