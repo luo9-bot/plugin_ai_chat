@@ -358,6 +358,13 @@ const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记
 - 有人纠正了你说过的话
 - 有人在讨论你关心的话题
 
+非常重要 — 记忆内容的写法：
+- 必须从对话中推断出用户的昵称/名字，写入记忆内容中
+- 绝对不要用"这个人"、"他"、"她"等代词，必须用具体的名字
+- 例如: "洛屿喜欢咖啡，生日3月15日" ✅  "这个人喜欢咖啡" ❌
+- 如果对话/记忆中用户自我介绍过（如"我是璃"），用那个名字
+- 如果没有办法得知用户的名字，可以考虑使用user_id替代
+
 完全无关的闲聊直接跳过，不要提取。返回空 relevant 数组表示没有值得记住的。"#;
 
 /// 审查对话消息，只提取有关的记忆
@@ -838,6 +845,18 @@ fn process_expired_batches() {
         return;
     }
 
+    // 预合并: 短等待让尾部消息到达 (用户连发多条时的合并窗口)
+    thread::sleep(Duration::from_millis(500));
+    let mut merged = Vec::new();
+    for (group_id, user_id, messages) in expired {
+        let mut final_msgs = messages;
+        if let Some(extra) = with_state(|s| s.take_batch_for_processing(group_id, user_id)) {
+            final_msgs.push('\n');
+            final_msgs.push_str(&extra);
+        }
+        merged.push((group_id, user_id, final_msgs));
+    }
+
     // 按群组聚合: 同一群的所有消息一起做 AI 决策
     let self_qq = cfg.self_qq;
     let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
@@ -845,7 +864,7 @@ fn process_expired_batches() {
     let mut group_msgs: std::collections::HashMap<u64, Vec<(u64, String)>> = std::collections::HashMap::new();
     let mut private_batches: Vec<(u64, String)> = Vec::new();
 
-    for (group_id, user_id, messages) in expired {
+    for (group_id, user_id, messages) in merged {
         if group_id > 0 {
             group_msgs.entry(group_id).or_default().push((user_id, messages));
         } else {
