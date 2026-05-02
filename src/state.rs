@@ -36,6 +36,10 @@ pub struct State {
     pub last_reply_times: HashMap<(u64, u64), Instant>,
     /// 机器人在各群最近发出的消息 (group_id → [(message, time)])，用于 AI 回复决策
     recent_bot_messages: HashMap<u64, Vec<(String, Instant)>>,
+    /// 各群组最近一次消息处理时间 (unix秒)，用于检测对话结束
+    pub last_conversation_times: HashMap<u64, u64>,
+    /// 已触发过对话后反思的群组，新消息到达时清除
+    pub reflected_groups: HashSet<u64>,
 }
 
 impl State {
@@ -48,6 +52,8 @@ impl State {
             batches: HashMap::new(),
             last_reply_times: HashMap::new(),
             recent_bot_messages: HashMap::new(),
+            last_conversation_times: HashMap::new(),
+            reflected_groups: HashSet::new(),
         }
     }
 
@@ -204,5 +210,23 @@ impl State {
         self.contexts.retain(|&(_, uid), _| uid != user_id);
         self.batches.retain(|&(_, uid), _| uid != user_id);
         self.last_reply_times.retain(|&(_, uid), _| uid != user_id);
+    }
+
+    /// 记录群组最近对话时间，并清除该群的反思标记（有新对话，需要重新计时）
+    pub fn record_conversation(&mut self, group_id: u64, timestamp: u64) {
+        self.last_conversation_times.insert(group_id, timestamp);
+        self.reflected_groups.remove(&group_id);
+    }
+
+    /// 返回空闲超过指定秒数且未反思过的群组列表
+    pub fn get_idle_groups(&self, now: u64, idle_secs: u64) -> Vec<u64> {
+        self.last_conversation_times.iter()
+            .filter(|(gid, last_time)| {
+                **gid > 0
+                    && now.saturating_sub(**last_time) >= idle_secs
+                    && !self.reflected_groups.contains(*gid)
+            })
+            .map(|(gid, _)| *gid)
+            .collect()
     }
 }

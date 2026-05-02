@@ -186,6 +186,9 @@ pub struct SelfReflectionConfig {
     /// 所有自我记忆都会永久保存，此值只控制每次对话注入多少条最近的想法
     #[serde(default = "default_max_thoughts")]
     pub max_thoughts: usize,
+    /// 对话结束后多久触发反思 (秒)，默认 120 (2分钟)
+    #[serde(default = "default_post_conversation_delay")]
+    pub post_conversation_delay_secs: u64,
 }
 
 impl Default for SelfReflectionConfig {
@@ -193,6 +196,7 @@ impl Default for SelfReflectionConfig {
         Self {
             interval: default_reflection_interval(),
             max_thoughts: default_max_thoughts(),
+            post_conversation_delay_secs: default_post_conversation_delay(),
         }
     }
 }
@@ -304,6 +308,7 @@ fn default_low_mood_multiplier() -> f64 { 2.0 }
 fn default_check_interval() -> u64 { 60 }
 fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
+fn default_post_conversation_delay() -> u64 { 120 }
 fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
 fn default_vision_model() -> String { "deepseek-chat".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
@@ -399,6 +404,7 @@ proactive:
 self_reflection:
   interval: 1800             # 自我反思间隔 (秒)，默认 1800 (30分钟)
   max_thoughts: 8            # 注入 prompt 的自我记忆条数 (所有记忆永久保存)
+  post_conversation_delay_secs: 120  # 对话结束后多久触发反思 (秒)，默认 120 (2分钟)
 
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
