@@ -40,6 +40,8 @@ pub struct State {
     pub last_conversation_times: HashMap<u64, u64>,
     /// 已触发过对话后反思的群组，新消息到达时清除
     pub reflected_groups: HashSet<u64>,
+    /// 各群组最近一次审查时间 (unix秒)，用于长时间对话的定期审查
+    pub last_review_times: HashMap<u64, u64>,
 }
 
 impl State {
@@ -54,6 +56,7 @@ impl State {
             recent_bot_messages: HashMap::new(),
             last_conversation_times: HashMap::new(),
             reflected_groups: HashSet::new(),
+            last_review_times: HashMap::new(),
         }
     }
 
@@ -225,6 +228,20 @@ impl State {
                 **gid > 0
                     && now.saturating_sub(**last_time) >= idle_secs
                     && !self.reflected_groups.contains(*gid)
+            })
+            .map(|(gid, _)| *gid)
+            .collect()
+    }
+
+    /// 返回长时间对话中需要定期审查的群组
+    /// 条件：有对话记录、距上次审查超过 review_interval、距最近对话在 max_idle 内（还在聊）
+    pub fn get_groups_needing_review(&self, now: u64, review_interval: u64, max_idle: u64) -> Vec<u64> {
+        self.last_conversation_times.iter()
+            .filter(|(gid, last_time)| {
+                **gid > 0
+                    && now.saturating_sub(**last_time) < max_idle
+                    && self.last_review_times.get(*gid)
+                        .map_or(true, |&last_review| now.saturating_sub(last_review) >= review_interval)
             })
             .map(|(gid, _)| *gid)
             .collect()

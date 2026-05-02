@@ -183,7 +183,18 @@ fn check_periodic() {
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = with_state(|s| s.get_idle_groups(now, post_delay));
     for group_id in idle_groups {
-        with_state(|s| { s.reflected_groups.insert(group_id); });
+        with_state(|s| {
+            s.reflected_groups.insert(group_id);
+            s.last_review_times.insert(group_id, now);
+        });
+        do_post_conversation_reflection(group_id);
+    }
+
+    // 长时间对话的定期审查：对话还在继续，但距离上次审查已经很久
+    let review_interval = config::get().self_reflection.interval;
+    let active_review_groups = with_state(|s| s.get_groups_needing_review(now, review_interval, post_delay));
+    for group_id in active_review_groups {
+        with_state(|s| { s.last_review_times.insert(group_id, now); });
         do_post_conversation_reflection(group_id);
     }
 
@@ -257,28 +268,95 @@ fn do_self_reflection() {
     debug!(count, "self_reflect completed");
 }
 
-/// 对话后反思：回顾刚结束的单个群对话，产生聚焦的内心想法
+/// 对话后反思：回顾刚结束的群对话 + 审查所有消息（已读+未读）
 fn do_post_conversation_reflection(group_id: u64) {
-    // 只取该群的最近工作记忆
-    let entries = working_memory::get_recent(group_id, 3600, 20);
-    let recent_context = if entries.is_empty() {
-        return; // 没有对话内容，跳过
-    } else {
-        let lines: Vec<String> = entries.iter().map(|e| {
-            let tag = if e.bot_replied { "[已回复]" } else { "" };
-            format!("[用户{}]{} {}", e.user_id, tag, e.content)
-        }).collect();
-        lines.join("\n")
-    };
+    // 取该群的最近工作记忆 (包含已回复和未回复的消息)
+    let entries = working_memory::get_recent(group_id, 3600, 30);
+    if entries.is_empty() {
+        return;
+    }
 
+    let recent_context: Vec<String> = entries.iter().map(|e| {
+        let tag = if e.bot_replied { "[已回复]" } else { "[未回复]" };
+        format!("[用户{}]{} {}", e.user_id, tag, e.content)
+    }).collect();
+    let context_text = recent_context.join("\n");
+
+    // 1. 自我反思
     let group_profiles = vec![self_memory::GroupProfile {
         group_id,
-        recent_messages: recent_context.clone(),
+        recent_messages: context_text.clone(),
     }];
-
-    // 传入空的 recent_context，对话内容通过 group_profiles 传入
     let (count, _share) = self_memory::reflect("", &group_profiles);
     debug!(group_id, count, "post_conversation_reflect completed");
+
+    // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
+    review_conversation_messages(group_id, &context_text);
+}
+
+/// 对话消息审查提示词
+const REVIEW_CONVERSATION_PROMPT: &str = r#"你在群里看到最近的对话记录，像翻聊天记录一样快速看一遍。消息标记了 [已回复] 和 [未回复]。
+
+返回 JSON（不要输出其他内容）:
+{"relevant": [{"user_id": 数字, "memory": "值得记住的内容", "importance": "normal|important|permanent"}], "emotion": {"state": "neutral|happy|sad|...", "intensity": 0.0~1.0}}
+
+只提取和你有关的、值得记住的信息。比如：
+- 有人提到你的名字、和你相关的事
+- 有人分享了重要的个人信息（生日、近况等）
+- 有人纠正了你说过的话
+- 有人在讨论你关心的话题
+
+完全无关的闲聊直接跳过，不要提取。返回空 relevant 数组表示没有值得记住的。"#;
+
+/// 审查对话消息，只提取有关的记忆
+fn review_conversation_messages(group_id: u64, messages_text: &str) {
+    let mut context_parts = Vec::new();
+    let personality = personality::get_prompt_context();
+    if !personality.is_empty() { context_parts.push(personality); }
+    let mem = memory::get_context(0);
+    if !mem.is_empty() { context_parts.push(mem); }
+
+    let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
+
+    match ai::analyze(REVIEW_CONVERSATION_PROMPT, &full_context) {
+        Ok(raw) => {
+            let json_str = ai::extract_json(&raw);
+            let json_str = match json_str {
+                Some(s) => s,
+                None => {
+                    debug!("review_conversation: no JSON in response");
+                    return;
+                }
+            };
+
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
+                    for item in relevant {
+                        let user_id = item.get("user_id").and_then(|u| u.as_u64()).unwrap_or(0);
+                        let memory_content = item.get("memory").and_then(|m| m.as_str()).unwrap_or("");
+                        let importance_str = item.get("importance").and_then(|i| i.as_str()).unwrap_or("normal");
+                        if memory_content.is_empty() || user_id == 0 { continue; }
+                        let importance = match importance_str {
+                            "permanent" => memory::Importance::Permanent,
+                            "important" => memory::Importance::Important,
+                            _ => memory::Importance::Normal,
+                        };
+                        memory::add(user_id, memory_content, importance);
+                    }
+                    debug!(group_id, count = relevant.len(), "review_conversation: memories extracted");
+                }
+
+                if let Some(emotion_obj) = parsed.get("emotion") {
+                    let state = emotion_obj.get("state").and_then(|s| s.as_str()).unwrap_or("neutral");
+                    let intensity = emotion_obj.get("intensity").and_then(|i| i.as_f64()).unwrap_or(0.3) as f32;
+                    emotion::update_from_analysis(0, state, intensity);
+                }
+            }
+        }
+        Err(e) => {
+            debug!(error = %e, "review_conversation: AI error");
+        }
+    }
 }
 
 fn now_secs() -> u64 {
@@ -745,10 +823,8 @@ fn process_expired_batches() {
             // 所有非@消息: AI 决策 (传入群组上下文)
             if decide_reply(group_id, *user_id, messages, &context_str) {
                 process_message(*user_id, group_id, messages);
-            } else {
-                // 不回复也要更新记忆: 记录历史 + 提取记忆 + 情绪分析
-                update_memory(*user_id, group_id, messages);
             }
+            // 不回复的消息已记录在工作记忆中，对话后统一审查
         }
 
         // 记录对话活跃时间 (用于对话后反思)
@@ -827,8 +903,6 @@ fn check_new_messages_for_group(group_id: u64) {
             process_message(user_id, group_id, &messages);
         } else if decide_reply(group_id, user_id, &messages, &context_str) {
             process_message(user_id, group_id, &messages);
-        } else {
-            update_memory(user_id, group_id, &messages);
         }
     }
 
@@ -1053,133 +1127,11 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
 
             // 标记工作记忆中该用户的消息为已回复
             working_memory::mark_replied(group_id, user_id);
-
-            // ── AI 驱动的后处理 (发送后执行，不阻塞用户) ──
-
-            // 合并分析: 记忆提取 + 情绪分析 + 记忆纠错 (单次 API 调用)
-            let analysis_context = {
-                let mut parts = Vec::new();
-                let mem = memory::get_context(user_id);
-                if !mem.is_empty() { parts.push(mem); }
-                let self_mem = self_memory::get_context(10);
-                if !self_mem.is_empty() { parts.push(self_mem); }
-                parts.join("\n\n")
-            };
-            let analysis = ai::post_analyze(message, &cleaned_reply, &history, &analysis_context);
-
-            debug!(
-                user_id,
-                group_id,
-                memories_count = analysis.memories.len(),
-                emotion = %analysis.emotion,
-                intensity = analysis.intensity,
-                corrections_count = analysis.corrections.len(),
-                "post_analyze completed"
-            );
-
-            // 保存提取的记忆
-            for (content, importance_str) in &analysis.memories {
-                let importance = match importance_str.as_str() {
-                    "permanent" => memory::Importance::Permanent,
-                    "important" => memory::Importance::Important,
-                    _ => memory::Importance::Normal,
-                };
-                memory::add(user_id, content, importance);
-            }
-
-            // 更新情绪状态
-            emotion::update_from_analysis(user_id, &analysis.emotion, analysis.intensity);
-
-            // 记忆纠错
-            for correction in &analysis.corrections {
-                match correction.target.as_str() {
-                    "self" => { self_memory::correct(&correction.old, &correction.new); }
-                    _ => { memory::correct(user_id, &correction.old, &correction.new); }
-                }
-            }
-
-            // 定期自动摘要
-            if history.len() > 10 && history.len() % 10 == 0 {
-                memory::auto_summarize(user_id, &history);
-            }
         }
         Err(e) => {
             debug!(user_id, group_id, error = %e, "AI chat error");
             sender::send_msg(group_id, user_id, "睡着了...");
         }
-    }
-}
-
-/// 不回复时仍更新记忆：记录对话历史 + 提取记忆 + 情绪分析
-fn update_memory(user_id: u64, group_id: u64, message: &str) {
-    let cfg = config::get();
-    let max_history = cfg.conversation.max_history;
-
-    // 图片处理 (同 process_message)
-    let image_descriptions: Vec<String> = if cfg.vision.enabled() {
-        let urls = vision::extract_image_urls(message);
-        urls.iter().filter_map(|url| vision::recognize(url)).collect()
-    } else {
-        Vec::new()
-    };
-    let text_message = vision::strip_image_cq(message);
-    let ai_message = if image_descriptions.is_empty() {
-        if text_message.is_empty() { "[图片]".to_string() } else { text_message.clone() }
-    } else {
-        let img_ctx: Vec<String> = image_descriptions.iter()
-            .enumerate()
-            .map(|(i, d)| format!("[图片{}: {}]", i + 1, d))
-            .collect();
-        if text_message.is_empty() { img_ctx.join("\n") } else { format!("{}\n{}", img_ctx.join("\n"), text_message) }
-    };
-
-    // 记录到对话历史
-    with_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
-
-    let history = with_state(|s| {
-        s.get_or_create_context(group_id, user_id).history.clone()
-    });
-
-    // 后处理: 记忆提取 + 情绪更新 + 记忆纠错 (无 AI 回复)
-    let analysis_context = {
-        let mut parts = Vec::new();
-        let mem = memory::get_context(user_id);
-        if !mem.is_empty() { parts.push(mem); }
-        let self_mem = self_memory::get_context(10);
-        if !self_mem.is_empty() { parts.push(self_mem); }
-        parts.join("\n\n")
-    };
-    let analysis = ai::post_analyze(message, "", &history, &analysis_context);
-
-    debug!(
-        user_id, group_id,
-        memories_count = analysis.memories.len(),
-        emotion = %analysis.emotion,
-        intensity = analysis.intensity,
-        corrections_count = analysis.corrections.len(),
-        "update_memory (no reply)"
-    );
-
-    for (content, importance_str) in &analysis.memories {
-        let importance = match importance_str.as_str() {
-            "permanent" => memory::Importance::Permanent,
-            "important" => memory::Importance::Important,
-            _ => memory::Importance::Normal,
-        };
-        memory::add(user_id, content, importance);
-    }
-
-    emotion::update_from_analysis(user_id, &analysis.emotion, analysis.intensity);
-
-    for correction in &analysis.corrections {
-        match correction.target.as_str() {
-            "self" => { self_memory::correct(&correction.old, &correction.new); }
-            _ => { memory::correct(user_id, &correction.old, &correction.new); }
-        }
-    }
-
-    if history.len() > 10 && history.len() % 10 == 0 {
-        memory::auto_summarize(user_id, &history);
     }
 }
 
