@@ -138,6 +138,32 @@ pub fn total_count() -> usize {
     store.thoughts.len()
 }
 
+/// 修正自我记忆：根据 old 模糊匹配，替换为 new (new 为空则删除)
+/// 返回修正的条数
+pub fn correct(old: &str, new: &str) -> usize {
+    let mut store = SelfMemoryStore::load();
+    let mut count = 0;
+
+    if new.is_empty() {
+        let before = store.thoughts.len();
+        store.thoughts.retain(|t| !t.content.contains(old));
+        count = before - store.thoughts.len();
+    } else {
+        for thought in &mut store.thoughts {
+            if thought.content.contains(old) {
+                thought.content = new.to_string();
+                count += 1;
+            }
+        }
+    }
+
+    if count > 0 {
+        store.save();
+        eprintln!("[ai_chat] self_memory correct: '{}' → '{}' ({} entries)", old, new, count);
+    }
+    count
+}
+
 /// 获取最近的自我思考上下文 (注入到 system prompt)
 pub fn get_context(max_count: usize) -> String {
     let store = SelfMemoryStore::load();

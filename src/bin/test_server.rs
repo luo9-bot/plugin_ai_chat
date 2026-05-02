@@ -10,6 +10,7 @@ use top_drluo_luo9_ai_chat::working_memory;
 use top_drluo_luo9_ai_chat::emotion;
 use top_drluo_luo9_ai_chat::personality;
 use top_drluo_luo9_ai_chat::ai;
+use top_drluo_luo9_ai_chat::self_memory;
 use top_drluo_luo9_ai_chat::state::State;
 use top_drluo_luo9_ai_chat::DECIDE_REPLY_PROMPT;
 
@@ -361,7 +362,7 @@ fn handle_simulate(body: &str, state: &mut State) -> serde_json::Value {
     }
 
     // 8. AI 后处理 (记忆提取 + 情绪分析)
-    let analysis = ai::post_analyze(message, &cleaned_reply, &history);
+    let analysis = ai::post_analyze(message, &cleaned_reply, &history, "");
 
     for (content, importance_str) in &analysis.memories {
         let importance = match importance_str.as_str() {
@@ -372,6 +373,14 @@ fn handle_simulate(body: &str, state: &mut State) -> serde_json::Value {
         memory::add(user_id, content, importance);
     }
     emotion::update_from_analysis(user_id, &analysis.emotion, analysis.intensity);
+
+    // 记忆纠错
+    for correction in &analysis.corrections {
+        match correction.target.as_str() {
+            "self" => { self_memory::correct(&correction.old, &correction.new); }
+            _ => { memory::correct(user_id, &correction.old, &correction.new); }
+        }
+    }
 
     let elapsed = now_millis() - start;
 

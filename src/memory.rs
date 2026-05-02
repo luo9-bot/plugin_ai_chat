@@ -175,6 +175,48 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
     }
 }
 
+/// 修正用户记忆：根据 old 模糊匹配，替换为 new (new 为空则删除)
+/// 返回修正的条数
+pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
+    let mut store = MemoryStore::load();
+    let user = store.get_user_mut(user_id);
+    let now = now_secs();
+    let mut count = 0;
+
+    if new.is_empty() {
+        // 删除匹配的记忆
+        let mut archived = Vec::new();
+        let mut remaining = Vec::new();
+        for entry in user.entries.drain(..) {
+            if entry.content.contains(old) {
+                archived.push(entry);
+                count += 1;
+            } else {
+                remaining.push(entry);
+            }
+        }
+        user.entries = remaining;
+        if !archived.is_empty() {
+            crate::archive::archive_long_term_memory(user_id, archived);
+        }
+    } else {
+        // 更新匹配的记忆
+        for entry in &mut user.entries {
+            if entry.content.contains(old) {
+                entry.content = new.to_string();
+                entry.last_accessed = now;
+                count += 1;
+            }
+        }
+    }
+
+    if count > 0 {
+        store.save();
+        eprintln!("[ai_chat] memory correct for user {}: '{}' → '{}' ({} entries)", user_id, old, new, count);
+    }
+    count
+}
+
 pub fn forget_all(user_id: u64) {
     let mut store = MemoryStore::load();
     if let Some(user) = store.users.remove(&user_id.to_string()) {

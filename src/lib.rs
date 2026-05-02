@@ -243,42 +243,13 @@ fn is_admin(user_id: u64) -> bool {
     admin == 0 || admin == user_id
 }
 
-/// 检查群消息是否需要回复
-///
-/// 判断逻辑:
-/// 1. @了机器人 → true
-/// 2. 机器人刚在群里回过话 (群级跟进时间内) → true
-/// 3. 其他 → false
-fn should_reply_in_group(group_id: u64, _user_id: u64, msg: &str) -> bool {
-    let cfg = config::get();
-
-    // 未配置 self_qq 时，回复所有消息 (向后兼容)
-    if cfg.self_qq == 0 {
-        return true;
-    }
-
-    // 检查是否 @了机器人
-    let at_pattern = format!("[CQ:at,qq={}]", cfg.self_qq);
-    if msg.contains(&at_pattern) {
-        return true;
-    }
-
-    // 检查群级对话跟进: 机器人刚在群里回过话，任何人都可以接话
-    let follow_up = cfg.conversation.reply_follow_up_secs;
-    if with_state(|s| s.is_in_follow_up(group_id, 0, follow_up)) {
-        return true;
-    }
-
-    false
-}
-
 fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
 
     // ── 管理员专属控制命令 ──
     if is_admin(user_id) {
         match trimmed {
-            "开!" | "开启对话" => {
+            "start" | "开启对话" => {
                 let already = with_state(|s| s.active_groups.contains(&group_id));
                 if already {
                     sender::send_msg(group_id, user_id, &config::get().messages.start.redo);
@@ -288,7 +259,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                 sender::send_msg(group_id, user_id, &config::get().messages.start.success);
                 return;
             }
-            "停!" | "关闭对话" => {
+            "end" | "关闭对话" => {
                 let active = with_state(|s| s.active_groups.contains(&group_id));
                 if !active {
                     sender::send_msg(group_id, user_id, &config::get().messages.stop.redo);
@@ -329,12 +300,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     emotion::analyze_user_message(user_id, trimmed);
     working_memory::record(group_id, user_id, trimmed, false);
 
-    // ── 判断是否需要回复 ──
-    if !should_reply_in_group(group_id, user_id, trimmed) {
-        return;
-    }
-
-    // 加入批次
+    // ── 所有消息加入批次，由 AI 决策是否回复 ──
     with_state(|s| s.append_batch(group_id, user_id, trimmed));
 }
 
@@ -817,7 +783,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             // 先发送回复 (用户不用等分析完成)
             if group_id > 0 {
                 // 群聊: @回复用户，让对方明确知道 bot 在回复谁
-                send_group_reply_with_at(group_id, user_id, &final_reply);
+                send_group_reply(group_id, user_id, &final_reply);
             } else {
                 sender::send_with_typing(0, user_id, &final_reply);
             }
@@ -835,8 +801,16 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
 
             // ── AI 驱动的后处理 (发送后执行，不阻塞用户) ──
 
-            // 合并分析: 记忆提取 + 情绪分析 (单次 API 调用)
-            let analysis = ai::post_analyze(message, &cleaned_reply, &history);
+            // 合并分析: 记忆提取 + 情绪分析 + 记忆纠错 (单次 API 调用)
+            let analysis_context = {
+                let mut parts = Vec::new();
+                let mem = memory::get_context(user_id);
+                if !mem.is_empty() { parts.push(mem); }
+                let self_mem = self_memory::get_context(10);
+                if !self_mem.is_empty() { parts.push(self_mem); }
+                parts.join("\n\n")
+            };
+            let analysis = ai::post_analyze(message, &cleaned_reply, &history, &analysis_context);
 
             // 保存提取的记忆
             for (content, importance_str) in &analysis.memories {
@@ -851,6 +825,14 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             // 更新情绪状态
             emotion::update_from_analysis(user_id, &analysis.emotion, analysis.intensity);
 
+            // 记忆纠错
+            for correction in &analysis.corrections {
+                match correction.target.as_str() {
+                    "self" => { self_memory::correct(&correction.old, &correction.new); }
+                    _ => { memory::correct(user_id, &correction.old, &correction.new); }
+                }
+            }
+
             // 定期自动摘要
             if history.len() > 10 && history.len() % 10 == 0 {
                 memory::auto_summarize(user_id, &history);
@@ -863,18 +845,13 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     }
 }
 
-/// 群聊回复：@用户 + 模拟打字延迟
-fn send_group_reply_with_at(group_id: u64, user_id: u64, reply: &str) {
+/// 群聊回复：模拟打字延迟，分段发送
+fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
     let cfg = config::get();
     let segments: Vec<&str> = reply.split("|^|").filter(|s| !s.trim().is_empty()).collect();
 
     for (i, segment) in segments.iter().enumerate() {
-        if i == 0 {
-            // 第一段: @用户
-            sender::send_at_msg(group_id, user_id, segment);
-        } else {
-            sender::send_msg(group_id, user_id, segment);
-        }
+        sender::send_msg(group_id, user_id, segment);
         // 段间打字延迟
         if i < segments.len() - 1 {
             let delay_secs = segment.chars().count() as f64 / cfg.conversation.typing_speed;
