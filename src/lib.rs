@@ -38,12 +38,14 @@ use std::time::Duration;
 use tracing::debug;
 
 /// AI 群聊回复决策提示词
-pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一条消息，判断你想不想回。
+pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一段对话，判断你想不想参与。
 
 返回 JSON（不要输出其他内容）:
 {"reply": true/false, "reason": "简短原因"}
 
-想象你真的是群里的一个人，看到这条消息你会怎么反应：
+注意看完整的对话，不要只看最后一条。有时候一个人发了多条消息，前面的才是重点。
+
+想象你真的是群里的一个人，看到这些对话你会怎么反应：
 - 有人 @你、叫你名字、明显在跟你说话 → 想回
 - 你刚发了言，有人接你的话 → 想回
 - 你俩正在来回聊着 → 想回
@@ -51,6 +53,8 @@ pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一条消息，判断
 - 有人 @了别人，或者两个人在聊，你没参与 → 不想回
 - 有人自言自语、发牢骚、感叹一句就走了，你也没什么特别想说的 → 不想回
 - 你拿不准是不是在跟你说话 → 不想回
+
+注意：你的名字和人设在上面的"你的身份"里。如果有人叫你的名字（哪怕加了感叹号、拆开了字），就是在叫你。
 
 群里不止你一个人，别把每条消息都当成在跟你说话。像真人一样判断就好。"#;
 
@@ -692,7 +696,9 @@ fn process_expired_batches() {
     // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
     for (group_id, user_msgs) in group_msgs {
         let group_context: Vec<String> = user_msgs.iter()
-            .map(|(uid, msg)| format!("[{}] {}", uid, msg))
+            .flat_map(|(uid, msg)| {
+                msg.lines().map(move |line| format!("[{}] {}", uid, line))
+            })
             .collect();
         let context_str = group_context.join("\n");
 
@@ -771,7 +777,9 @@ fn check_new_messages_for_group(group_id: u64) {
 
     // 构建群上下文
     let group_context: Vec<String> = new_batches.iter()
-        .map(|(uid, msg)| format!("[{}] {}", uid, msg))
+        .flat_map(|(uid, msg)| {
+            msg.lines().map(move |line| format!("[{}] {}", uid, line))
+        })
         .collect();
     let context_str = group_context.join("\n");
 
@@ -803,6 +811,12 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     // 构建决策上下文
     let mut context_parts = Vec::new();
+
+    // 0. 人设提示词 (角色名称和身份)
+    let prompt = config::prompt();
+    if !prompt.is_empty() {
+        context_parts.push(format!("# 你的身份\n{}", prompt));
+    }
 
     // 1. 人格信息
     let personality_ctx = personality::get_prompt_context();
@@ -884,10 +898,17 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     let msg_text = vision::strip_image_cq(message);
     let msg_display = if msg_text.is_empty() { "[图片]" } else { &msg_text };
 
+    // 批次内每行都加 user_id 前缀，避免多行消息被误认为不同人
+    let msg_lines: Vec<String> = msg_display.lines()
+        .map(|line| format!("[{}] {}", user_id, line))
+        .collect();
+
     let content = format!(
-        "{}\n\n需要判断是否回复的当前消息:\n[{}] {}",
-        personality_hint, user_id, msg_display
+        "{}\n\n需要判断是否回复的当前对话:\n{}",
+        personality_hint, msg_lines.join("\n")
     );
+
+    debug!("{:?}", content);
 
     match ai::analyze(&full_prompt, &content) {
         Ok(raw) => {

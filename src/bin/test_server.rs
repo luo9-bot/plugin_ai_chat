@@ -59,6 +59,11 @@ fn test_decide_reply(group_id: u64, user_id: u64, message: &str, state: &mut Sta
 
     let mut context_parts = Vec::new();
 
+    let prompt = config::prompt();
+    if !prompt.is_empty() {
+        context_parts.push(format!("# 你的身份\n{}", prompt));
+    }
+
     let personality = personality::get_prompt_context();
     if !personality.is_empty() {
         context_parts.push(personality);
@@ -115,9 +120,12 @@ fn test_decide_reply(group_id: u64, user_id: u64, message: &str, state: &mut Sta
     };
 
     let full_prompt = format!("{}\n\n{}", DECIDE_REPLY_PROMPT, context_parts.join("\n\n"));
+    let msg_lines: Vec<String> = message.lines()
+        .map(|line| format!("[{}] {}", user_id, line))
+        .collect();
     let content = format!(
-        "{}\n\n需要判断是否回复的当前消息:\n[{}] {}",
-        personality_hint, user_id, message
+        "{}\n\n需要判断是否回复的当前对话:\n{}",
+        personality_hint, msg_lines.join("\n")
     );
 
     match ai::analyze(&full_prompt, &content) {
@@ -146,6 +154,11 @@ fn test_decide_reply(group_id: u64, user_id: u64, message: &str, state: &mut Sta
 /// 构建 decide_reply 的完整上下文 (复用 lib.rs 的逻辑)
 fn build_decide_context(group_id: u64, user_id: u64, _message: &str, state: &mut State) -> Vec<String> {
     let mut parts = Vec::new();
+
+    let prompt = config::prompt();
+    if !prompt.is_empty() {
+        parts.push(format!("# 你的身份\n{}", prompt));
+    }
 
     let personality_ctx = personality::get_prompt_context();
     if !personality_ctx.is_empty() {
