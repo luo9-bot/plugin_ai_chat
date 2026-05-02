@@ -152,15 +152,34 @@ fn check_periodic() {
     with_state(|s| {
         // 私聊活跃用户
         let private_users: Vec<(u64, u64)> = s.active.iter().map(|&uid| (uid, 0u64)).collect();
-        // 群聊: 从批次键中获取最近交互的 (user_id, group_id)
-        let group_users: Vec<(u64, u64)> = s.batches.iter()
-            .map(|(&(gid, uid), _)| (uid, gid))
+
+        // 群聊: 从 contexts 中获取所有有对话历史的群聊用户
+        let mut group_users: Vec<(u64, u64)> = s.contexts.iter()
+            .filter(|((gid, _), _)| *gid > 0 && s.active_groups.contains(gid))
+            .map(|((gid, uid), _)| (*uid, *gid))
             .collect();
+
+        // 也包含当前有活跃批次的用户
+        for (&(gid, uid), _) in &s.batches {
+            if gid > 0 {
+                group_users.push((uid, gid));
+            }
+        }
+
+        group_users.sort_unstable();
+        group_users.dedup();
+
+        let private_count = private_users.len();
+        let group_count = group_users.len();
 
         let mut all_users: Vec<(u64, u64)> = private_users;
         all_users.extend(group_users);
-        all_users.sort_unstable();
-        all_users.dedup();
+
+        debug!(
+            private_count,
+            group_count,
+            "proactive: checking users"
+        );
 
         for (user_id, group_id) in all_users {
             emotion::decay(user_id);

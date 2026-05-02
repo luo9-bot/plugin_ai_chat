@@ -161,21 +161,37 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     }
 
     let state = load_state(user_id);
+    let now = now_secs();
 
     if is_quiet_hour(quiet_start, quiet_end) {
+        tracing::debug!(user_id, group_id, "proactive: quiet hour, skipping");
         return;
     }
 
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
+        tracing::debug!(user_id, group_id, msg = %reminder_msg, "proactive: sending date reminder");
         sender::send_msg(group_id, user_id, &reminder_msg);
         record_sent(user_id);
         return;
     }
 
+    let time_since_last = now.saturating_sub(state.last_sent);
+    let time_since_reply = now.saturating_sub(state.last_user_reply);
+
     if should_send_greeting(user_id, interval, max_ignore, low_mood_mult, &state) {
         let msg = generate_greeting(user_id);
+        tracing::debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, "proactive: sending greeting");
         sender::send_msg(group_id, user_id, &msg);
         record_sent(user_id);
+    } else {
+        tracing::debug!(
+            user_id, group_id,
+            time_since_last,
+            time_since_reply,
+            ignore_count = state.ignore_count,
+            interval,
+            "proactive: not yet time"
+        );
     }
 }
 
