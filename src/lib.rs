@@ -39,28 +39,26 @@ use tracing::debug;
 /// AI 群聊回复决策提示词
 pub const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判断是否要回复当前消息。
 
-根据以下信息做判断:
-1. 消息是否是发给你的（@你、提到你、回复你的消息）
-2. 消息是否是你正在参与的对话的延续
-3. 消息内容是否有趣到值得你插话
-4. 你的人格特质和当前情绪
-5. 你刚说过的话是否被对方回应（非常重要！）
-
 返回 JSON（不要输出其他内容）:
 {"reply": true/false, "reason": "简短原因"}
 
-判断标准 (按优先级):
-- 如果消息明显是发给你的 → reply: true
-- 如果你刚刚说了某句话（见"你在群里最近的消息"），而现在有人对你的话做出回应、追问、评论、调侃 → reply: true
-- 如果你刚参与了某个话题的讨论，其他人正在继续讨论同一话题 → reply: true
-- 如果你和发送者正在聊天 → reply: true
-- 如果消息是两个人之间的对话，话题与你无关，不是发给你的 → reply: false
-- 如果消息是一般性的群聊内容（牢骚、感叹、转发等）→ 根据你的人格决定是否参与
+应该回复的情况 (reply: true):
+- 消息直接 @你 或提到你的名字
+- 你刚说了话，有人明确回应你（追问、评论、调侃、附和你的话）
+- 你和对方正在进行一对一的对话（连续互相发消息）
+- 消息是发给群里所有人的问题或话题，你想参与
 
-特别注意:
-- "你在群里最近的消息"是关键参考。如果有人对你刚说过的话做出任何反应（追问、评论、调侃、附和），你应该回复
-- 只有当消息明显是在两个人之间的私聊、且话题完全与你无关时，才不回复
-- 像真人一样参与对话：你刚说了话，别人接话时你应该回应"#;
+不应该回复的情况 (reply: false):
+- 消息 @了其他人而不是你（即使你认识那个人）
+- 两个人在聊天，你没有参与其中
+- 一般性的感叹、牢骚、自言自语（除非你特别想插话）
+- 你不确定消息是否发给你的 → 不回复
+
+关键原则:
+- 群里有多个成员，消息可能是发给别人的，不要默认所有消息都和你有关
+- @了别人的消息 = 发给别人的，不要抢答
+- 区分"对方在和你说话" vs "对方在和别人说话" vs "对方在自言自语"
+- 像真人一样判断：你会回复的消息才回复，不要过度热情"#;
 
 thread_local! {
     static STATE: RefCell<state::State> = RefCell::new(state::State::new());
@@ -85,8 +83,27 @@ static mut LAST_SELF_REFLECTION: u64 = 0;
 #[cfg(feature = "plugin")]
 #[unsafe(no_mangle)]
 pub extern "C" fn plugin_main() {
+    // 初始化 tracing subscriber，只输出 ai_chat 的 debug 日志
+    use tracing_subscriber::EnvFilter;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("top_drluo_luo9_ai_chat=debug,warn"))
+        )
+        .with_target(false)
+        .with_ansi(false)
+        .init();
+
     config::init();
-    println!("[ai_chat] plugin loaded, model: {}", config::get().model);
+    debug!(model = %config::get().model, "plugin loaded");
+
+    // 初始化定时器，避免启动时立即触发
+    let now = now_secs();
+    unsafe {
+        LAST_PROACTIVE_CHECK = now;
+        LAST_MEMORY_REVIEW = now;
+        LAST_SELF_REFLECTION = now;
+    }
 
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
@@ -219,10 +236,15 @@ fn do_self_reflection() {
 
     let (count, share) = self_memory::reflect(&recent_context, &group_profiles);
 
-    // 如果反思产生了想分享的想法，主动发送
+    // 如果反思产生了想分享的想法，主动发送 (只发到激活的群)
     if let Some((content, group_id)) = share {
-        debug!(group_id, content, "self_reflect: sharing thought");
-        sender::send_msg(group_id, 0, &content);
+        let is_active = with_state(|s| s.active_groups.contains(&group_id));
+        if is_active {
+            debug!(group_id, content, "self_reflect: sharing thought");
+            sender::send_msg(group_id, 0, &content);
+        } else {
+            debug!(group_id, "self_reflect: skipping share to inactive group");
+        }
     }
 
     debug!(count, "self_reflect completed");
