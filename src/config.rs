@@ -224,7 +224,7 @@ fn default_temperature() -> f64 { 1.3 }
 fn default_top_p() -> f64 { 0.1 }
 fn default_max_tokens() -> u32 { 4096 }
 fn default_request_timeout() -> u64 { 60 }
-fn default_analysis_max_tokens() -> u32 { 300 }
+fn default_analysis_max_tokens() -> u32 { 800 }
 fn default_analysis_temperature() -> f64 { 0.3 }
 fn default_max_history() -> usize { 10 }
 fn default_batch_timeout() -> u64 { 6000 }
@@ -293,7 +293,7 @@ ai:
   top_p: 0.1                # 核采样 (0.0~1.0)，越低越集中
   max_tokens: 4096          # 最大回复 token
   request_timeout: 60       # 请求超时 (秒)
-  analysis_max_tokens: 300  # 分析任务最大 token (记忆/情绪分析)
+  analysis_max_tokens: 800  # 分析任务最大 token (记忆/情绪分析)
   analysis_temperature: 0.3 # 分析任务温度 (越低越确定)
 
 # ── 对话参数 ─────────────────────────────────────────────────────

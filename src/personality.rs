@@ -176,6 +176,11 @@ pub fn get_prompt_context() -> String {
     parts.join("\n\n")
 }
 
+/// 获取 verbosity 特质值 (供 decide_reply 使用)
+pub fn get_verbosity() -> f32 {
+    PersonalityStore::load().current.traits.verbosity
+}
+
 pub fn apply_template(template_name: &str) -> Result<String, String> {
     let Some((traits, _)) = template_traits(template_name) else {
         return Err(format!("未知模板: {}", template_name));

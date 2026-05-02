@@ -517,9 +517,9 @@ pub fn ai_review_all() {
             format!("- [{}] {}", imp, e.content)
         }).collect();
 
-        // 获取最近对话历史
+        // 获取最近对话历史 (取私聊上下文作为代表)
         let recent_history = crate::with_state(|s| {
-            let ctx = s.get_or_create_context(user_id);
+            let ctx = s.get_or_create_context(0, user_id);
             ctx.history.iter()
                 .rev()
                 .take(8)

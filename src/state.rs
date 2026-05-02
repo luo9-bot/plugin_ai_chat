@@ -12,9 +12,12 @@ pub struct UserContext {
 /// 消息批次 (合并短时间内连续消息)
 pub struct MessageBatch {
     pub messages: String,
-    pub group_id: u64,
     pub last_update: Instant,
 }
+
+/// 上下文键: (group_id, user_id)
+/// 私聊: (0, user_id)，群聊: (group_id, user_id)
+pub type CtxKey = (u64, u64);
 
 /// 全局状态
 pub struct State {
@@ -22,10 +25,10 @@ pub struct State {
     pub active: std::collections::HashSet<u64>,
     /// 群聊活跃群组集合 (group_id)，管理员开启后整个群可聊
     pub active_groups: std::collections::HashSet<u64>,
-    /// 用户对话上下文
-    pub contexts: HashMap<u64, UserContext>,
-    /// 消息批次缓冲
-    pub batches: HashMap<u64, MessageBatch>,
+    /// 用户对话上下文 (按 (group_id, user_id) 隔离)
+    pub contexts: HashMap<CtxKey, UserContext>,
+    /// 消息批次缓冲 (按 (group_id, user_id) 隔离)
+    pub batches: HashMap<CtxKey, MessageBatch>,
     /// 机器人上次回复时间 (group_id, user_id) → Instant，用于对话跟进判断
     /// group_id=0 表示私聊
     pub last_reply_times: HashMap<(u64, u64), Instant>,
@@ -74,64 +77,67 @@ impl State {
         }
     }
 
-    /// 追加消息到用户批次
-    pub fn append_batch(&mut self, user_id: u64, group_id: u64, message: &str) {
+    /// 追加消息到用户批次 (按 (group_id, user_id) 隔离)
+    pub fn append_batch(&mut self, group_id: u64, user_id: u64, message: &str) {
+        let key: CtxKey = (group_id, user_id);
         let now = Instant::now();
-        if let Some(batch) = self.batches.get_mut(&user_id) {
+        if let Some(batch) = self.batches.get_mut(&key) {
             batch.messages.push('\n');
             batch.messages.push_str(message);
-            batch.group_id = group_id;
             batch.last_update = now;
         } else {
-            self.batches.insert(user_id, MessageBatch {
+            self.batches.insert(key, MessageBatch {
                 messages: message.to_string(),
-                group_id,
                 last_update: now,
             });
         }
     }
 
     /// 检查并取出已超时的批次
-    pub fn take_expired_batch(&mut self, user_id: u64, timeout_ms: u64) -> Option<MessageBatch> {
-        let should_take = self.batches.get(&user_id).map_or(false, |batch| {
+    pub fn take_expired_batch(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<MessageBatch> {
+        let key: CtxKey = (group_id, user_id);
+        let should_take = self.batches.get(&key).map_or(false, |batch| {
             batch.last_update.elapsed().as_millis() >= timeout_ms as u128
         });
         if should_take {
-            self.batches.remove(&user_id)
+            self.batches.remove(&key)
         } else {
             None
         }
     }
 
-    /// 取出批次消息用于处理，但保留槽位
+    /// 取出批次消息用于处理
     /// 在 AI 处理期间如果有新消息到来，会追加到同一个槽位
-    pub fn take_batch_for_processing(&mut self, user_id: u64) -> Option<String> {
-        self.batches.remove(&user_id).map(|batch| batch.messages)
+    pub fn take_batch_for_processing(&mut self, group_id: u64, user_id: u64) -> Option<String> {
+        let key: CtxKey = (group_id, user_id);
+        self.batches.remove(&key).map(|batch| batch.messages)
     }
 
     /// 检查并取出处理期间新到达的消息
-    pub fn take_new_messages(&mut self, user_id: u64, timeout_ms: u64) -> Option<String> {
-        let should_take = self.batches.get(&user_id).map_or(false, |batch| {
+    pub fn take_new_messages(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<String> {
+        let key: CtxKey = (group_id, user_id);
+        let should_take = self.batches.get(&key).map_or(false, |batch| {
             batch.last_update.elapsed().as_millis() >= timeout_ms as u128
         });
         if should_take {
-            self.batches.remove(&user_id).map(|batch| batch.messages)
+            self.batches.remove(&key).map(|batch| batch.messages)
         } else {
             None
         }
     }
 
-    /// 获取或创建用户上下文
-    pub fn get_or_create_context(&mut self, user_id: u64) -> &mut UserContext {
-        self.contexts.entry(user_id).or_insert(UserContext {
+    /// 获取或创建用户上下文 (按 (group_id, user_id) 隔离)
+    pub fn get_or_create_context(&mut self, group_id: u64, user_id: u64) -> &mut UserContext {
+        let key: CtxKey = (group_id, user_id);
+        self.contexts.entry(key).or_insert(UserContext {
             history: Vec::new(),
             emotion: String::new(),
         })
     }
 
     /// 向用户历史追加一条消息，并保持窗口大小
-    pub fn push_history(&mut self, user_id: u64, role: &str, content: &str, max_pairs: usize) {
-        let ctx = self.get_or_create_context(user_id);
+    pub fn push_history(&mut self, group_id: u64, user_id: u64, role: &str, content: &str, max_pairs: usize) {
+        let ctx = self.get_or_create_context(group_id, user_id);
         ctx.history.push((role.to_string(), content.to_string()));
         // 滑动窗口: 保留最近 max_pairs 对 (user + assistant)
         while ctx.history.len() > max_pairs * 2 {
@@ -165,10 +171,18 @@ impl State {
             .unwrap_or_default()
     }
 
-    /// 遗忘用户对话
+    /// 遗忘用户在指定上下文中的对话
+    pub fn forget_context(&mut self, group_id: u64, user_id: u64) {
+        let key: CtxKey = (group_id, user_id);
+        self.contexts.remove(&key);
+        self.batches.remove(&key);
+        self.last_reply_times.remove(&(group_id, user_id));
+    }
+
+    /// 遗忘用户的所有对话 (所有群聊 + 私聊上下文)
     pub fn forget_user(&mut self, user_id: u64) {
-        self.contexts.remove(&user_id);
-        self.batches.remove(&user_id);
+        self.contexts.retain(|&(_, uid), _| uid != user_id);
+        self.batches.retain(|&(_, uid), _| uid != user_id);
         self.last_reply_times.retain(|&(_, uid), _| uid != user_id);
     }
 }

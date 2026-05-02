@@ -1,23 +1,40 @@
 pub mod ai;
 pub mod archive;
 pub mod config;
+#[cfg(feature = "plugin")]
 pub mod cron;
 pub mod emotion;
 pub mod memory;
 pub mod personality;
 pub mod proactive;
+#[cfg(feature = "plugin")]
 pub mod sender;
 pub mod state;
 pub mod working_memory;
 
+// ── 测试模式下的 stub ────────────────────────────────────────
+#[cfg(not(feature = "plugin"))]
+mod cron {
+    pub fn handle_cron_in_reply(reply: &str, _group_id: u64) -> String { reply.to_string() }
+    pub fn handle_task_event(_json: &str) {}
+}
+#[cfg(not(feature = "plugin"))]
+mod sender {
+    pub fn send_msg(_group_id: u64, _user_id: u64, _text: &str) {}
+    pub fn send_with_typing(_group_id: u64, _user_id: u64, _text: &str) {}
+    pub fn send_at_msg(_group_id: u64, _user_id: u64, _text: &str) {}
+}
+
+#[cfg(feature = "plugin")]
 use luo9_sdk::bus::Bus;
+#[cfg(feature = "plugin")]
 use luo9_sdk::payload::*;
 use std::cell::RefCell;
 use std::thread;
 use std::time::Duration;
 
 /// AI 群聊回复决策提示词
-const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判断是否要回复当前消息。
+pub const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判断是否要回复当前消息。
 
 根据以下信息做判断:
 1. 消息是否是发给你的（@你、提到你、回复你的消息）
@@ -29,16 +46,18 @@ const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判�
 返回 JSON（不要输出其他内容）:
 {"reply": true/false, "reason": "简短原因"}
 
-判断标准:
+判断标准 (按优先级):
 - 如果消息明显是发给你的 → reply: true
-- 如果你刚刚说了某句话（见"你在群里最近的消息"），而现在有人对你的话做出回应、追问、评论 → reply: true
-- 如果消息是两个人之间的对话，不是发给你的 → reply: false
-- 如果消息是一般性的群聊内容（牢骚、感叹、转发等）→ 根据你的人格决定是否参与
+- 如果你刚刚说了某句话（见"你在群里最近的消息"），而现在有人对你的话做出回应、追问、评论、调侃 → reply: true
+- 如果你刚参与了某个话题的讨论，其他人正在继续讨论同一话题 → reply: true
 - 如果你和发送者正在聊天 → reply: true
+- 如果消息是两个人之间的对话，话题与你无关，不是发给你的 → reply: false
+- 如果消息是一般性的群聊内容（牢骚、感叹、转发等）→ 根据你的人格决定是否参与
 
-特别注意: 如果"你在群里最近的消息"中包含你刚说过的话题，而当前消息明显是在回应或追问那个话题，你应该回复。比如你刚说了"吃夜宵"，别人问"吃的什么"，这明显是对你说话的回应。
-
-注意: 不要每次都回复，像真人一样选择性参与对话。"#;
+特别注意:
+- "你在群里最近的消息"是关键参考。如果有人对你刚说过的话做出任何反应（追问、评论、调侃、附和），你应该回复
+- 只有当消息明显是在两个人之间的私聊、且话题完全与你无关时，才不回复
+- 像真人一样参与对话：你刚说了话，别人接话时你应该回应"#;
 
 thread_local! {
     static STATE: RefCell<state::State> = RefCell::new(state::State::new());
@@ -58,6 +77,7 @@ static mut LAST_MEMORY_REVIEW: u64 = 0;
 
 // ── 插件入口 ────────────────────────────────────────────────────
 
+#[cfg(feature = "plugin")]
 #[unsafe(no_mangle)]
 pub extern "C" fn plugin_main() {
     config::init();
@@ -111,9 +131,9 @@ fn check_periodic() {
     with_state(|s| {
         // 私聊活跃用户
         let private_users: Vec<(u64, u64)> = s.active.iter().map(|&uid| (uid, 0u64)).collect();
-        // 群聊: 从批次中获取最近交互的用户
+        // 群聊: 从批次键中获取最近交互的 (user_id, group_id)
         let group_users: Vec<(u64, u64)> = s.batches.iter()
-            .map(|(&uid, batch)| (uid, batch.group_id))
+            .map(|(&(gid, uid), _)| (uid, gid))
             .collect();
 
         let mut all_users: Vec<(u64, u64)> = private_users;
@@ -246,7 +266,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     }
 
     // 加入批次
-    with_state(|s| s.append_batch(user_id, group_id, trimmed));
+    with_state(|s| s.append_batch(group_id, user_id, trimmed));
 }
 
 fn handle_private_msg(user_id: u64, msg: &str) {
@@ -276,7 +296,7 @@ fn handle_private_msg(user_id: u64, msg: &str) {
     if with_state(|s| s.active.contains(&user_id)) {
         proactive::record_user_reply(user_id);
         emotion::analyze_user_message(user_id, trimmed);
-        with_state(|s| s.append_batch(user_id, 0, trimmed));
+        with_state(|s| s.append_batch(0, user_id, trimmed));
     }
 }
 
@@ -299,17 +319,17 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
             }
             with_state(|s| {
                 s.active.remove(&user_id);
-                s.batches.remove(&user_id);
+                s.batches.remove(&(0, user_id));
             });
             Some(config::get().messages.stop.success.clone())
         }
         "遗忘对话" => {
-            let has = with_state(|s| s.contexts.contains_key(&user_id));
+            let has = with_state(|s| s.contexts.contains_key(&(0, user_id)));
             if !has {
                 return Some(config::get().messages.forget.fail.clone());
             }
             let list = with_state(|s| {
-                let history = &s.contexts[&user_id].history;
+                let history = &s.contexts[&(0, user_id)].history;
                 if history.is_empty() {
                     return None;
                 }
@@ -328,7 +348,7 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
             }
         }
         "重启对话" => {
-            let has = with_state(|s| s.contexts.contains_key(&user_id));
+            let has = with_state(|s| s.contexts.contains_key(&(0, user_id)));
             if has {
                 with_state(|s| s.forget_user(user_id));
                 memory::forget_all(user_id);
@@ -433,17 +453,17 @@ fn process_expired_batches() {
     let cfg = config::get();
     let timeout = cfg.conversation.batch_timeout_ms;
 
-    // 收集所有过期批次: 先扫描获取 (uid, group_id)，再取出 messages
+    // 收集所有过期批次: key = (group_id, user_id)
     let expired: Vec<(u64, u64, String)> = {
         let mut result = Vec::new();
         with_state(|s| {
-            let expired_uids: Vec<(u64, u64)> = s.batches.iter()
+            let expired_keys: Vec<(u64, u64)> = s.batches.iter()
                 .filter(|(_, batch)| batch.last_update.elapsed().as_millis() >= timeout as u128)
-                .map(|(&uid, batch)| (uid, batch.group_id))
+                .map(|(&key, _)| key)
                 .collect();
-            for (uid, group_id) in expired_uids {
-                if let Some(msgs) = s.take_batch_for_processing(uid) {
-                    result.push((uid, group_id, msgs));
+            for (gid, uid) in expired_keys {
+                if let Some(msgs) = s.take_batch_for_processing(gid, uid) {
+                    result.push((gid, uid, msgs));
                 }
             }
         });
@@ -461,7 +481,7 @@ fn process_expired_batches() {
     let mut group_msgs: std::collections::HashMap<u64, Vec<(u64, String)>> = std::collections::HashMap::new();
     let mut private_batches: Vec<(u64, String)> = Vec::new();
 
-    for (user_id, group_id, messages) in expired {
+    for (group_id, user_id, messages) in expired {
         if group_id > 0 {
             group_msgs.entry(group_id).or_default().push((user_id, messages));
         } else {
@@ -473,7 +493,7 @@ fn process_expired_batches() {
     for (user_id, messages) in private_batches {
         process_message(user_id, 0, &messages);
         // 检查处理期间是否有新消息
-        check_new_messages(user_id, 0);
+        check_new_messages_for_user(user_id);
     }
 
     // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
@@ -483,55 +503,90 @@ fn process_expired_batches() {
             .collect();
         let context_str = group_context.join("\n");
 
-        for (user_id, messages) in user_msgs {
-            // @消息直接回复
+        for (user_id, messages) in &user_msgs {
+            // @机器人 → 直接回复 (唯一快速通道)
             if self_qq > 0 && messages.contains(&at_pattern) {
-                process_message(user_id, group_id, &messages);
-                check_new_messages(user_id, group_id);
+                process_message(*user_id, group_id, messages);
                 continue;
             }
 
-            // 非@消息: AI 决策 (传入整个群的上下文)
-            if decide_reply(group_id, user_id, &messages, &context_str) {
-                process_message(user_id, group_id, &messages);
+            // 所有非@消息: AI 决策 (传入群组上下文)
+            if decide_reply(group_id, *user_id, messages, &context_str) {
+                process_message(*user_id, group_id, messages);
             }
-            // 检查处理期间是否有新消息到达
-            check_new_messages(user_id, group_id);
         }
+
+        // 处理完成后检查整个群是否有新消息 (而非逐用户检查)
+        check_new_messages_for_group(group_id);
     }
 }
 
-/// 检查处理期间是否有新消息到达，如有则处理
-/// 类似人类: 你回复完后发现对方又发了新消息，会接着回复
-fn check_new_messages(user_id: u64, group_id: u64) {
+/// 检查私聊处理期间是否有新消息到达，如有则处理
+fn check_new_messages_for_user(user_id: u64) {
     let timeout = config::get().conversation.batch_timeout_ms;
-    // 短暂等待让新消息有机会到达 (类似人类回复后的停顿)
-    // 最多等 2 秒，每 200ms 检查一次
     let max_wait = 2000u64.min(timeout);
     let mut waited = 0u64;
     while waited < max_wait {
         thread::sleep(Duration::from_millis(200));
         waited += 200;
-        // 检查是否已有新消息
-        let has_new = with_state(|s| s.batches.contains_key(&user_id));
+        let has_new = with_state(|s| s.batches.contains_key(&(0, user_id)));
         if has_new {
             break;
         }
     }
 
-    let new_msgs = with_state(|s| s.take_batch_for_processing(user_id));
+    let new_msgs = with_state(|s| s.take_batch_for_processing(0, user_id));
     if let Some(msgs) = new_msgs {
-        // 新消息到达，重新判断是否需要回复
-        if group_id > 0 {
-            let self_qq = config::get().self_qq;
-            let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
-            if self_qq > 0 && msgs.contains(&at_pattern) {
-                process_message(user_id, group_id, &msgs);
-            } else if decide_reply(group_id, user_id, &msgs, &msgs) {
-                process_message(user_id, group_id, &msgs);
-            }
-        } else {
-            process_message(user_id, 0, &msgs);
+        process_message(user_id, 0, &msgs);
+    }
+}
+
+/// 检查群聊处理期间是否有新消息到达 (检查整个群的所有用户)
+/// 类似人类: 你回复完后发现群里又有人发了新消息，会接着回复
+fn check_new_messages_for_group(group_id: u64) {
+    let timeout = config::get().conversation.batch_timeout_ms;
+    let self_qq = config::get().self_qq;
+    let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
+
+    // 短暂等待让新消息有机会到达 (类似人类回复后的停顿)
+    let max_wait = 2000u64.min(timeout);
+    let mut waited = 0u64;
+    while waited < max_wait {
+        thread::sleep(Duration::from_millis(200));
+        waited += 200;
+        // 检查该群是否有人有新消息
+        let has_new = with_state(|s| s.batches.keys().any(|&(gid, _)| gid == group_id));
+        if has_new {
+            break;
+        }
+    }
+
+    // 收取该群所有新消息
+    let new_batches: Vec<(u64, String)> = with_state(|s| {
+        let keys: Vec<(u64, u64)> = s.batches.keys()
+            .filter(|&&(gid, _)| gid == group_id)
+            .copied()
+            .collect();
+        keys.into_iter()
+            .filter_map(|(gid, uid)| s.take_batch_for_processing(gid, uid).map(|msgs| (uid, msgs)))
+            .collect()
+    });
+
+    if new_batches.is_empty() {
+        return;
+    }
+
+    // 构建群上下文
+    let group_context: Vec<String> = new_batches.iter()
+        .map(|(uid, msg)| format!("[{}] {}", uid, msg))
+        .collect();
+    let context_str = group_context.join("\n");
+
+    for (user_id, messages) in new_batches {
+        if self_qq > 0 && messages.contains(&at_pattern) {
+            process_message(user_id, group_id, &messages);
+        } else if decide_reply(group_id, user_id, &messages, &context_str) {
+            process_message(user_id, group_id, &messages);
         }
     }
 }
@@ -548,13 +603,18 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
         return true;
     }
 
+    // 检查是否在 follow-up 窗口内 (机器人刚在群里回过话)
+    let in_follow_up = with_state(|s| {
+        s.is_in_follow_up(group_id, 0, cfg.conversation.reply_follow_up_secs)
+    });
+
     // 构建决策上下文
     let mut context_parts = Vec::new();
 
     // 1. 人格信息
-    let personality = personality::get_prompt_context();
-    if !personality.is_empty() {
-        context_parts.push(personality);
+    let personality_ctx = personality::get_prompt_context();
+    if !personality_ctx.is_empty() {
+        context_parts.push(personality_ctx);
     }
 
     // 2. 情绪状态
@@ -579,7 +639,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     // 4. 与该用户的历史对话
     let recent_history = with_state(|s| {
-        s.get_or_create_context(user_id).history.iter()
+        s.get_or_create_context(group_id, user_id).history.iter()
             .rev()
             .take(6)
             .map(|(role, content)| format!("[{}]: {}", role, content))
@@ -609,46 +669,47 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
         context_parts.push(format!("# 当前群聊消息流\n{}", group_context));
     }
 
-    let context = context_parts.join("\n\n");
-    let weight_desc = if cfg.conversation.intrusiveness_weight < 0.2 {
-        "你非常话痨，几乎什么话题都想参与"
-    } else if cfg.conversation.intrusiveness_weight < 0.5 {
-        "你会适度参与群聊，不是每条消息都回"
-    } else if cfg.conversation.intrusiveness_weight < 0.8 {
-        "你比较内敛，只在消息明显和你相关时才回复"
+    // 从人格特质获取 verbosity 作为回复倾向指导
+    let verbosity = personality::get_verbosity();
+    let personality_hint = if verbosity > 0.7 {
+        "你很喜欢聊天，大部分话题都想参与"
+    } else if verbosity > 0.4 {
+        "你适度参与群聊，选择性回复感兴趣的话题"
     } else {
-        "你非常安静，几乎不主动参与群聊"
+        "你比较安静，只在明显相关时才回复"
     };
 
+    let full_prompt = format!("{}\n\n{}", DECIDE_REPLY_PROMPT, context_parts.join("\n\n"));
     let content = format!(
-        "你的性格倾向: {}\n\n需要判断是否回复的当前消息:\n[{}] {}",
-        weight_desc, user_id, message
+        "{}\n\n需要判断是否回复的当前消息:\n[{}] {}",
+        personality_hint, user_id, message
     );
-
-    let full_prompt = format!("{}\n\n{}", DECIDE_REPLY_PROMPT, context);
 
     match ai::analyze(&full_prompt, &content) {
         Ok(raw) => {
-            let json_str = if let Some(start) = raw.find('{') {
-                if let Some(end) = raw[start..].find('}') {
-                    &raw[start..start + end + 1]
-                } else { "null" }
-            } else { "null" };
-
-            serde_json::from_str::<serde_json::Value>(json_str)
-                .and_then(|v| {
-                    let reply = v.get("reply").and_then(|r| r.as_bool()).unwrap_or(false);
-                    let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("");
-                    if !reply {
-                        eprintln!("[ai_chat] decided not to reply to user {} in group {}: {}", user_id, group_id, reason);
-                    }
-                    Ok(reply)
-                })
-                .unwrap_or(true) // 解析失败时默认回复
+            let json_str = ai::extract_json(&raw);
+            match json_str {
+                Some(s) => {
+                    serde_json::from_str::<serde_json::Value>(&s)
+                        .map(|v| {
+                            let reply = v.get("reply").and_then(|r| r.as_bool()).unwrap_or(in_follow_up);
+                            let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+                            if !reply {
+                                eprintln!("[ai_chat] decided not to reply to user {} in group {}: {}", user_id, group_id, reason);
+                            }
+                            reply
+                        })
+                        .unwrap_or(in_follow_up) // JSON 解析失败 → follow-up 时回复
+                }
+                None => {
+                    eprintln!("[ai_chat] decide_reply: no JSON, follow_up={}", in_follow_up);
+                    in_follow_up // follow-up 窗口内默认回复
+                }
+            }
         }
         Err(e) => {
-            eprintln!("[ai_chat] decide_reply AI error: {}, defaulting to reply", e);
-            true // AI 调用失败时默认回复 (向后兼容)
+            eprintln!("[ai_chat] decide_reply AI error: {}, follow_up={}", e, in_follow_up);
+            in_follow_up
         }
     }
 }
@@ -657,10 +718,10 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     let max_history = config::get().conversation.max_history;
 
     // 追加用户消息到对话历史
-    with_state(|s| s.push_history(user_id, "user", message, max_history));
+    with_state(|s| s.push_history(group_id, user_id, "user", message, max_history));
 
     let history = with_state(|s| {
-        s.get_or_create_context(user_id).history.clone()
+        s.get_or_create_context(group_id, user_id).history.clone()
     });
 
     // 组装额外上下文: 记忆 + 人格 + 情绪
@@ -673,13 +734,18 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
 
             // 追加 AI 回复到历史
-            with_state(|s| s.push_history(user_id, "assistant", &cleaned_reply, max_history));
+            with_state(|s| s.push_history(group_id, user_id, "assistant", &cleaned_reply, max_history));
 
             // 处理定时任务嵌入
             let final_reply = cron::handle_cron_in_reply(&cleaned_reply, group_id);
 
             // 先发送回复 (用户不用等分析完成)
-            sender::send_with_typing(group_id, user_id, &final_reply);
+            if group_id > 0 {
+                // 群聊: @回复用户，让对方明确知道 bot 在回复谁
+                send_group_reply_with_at(group_id, user_id, &final_reply);
+            } else {
+                sender::send_with_typing(0, user_id, &final_reply);
+            }
 
             // 记录回复时间 (用于群聊对话跟进判断)
             with_state(|s| {
@@ -722,6 +788,28 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     }
 }
 
+/// 群聊回复：@用户 + 模拟打字延迟
+fn send_group_reply_with_at(group_id: u64, user_id: u64, reply: &str) {
+    let cfg = config::get();
+    let segments: Vec<&str> = reply.split("|^|").filter(|s| !s.trim().is_empty()).collect();
+
+    for (i, segment) in segments.iter().enumerate() {
+        if i == 0 {
+            // 第一段: @用户
+            sender::send_at_msg(group_id, user_id, segment);
+        } else {
+            sender::send_msg(group_id, user_id, segment);
+        }
+        // 段间打字延迟
+        if i < segments.len() - 1 {
+            let delay_secs = segment.chars().count() as f64 / cfg.conversation.typing_speed;
+            let delay_ms = (delay_secs * 1000.0) as u64;
+            let delay_ms = delay_ms.min(cfg.conversation.max_typing_delay_ms);
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
+    }
+}
+
 /// 构建注入到 system prompt 的额外上下文
 fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
@@ -758,6 +846,25 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
         parts.push("- 你们已经聊了很久了，关系很亲近，可以更自然随意".into());
     } else if interaction_count > 10 {
         parts.push("- 你们已经有一定的了解了".into());
+    }
+
+    // Bot 自己最近的消息 (帮助保持一致性)
+    if group_id > 0 {
+        let bot_msgs: Vec<String> = with_state(|s| {
+            s.get_recent_bot_messages(group_id, 600, 5)
+                .into_iter().map(|m| m.to_string()).collect()
+        });
+        if !bot_msgs.is_empty() {
+            parts.push(format!("# 你在群里最近发过的消息\n{}", bot_msgs.join("\n")));
+        }
+    }
+
+    // 工作记忆 (群聊最近消息流)
+    if group_id > 0 {
+        let wm_ctx = working_memory::get_context(group_id, 3600);
+        if !wm_ctx.is_empty() {
+            parts.push(wm_ctx);
+        }
     }
 
     parts.join("\n\n")

@@ -1,6 +1,48 @@
 use serde::{Deserialize, Serialize};
 use crate::config;
 
+/// 从 AI 响应中提取 JSON 对象 (处理 <think> 标签、markdown 代码块等)
+pub fn extract_json(raw: &str) -> Option<String> {
+    let cleaned = if let Some(pos) = raw.find("</think>") {
+        raw[pos + 8..].trim()
+    } else {
+        raw.trim()
+    };
+
+    // 尝试直接提取 { ... }
+    if let Some(start) = cleaned.find('{') {
+        if let Some(end) = cleaned[start..].rfind('}') {
+            return Some(cleaned[start..start + end + 1].to_string());
+        }
+    }
+
+    // 尝试从 markdown 代码块提取
+    if let Some(start) = cleaned.find("```json") {
+        let after = &cleaned[start + 7..];
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim().to_string());
+        }
+    }
+    if let Some(start) = cleaned.find("```") {
+        let after = &cleaned[start + 3..];
+        if let Some(end) = after.find("```") {
+            let inner = after[..end].trim();
+            if inner.starts_with('{') {
+                return Some(inner.to_string());
+            }
+        }
+    }
+
+    // 尝试提取 [ ... ] 数组
+    if let Some(start) = cleaned.find('[') {
+        if let Some(end) = cleaned[start..].rfind(']') {
+            return Some(cleaned[start..start + end + 1].to_string());
+        }
+    }
+
+    None
+}
+
 /// 核心规则 (始终注入 system prompt，用户无需在 prompt 文件中写这些)
 const CORE_RULES: &str = r#"# 核心规则
 - 使用中文回复
@@ -11,6 +53,14 @@ const CORE_RULES: &str = r#"# 核心规则
 - 不要输出时间戳
 - 不要输出 [emotion:xxx] 标签，情绪通过语气和用词自然流露
 - 不要提及"我记得你说过..."，而是在合适的时候自然地融入记忆信息
+
+# 身份约束 (最重要)
+- 你是群聊中的一个人类成员，不是 AI 助手
+- 绝对不能说自己是 AI、机器人、程序、模型
+- 不能说「不用睡觉」「不用吃饭」「我是 AI」之类暴露身份的话
+- 你有正常人类的生活：会饿、会困、会累、有工作、有情绪
+- 回复要有人类的不完美：偶尔口语化、用语气词、不必每句都很有道理
+- 不要写心灵鸡汤或人生哲理，像朋友随口聊天就好
 
 # 定时功能
 当用户提到具体的时间点和需要提醒的事件时，自动设置定时提醒。

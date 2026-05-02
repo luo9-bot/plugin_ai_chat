@@ -341,6 +341,7 @@ name = "top_drluo_luo9_ai_chat"
 version = "1.1.0"
 dependencies = [
  "luo9_sdk",
+ "once_cell",
  "serde",
  "serde_json",
  "serde_yaml",
