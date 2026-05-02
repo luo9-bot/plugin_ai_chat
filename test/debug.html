@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luo9 AI Chat Debug Tool</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; }
+.header { background: #161b22; padding: 16px 24px; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 16px; }
+.header h1 { font-size: 18px; color: #58a6ff; }
+.header .tabs { display: flex; gap: 4px; }
+.header .tab { padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #8b949e; border: 1px solid transparent; }
+.header .tab.active { background: #21262d; color: #c9d1d9; border-color: #30363d; }
+.header .tab:hover { color: #c9d1d9; }
+.container { display: flex; height: calc(100vh - 57px); }
+.panel { flex: 1; overflow-y: auto; padding: 16px; border-right: 1px solid #30363d; }
+.panel:last-child { border-right: none; }
+.panel h2 { font-size: 14px; color: #58a6ff; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+.card .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+.card .value { font-size: 13px; margin-top: 4px; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin: 2px; }
+.tag-permanent { background: #1f3a1f; color: #3fb950; }
+.tag-important { background: #3a2f1f; color: #d29922; }
+.tag-normal { background: #1f2a3a; color: #58a6ff; }
+.tag-faded { background: #2a2a2a; color: #6e7681; }
+.tag-replied { background: #1a2e1a; color: #3fb950; }
+.tag-unreplied { background: #2e1a1a; color: #f85149; }
+.emotion-tag { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 500; }
+.emotion-neutral { background: #21262d; color: #8b949e; }
+.emotion-happy { background: #1f3a1f; color: #3fb950; }
+.emotion-sad { background: #1f2a3a; color: #58a6ff; }
+.emotion-angry { background: #3a1f1f; color: #f85149; }
+.emotion-excited { background: #3a2f1f; color: #d29922; }
+.emotion-thinking { background: #2a1f3a; color: #bc8cff; }
+input, select, textarea { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; font-size: 13px; width: 100%; }
+input:focus, select:focus, textarea:focus { border-color: #58a6ff; outline: none; }
+textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+button { background: #238636; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+button:hover { background: #2ea043; }
+button.secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+button.secondary:hover { background: #30363d; }
+button.danger { background: #da3633; }
+button.danger:hover { background: #f85149; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.form-row { display: flex; gap: 8px; }
+.form-row > * { flex: 1; }
+.drop-zone { border: 2px dashed #30363d; border-radius: 8px; padding: 32px; text-align: center; color: #8b949e; cursor: pointer; transition: all 0.2s; }
+.drop-zone:hover, .drop-zone.dragover { border-color: #58a6ff; color: #58a6ff; }
+.drop-zone input { display: none; }
+pre { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+.context-block { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 8px; font-size: 12px; }
+.context-block h3 { font-size: 12px; color: #d29922; margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { padding: 8px; text-align: left; border-bottom: 1px solid #21262d; }
+th { color: #8b949e; font-weight: 500; }
+.stats { display: flex; gap: 12px; flex-wrap: wrap; }
+.stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; min-width: 120px; }
+.stat .num { font-size: 24px; font-weight: 600; color: #58a6ff; }
+.stat .label { font-size: 11px; color: #8b949e; }
+.chat-log { max-height: 400px; overflow-y: auto; }
+.chat-msg { padding: 8px 12px; margin-bottom: 4px; border-radius: 8px; font-size: 13px; }
+.chat-msg.user { background: #1f2a3a; margin-right: 20%; }
+.chat-msg.bot { background: #1a2e1a; margin-left: 20%; }
+.chat-msg .meta { font-size: 11px; color: #8b949e; margin-bottom: 2px; }
+.hidden { display: none; }
+#view-data, #view-sim, #view-raw { display: none; }
+#view-data.active, #view-sim.active, #view-raw.active { display: flex; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Luo9 AI Chat Debug</h1>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('data')">Data Viewer</div>
+    <div class="tab" onclick="switchTab('sim')">Simulator</div>
+    <div class="tab" onclick="switchTab('raw')">Raw JSON</div>
+  </div>
+  <button class="secondary" onclick="loadTestData()" style="margin-left:auto">Load Test Data</button>
+</div>
+
+<!-- Data Viewer -->
+<div id="view-data" class="container active">
+  <div class="panel" style="flex:0.4">
+    <h2>Load Data Files</h2>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      Drop JSON files here or click to select<br>
+      <small>memory.json, working_memory.json, emotion.json, archive.json, config.yaml</small>
+      <input type="file" id="fileInput" multiple accept=".json,.yaml,.yml" onchange="handleFiles(this.files)">
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label>Or load from path</label>
+      <div class="form-row">
+        <input id="dataPath" placeholder="data/plugin_ai_chat/" value="data/plugin_ai_chat/">
+        <button class="secondary" onclick="loadFromPath()">Load</button>
+      </div>
+    </div>
+    <div class="stats" id="stats" style="margin-top:16px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Memories by User</h2>
+    <div id="memoryList"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Working Memory (by Group)</h2>
+    <div id="workingMemoryList"></div>
+  </div>
+
+  <div class="panel" style="flex:0.6">
+    <h2>Emotion States</h2>
+    <div id="emotionList"></div>
+    <h2 style="margin-top:16px">Archive</h2>
+    <div id="archiveList"></div>
+  </div>
+</div>
+
+<!-- Simulator -->
+<div id="view-sim" class="container">
+  <div class="panel" style="flex:0.4">
+    <h2>Message Simulator</h2>
+    <div class="form-group">
+      <label>Group ID (0 = private)</label>
+      <input id="simGroup" type="number" value="676426335">
+    </div>
+    <div class="form-group">
+      <label>User ID</label>
+      <input id="simUser" type="number" value="1111111111">
+    </div>
+    <div class="form-group">
+      <label>User Nickname</label>
+      <input id="simNick" value="璃">
+    </div>
+    <div class="form-group">
+      <label>Message</label>
+      <textarea id="simMsg" rows="3">夜宵吃的什么啊？</textarea>
+    </div>
+    <button onclick="simulateMessage()" style="width:100%">Simulate</button>
+
+    <h2 style="margin-top:24px">Chat Log</h2>
+    <div class="chat-log" id="chatLog"></div>
+    <div class="form-row" style="margin-top:8px">
+      <button class="secondary" onclick="clearChat()">Clear Log</button>
+      <button class="danger" onclick="clearChatAndMemory()">Reset All</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Context for decide_reply</h2>
+    <div id="decideContext"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Context for process_message (system prompt)</h2>
+    <div id="processContext"></div>
+  </div>
+</div>
+
+<!-- Raw JSON -->
+<div id="view-raw" class="container">
+  <div class="panel">
+    <h2>Raw Data</h2>
+    <div class="form-group">
+      <label>Select file</label>
+      <select id="rawSelect" onchange="showRaw(this.value)">
+        <option value="memory">memory.json</option>
+        <option value="working_memory">working_memory.json</option>
+        <option value="emotion">emotion.json</option>
+        <option value="archive">archive.json</option>
+      </select>
+    </div>
+    <pre id="rawContent">No data loaded</pre>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────
+
+let data = {
+  memory: null,
+  working_memory: null,
+  emotion: null,
+  archive: null
+};
+
+let chatHistory = []; // [{role, content, user_id, group_id}]
+
+// ── Tab switching ──────────────────────────────────────────
+
+function switchTab(tab) {
+  document.querySelectorAll('.header .tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.container').forEach(c => c.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('view-' + tab).classList.add('active');
+  if (tab === 'raw') showRaw(document.getElementById('rawSelect').value);
+}
+
+// ── File loading ──────────────────────────────────────────
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+
+function handleFiles(files) {
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const json = JSON.parse(e.target.result);
+        if (file.name.includes('memory') && !file.name.includes('working') && !file.name.includes('archive')) {
+          data.memory = json;
+        } else if (file.name.includes('working_memory')) {
+          data.working_memory = json;
+        } else if (file.name.includes('emotion')) {
+          data.emotion = json;
+        } else if (file.name.includes('archive')) {
+          data.archive = json;
+        }
+        refreshViews();
+      } catch (err) {
+        alert('Failed to parse ' + file.name + ': ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+}
+
+function loadFromPath() {
+  const basePath = document.getElementById('dataPath').value;
+  const files = ['memory.json', 'working_memory.json', 'emotion.json', 'archive.json'];
+  files.forEach(f => {
+    fetch(basePath + f)
+      .then(r => r.json())
+      .then(json => {
+        if (f === 'memory.json') data.memory = json;
+        else if (f === 'working_memory.json') data.working_memory = json;
+        else if (f === 'emotion.json') data.emotion = json;
+        else if (f === 'archive.json') data.archive = json;
+        refreshViews();
+      })
+      .catch(() => {});
+  });
+}
+
+// ── Test data generation ──────────────────────────────────
+
+function loadTestData() {
+  data.memory = {
+    users: {
+      "1111111111": {
+        entries: [
+          { content: "用户叫璃", importance: "Important", created: 1777600000, last_accessed: 1777654000, access_count: 5 },
+          { content: "用户喜欢夜宵", importance: "Normal", created: 1777640000, last_accessed: 1777654000, access_count: 2 },
+          { content: "用户是群主", importance: "Important", created: 1777600000, last_accessed: 1777650000, access_count: 3 }
+        ]
+      },
+      "2222222222": {
+        entries: [
+          { content: "用户叫墨墨", importance: "Important", created: 1777600000, last_accessed: 1777653000, access_count: 4 },
+          { content: "用户喜欢咖啡", importance: "Normal", created: 1777620000, last_accessed: 1777653000, access_count: 1 }
+        ]
+      },
+      "123456789": {
+        entries: [
+          { content: "用户叫小明", importance: "Important", created: 1777500000, last_accessed: 1777650000, access_count: 8 },
+          { content: "用户生日是3月15日", importance: "Permanent", created: 1777500000, last_accessed: 1777600000, access_count: 3 }
+        ]
+      }
+    }
+  };
+
+  data.working_memory = {
+    groups: {
+      "676426335": {
+        entries: [
+          { user_id: 1111111111, content: "史", timestamp: 1777654322, bot_replied: false },
+          { user_id: 1111111111, content: "刚才问你半天你不说", timestamp: 1777654328, bot_replied: false },
+          { user_id: 1111111111, content: "压力", timestamp: 1777654332, bot_replied: true },
+          { user_id: 2222222222, content: "墨墨也想吃夜宵", timestamp: 1777654400, bot_replied: false },
+          { user_id: 1111111111, content: "夜宵吃的什么啊？", timestamp: 1777654500, bot_replied: false }
+        ]
+      }
+    }
+  };
+
+  data.emotion = {
+    "1111111111": { emotion: "neutral", intensity: 0.3, last_change: 1777654332, last_decay: 1777654332 },
+    "2222222222": { emotion: "happy", intensity: 0.6, last_change: 1777654400, last_decay: 1777654400 }
+  };
+
+  data.archive = {
+    working_memory: [
+      { group_id: 676426335, user_id: 1111111111, content: "旧消息1", timestamp: 1777600000, bot_replied: false, archived_at: 1777621600 }
+    ],
+    long_term: [
+      { user_id: 999999, content: "已删除的记忆", importance: "normal", created: 1777500000, archived_at: 1777600000 }
+    ]
+  };
+
+  refreshViews();
+}
+
+// ── Refresh all views ──────────────────────────────────────
+
+function refreshViews() {
+  renderStats();
+  renderMemories();
+  renderWorkingMemory();
+  renderEmotions();
+  renderArchive();
+  showRaw(document.getElementById('rawSelect').value);
+}
+
+function renderStats() {
+  const el = document.getElementById('stats');
+  const memUsers = data.memory ? Object.keys(data.memory.users).length : 0;
+  const wmGroups = data.working_memory ? Object.keys(data.working_memory.groups).length : 0;
+  const emotions = data.emotion ? Object.keys(data.emotion).length : 0;
+  const archiveWm = data.archive ? (data.archive.working_memory || []).length : 0;
+  const archiveLt = data.archive ? (data.archive.long_term || []).length : 0;
+  el.innerHTML = `
+    <div class="stat"><div class="num">${memUsers}</div><div class="label">Users</div></div>
+    <div class="stat"><div class="num">${wmGroups}</div><div class="label">Groups</div></div>
+    <div class="stat"><div class="num">${emotions}</div><div class="label">Emotions</div></div>
+    <div class="stat"><div class="num">${archiveWm + archiveLt}</div><div class="label">Archived</div></div>
+  `;
+}
+
+function renderMemories() {
+  const el = document.getElementById('memoryList');
+  if (!data.memory) { el.innerHTML = '<div class="card">No data</div>'; return; }
+  let html = '';
+  for (const [uid, user] of Object.entries(data.memory.users)) {
+    html += `<div class="card"><div class="label">User ${uid}</div><div class="value">`;
+    for (const entry of user.entries) {
+      const cls = entry.importance === 'Permanent' ? 'tag-permanent' :
+                  entry.importance === 'Important' ? 'tag-important' : 'tag-normal';
+      html += `<span class="tag ${cls}">[${entry.importance}] ${entry.content}</span> `;
+    }
+    html += '</div></div>';
+  }
+  el.innerHTML = html || '<div class="card">No memories</div>';
+}
+
+function renderWorkingMemory() {
+  const el = document.getElementById('workingMemoryList');
+  if (!data.working_memory) { el.innerHTML = '<div class="card">No data</div>'; return; }
+  let html = '';
+  for (const [gid, group] of Object.entries(data.working_memory.groups)) {
+    html += `<div class="card"><div class="label">Group ${gid}</div><div class="value">`;
+    for (const entry of group.entries) {
+      const tag = entry.bot_replied ? 'tag-replied' : 'tag-unreplied';
+      const label = entry.bot_replied ? '已回复' : '未回复';
+      html += `<div style="margin:4px 0"><span class="tag ${tag}">${label}</span> [${entry.user_id}] ${entry.content}</div>`;
+    }
+    html += '</div></div>';
+  }
+  el.innerHTML = html || '<div class="card">No working memory</div>';
+}
+
+function renderEmotions() {
+  const el = document.getElementById('emotionList');
+  if (!data.emotion) { el.innerHTML = '<div class="card">No data</div>'; return; }
+  let html = '';
+  for (const [uid, emo] of Object.entries(data.emotion)) {
+    html += `<div class="card"><div class="label">User ${uid}</div><div class="value">
+      <span class="emotion-tag emotion-${emo.emotion}">${emo.emotion}</span>
+      <span style="margin-left:8px;font-size:12px;color:#8b949e">intensity: ${emo.intensity.toFixed(2)}</span>
+    </div></div>`;
+  }
+  el.innerHTML = html || '<div class="card">No emotions</div>';
+}
+
+function renderArchive() {
+  const el = document.getElementById('archiveList');
+  if (!data.archive) { el.innerHTML = '<div class="card">No data</div>'; return; }
+  const wm = data.archive.working_memory || [];
+  const lt = data.archive.long_term || [];
+  let html = `<div class="card"><div class="label">Archived Working Memory (${wm.length})</div><div class="value">`;
+  for (const entry of wm.slice(-5)) {
+    html += `<div style="font-size:11px;color:#6e7681">[${entry.user_id}] ${entry.content}</div>`;
+  }
+  if (wm.length > 5) html += `<div style="font-size:11px;color:#6e7681">... and ${wm.length - 5} more</div>`;
+  html += `</div></div>`;
+  html += `<div class="card"><div class="label">Archived Long-term (${lt.length})</div><div class="value">`;
+  for (const entry of lt.slice(-5)) {
+    html += `<div style="font-size:11px;color:#6e7681">[${entry.user_id}] ${entry.content}</div>`;
+  }
+  if (lt.length > 5) html += `<div style="font-size:11px;color:#6e7681">... and ${lt.length - 5} more</div>`;
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+// ── Simulator ──────────────────────────────────────────────
+
+function simulateMessage() {
+  const groupId = parseInt(document.getElementById('simGroup').value) || 0;
+  const userId = parseInt(document.getElementById('simUser').value);
+  const nick = document.getElementById('simNick').value;
+  const msg = document.getElementById('simMsg').value.trim();
+  if (!userId || !msg) return;
+
+  // Add to chat log
+  chatHistory.push({ role: 'user', content: msg, user_id: userId, group_id: groupId });
+  renderChatLog();
+
+  // Build contexts
+  const decideCtx = buildDecideContext(groupId, userId, msg);
+  const processCtx = buildProcessContext(groupId, userId, msg);
+
+  document.getElementById('decideContext').innerHTML = decideCtx;
+  document.getElementById('processContext').innerHTML = processCtx;
+}
+
+function renderChatLog() {
+  const el = document.getElementById('chatLog');
+  let html = '';
+  for (const msg of chatHistory) {
+    const cls = msg.role === 'user' ? 'user' : 'bot';
+    const meta = msg.role === 'user' ? `User ${msg.user_id}` : 'Bot';
+    html += `<div class="chat-msg ${cls}"><div class="meta">${meta}</div>${msg.content}</div>`;
+  }
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearChat() {
+  chatHistory = [];
+  renderChatLog();
+  document.getElementById('decideContext').innerHTML = '';
+  document.getElementById('processContext').innerHTML = '';
+}
+
+function clearChatAndMemory() {
+  chatHistory = [];
+  data = { memory: null, working_memory: null, emotion: null, archive: null };
+  refreshViews();
+  clearChat();
+}
+
+// ── Context builders ──────────────────────────────────────
+
+function getUserMemories(userId) {
+  if (!data.memory || !data.memory.users[userId]) return '';
+  const entries = data.memory.users[userId].entries;
+  const now = Math.floor(Date.now() / 1000);
+  const lines = entries
+    .filter(e => {
+      if (e.importance === 'Normal' && now - e.last_accessed > 30 * 86400) return false;
+      return true;
+    })
+    .map(e => {
+      let tag = '';
+      if (e.importance === 'Permanent') tag = '[永久]';
+      else if (e.importance === 'Important') tag = '[重要]';
+      else if (now - e.last_accessed > 7 * 86400) tag = '[淡忘]';
+      return `- ${tag}${e.content}`;
+    });
+  return lines.length ? `# 关于用户的记忆\n${lines.join('\n')}` : '';
+}
+
+function getGroupMemories(groupId, excludeUser) {
+  if (!groupId || !data.working_memory || !data.working_memory.groups[groupId]) return '';
+  const entries = data.working_memory.groups[groupId].entries;
+  const now = Math.floor(Date.now() / 1000);
+  const participants = [...new Set(entries.filter(e => now - e.timestamp < 7200).map(e => e.user_id))];
+  if (!participants.length) return '';
+
+  const blocks = [];
+  for (const uid of participants) {
+    if (uid === excludeUser) continue;
+    if (!data.memory || !data.memory.users[uid]) continue;
+    const mems = data.memory.users[uid].entries;
+    const lines = mems
+      .filter(e => {
+        if (e.importance === 'Normal' && now - e.last_accessed > 30 * 86400) return false;
+        return true;
+      })
+      .map(e => {
+        let tag = '';
+        if (e.importance === 'Permanent') tag = '[永久]';
+        else if (e.importance === 'Important') tag = '[重要]';
+        else if (now - e.last_accessed > 7 * 86400) tag = '[淡忘]';
+        return `  - ${tag}${e.content}`;
+      });
+    if (lines.length) blocks.push(`用户${uid}:\n${lines.join('\n')}`);
+  }
+  return blocks.length ? `# 群内其他成员的记忆\n${blocks.join('\n')}` : '';
+}
+
+function getEmotionContext(userId) {
+  if (!data.emotion || !data.emotion[userId]) return '';
+  const emo = data.emotion[userId];
+  return `# 当前情绪\n情绪: ${emo.emotion}, 强度: ${emo.intensity.toFixed(2)}`;
+}
+
+function getWorkingMemoryContext(groupId) {
+  if (!groupId || !data.working_memory || !data.working_memory.groups[groupId]) return '';
+  const entries = data.working_memory.groups[groupId].entries;
+  const now = Math.floor(Date.now() / 1000);
+  const recent = entries.filter(e => now - e.timestamp < 3600);
+  if (!recent.length) return '';
+  const lines = recent.map(e => {
+    const tag = e.bot_replied ? '[已回复]' : '';
+    return `[${e.user_id}]${tag} ${e.content}`;
+  });
+  return `# 群聊工作记忆 (最近消息)\n${lines.join('\n')}`;
+}
+
+function buildDecideContext(groupId, userId, msg) {
+  const sections = [];
+
+  // 1. Personality
+  sections.push({ title: 'Personality', content: '# 人格\n温柔友善的AI助手', color: '#bc8cff' });
+
+  // 2. Emotion
+  const emoCtx = getEmotionContext(userId);
+  if (emoCtx) sections.push({ title: 'Emotion', content: emoCtx, color: '#f85149' });
+
+  // 3. User memories
+  const memCtx = getUserMemories(userId);
+  if (memCtx) sections.push({ title: 'User Memories', content: memCtx, color: '#3fb950' });
+
+  // 3.5 Group memories
+  const groupMemCtx = getGroupMemories(groupId, userId);
+  if (groupMemCtx) sections.push({ title: 'Group Memories (others)', content: groupMemCtx, color: '#d29922' });
+
+  // 4. Recent history
+  const recentHist = chatHistory.slice(-6).map(m =>
+    `[${m.role}]: ${m.content}`
+  ).join('\n');
+  if (recentHist) sections.push({ title: 'Recent History', content: `# 与该用户的历史对话\n${recentHist}`, color: '#58a6ff' });
+
+  // 5. Bot recent messages (simulated)
+  sections.push({ title: 'Bot Recent Messages', content: '# 你在群里最近的消息\n(无数据 - 请加载 working_memory)', color: '#8b949e' });
+
+  // 6. Working memory
+  const wmCtx = getWorkingMemoryContext(groupId);
+  if (wmCtx) sections.push({ title: 'Working Memory', content: wmCtx, color: '#d29922' });
+
+  // 7. Current message
+  sections.push({ title: 'Current Message', content: `# 当前群聊消息流\n[${userId}] ${msg}`, color: '#f0883e' });
+
+  return sections.map(s =>
+    `<div class="context-block"><h3 style="color:${s.color}">${s.title}</h3><pre>${escapeHtml(s.content)}</pre></div>`
+  ).join('');
+}
+
+function buildProcessContext(groupId, userId, msg) {
+  const sections = [];
+
+  // Memory
+  const memCtx = getUserMemories(userId);
+  if (memCtx) sections.push({ title: 'Memory', content: memCtx, color: '#3fb950' });
+
+  // Group memories
+  const groupMemCtx = getGroupMemories(groupId, userId);
+  if (groupMemCtx) sections.push({ title: 'Group Memories', content: groupMemCtx, color: '#d29922' });
+
+  // Personality
+  sections.push({ title: 'Personality', content: '# 人格\n温柔友善的AI助手', color: '#bc8cff' });
+
+  // Emotion
+  const emoCtx = getEmotionContext(userId);
+  if (emoCtx) sections.push({ title: 'Emotion', content: emoCtx, color: '#f85149' });
+
+  return sections.map(s =>
+    `<div class="context-block"><h3 style="color:${s.color}">${s.title}</h3><pre>${escapeHtml(s.content)}</pre></div>`
+  ).join('');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Raw JSON viewer ──────────────────────────────────────
+
+function showRaw(key) {
+  const el = document.getElementById('rawContent');
+  el.textContent = data[key] ? JSON.stringify(data[key], null, 2) : 'No data loaded';
+}
+</script>
+</body>
+</html>

@@ -569,6 +569,14 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
         context_parts.push(memories);
     }
 
+    // 3.5 群内其他成员的记忆 (解决"A提到B时不知道B是谁"的问题)
+    if group_id > 0 {
+        let group_mem = memory::get_group_context(group_id, user_id);
+        if !group_mem.is_empty() {
+            context_parts.push(group_mem);
+        }
+    }
+
     // 4. 与该用户的历史对话
     let recent_history = with_state(|s| {
         s.get_or_create_context(user_id).history.iter()
@@ -656,7 +664,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     });
 
     // 组装额外上下文: 记忆 + 人格 + 情绪
-    let extra_context = build_context(user_id, &history);
+    let extra_context = build_context(user_id, group_id, &history);
 
     // 调用 AI
     match ai::chat(config::prompt(), &extra_context, &history, message) {
@@ -715,13 +723,21 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
 }
 
 /// 构建注入到 system prompt 的额外上下文
-fn build_context(user_id: u64, history: &[(String, String)]) -> String {
+fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
 
     // 记忆上下文
     let mem = memory::get_context(user_id);
     if !mem.is_empty() {
         parts.push(mem);
+    }
+
+    // 群内其他成员的记忆 (群聊时)
+    if group_id > 0 {
+        let group_mem = memory::get_group_context(group_id, user_id);
+        if !group_mem.is_empty() {
+            parts.push(group_mem);
+        }
     }
 
     // 人格上下文

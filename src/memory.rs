@@ -227,6 +227,59 @@ pub fn get_context(user_id: u64) -> String {
     format!("# 关于用户的记忆\n{}", lines.join("\n"))
 }
 
+/// 获取群组级别的记忆上下文 (包含群内所有参与者的记忆)
+/// 解决问题: 用户A提及用户B时，AI需要知道B是谁
+pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
+    // 从工作记忆获取群内参与者列表
+    let participants = crate::working_memory::get_participants(group_id);
+    if participants.is_empty() {
+        return String::new();
+    }
+
+    let store = MemoryStore::load();
+    let cfg = &crate::config::get().memory;
+    let now = now_secs();
+    let normal_expire = cfg.normal_expire_days * 86400;
+    let important_fade = cfg.important_fade_days * 86400;
+    let mut user_blocks = Vec::new();
+
+    for user_id in &participants {
+        if *user_id == exclude_user {
+            continue; // 排除当前用户（已有独立记忆上下文）
+        }
+        if let Some(user_mem) = store.users.get(&user_id.to_string()) {
+            let mut lines = Vec::new();
+            for entry in &user_mem.entries {
+                if entry.importance == Importance::Normal
+                    && now.saturating_sub(entry.last_accessed) > normal_expire
+                {
+                    continue;
+                }
+                let tag = match entry.importance {
+                    Importance::Permanent => "[永久]",
+                    Importance::Important => "[重要]",
+                    Importance::Normal => {
+                        if now.saturating_sub(entry.last_accessed) > important_fade {
+                            "[淡忘]"
+                        } else {
+                            ""
+                        }
+                    }
+                };
+                lines.push(format!("  - {}{}", tag, entry.content));
+            }
+            if !lines.is_empty() {
+                user_blocks.push(format!("用户{}:\n{}", user_id, lines.join("\n")));
+            }
+        }
+    }
+
+    if user_blocks.is_empty() {
+        return String::new();
+    }
+    format!("# 群内其他成员的记忆\n{}", user_blocks.join("\n"))
+}
+
 /// AI 驱动的记忆提取 (发送回复后调用)
 ///
 /// 分析用户消息和 AI 回复的完整上下文，提取值得记忆的信息

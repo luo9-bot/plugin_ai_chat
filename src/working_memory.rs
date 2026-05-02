@@ -147,3 +147,21 @@ pub fn group_count() -> usize {
     let store = WorkingMemoryStore::load();
     store.groups.len()
 }
+
+/// 获取某群最近参与过的用户列表 (用于群组记忆互通)
+pub fn get_participants(group_id: u64) -> Vec<u64> {
+    let store = WorkingMemoryStore::load();
+    let now = now_secs();
+    store.groups
+        .get(&group_id.to_string())
+        .map(|group| {
+            let mut users: Vec<u64> = group.entries.iter()
+                .filter(|e| now.saturating_sub(e.timestamp) < 7200) // 最近2小时
+                .map(|e| e.user_id)
+                .collect();
+            users.sort_unstable();
+            users.dedup();
+            users
+        })
+        .unwrap_or_default()
+}

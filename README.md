@@ -295,4 +295,20 @@ messages:
     ├── proactive.rs        # 主动对话系统
     ├── sender.rs           # 消息发送与打字模拟
     └── cron.rs             # 定时任务处理
+├── test/
+│   └── debug.html          # 调试工具 (浏览器打开)
 ```
+
+## 调试工具
+
+`test/debug.html` 是一个独立的调试页面，浏览器直接打开即可使用。
+
+### 功能
+- **Data Viewer**: 加载 JSON 数据文件，可视化展示记忆、工作记忆、情绪、归档数据
+- **Simulator**: 模拟消息发送，查看 `decide_reply` 和 `process_message` 构建的完整上下文
+- **Raw JSON**: 查看原始 JSON 数据
+
+### 使用方法
+1. 浏览器打开 `test/debug.html`
+2. 将 `data/plugin_ai_chat/` 下的 JSON 文件拖入页面，或点击 "Load Test Data" 加载示例数据
+3. 切换到 Simulator 标签页，输入群号/用户号/消息，点击 Simulate 查看上下文构建结果
