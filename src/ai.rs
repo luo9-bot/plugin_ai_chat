@@ -49,6 +49,7 @@ const CORE_RULES: &str = r#"# 你是谁
 你是群聊里的一个普通成员，有自己的生活和性格。你会饿、会困、会累、有工作、有情绪波动。你用中文和大家聊天，说话简短口语化，像朋友之间随口聊的那种。
 
 # 怎么聊天
+- 回复简短自然，一两句话即可，像朋友聊天
 - 一句话能说完的事就别拆成两句，像人一样想到什么说什么
 - 用 |^| 分隔不同的话题或短语，例如：你好|^|今天天气不错
 - 对方一次发了好几条消息的话，综合起来回一条就行，别逐条回
@@ -61,6 +62,7 @@ const CORE_RULES: &str = r#"# 你是谁
 - 接梗、吐槽、安慰、共情、嘲笑都可以，看情况来
 - "别气了摸摸" 是朋友会说的，"到底发生了什么，说说呗" 是心理咨询师会说的
 - 同一个意思，用朋友的口吻说出来就好
+- 回复里不要提"表情包"、"图片"、"截图"这些词，就像你不会在面对面聊天时说"你发的这个表情包"一样，直接对内容做出反应
 
 # 定时功能
 当用户提到具体的时间点和需要提醒的事件时，自动设置定时提醒。
@@ -116,11 +118,10 @@ pub fn chat(
     let now = chrono_now();
     let time_prompt = format!("\n你的时间为：{}\n", now);
 
-    // 组装 system prompt: 核心规则 + 回复风格 + 用户 prompt + 记忆/人格/情绪 + 时间
-    let reply_style = format!("# 回复风格\n- {}", cfg.reply_style);
+    // 组装 system prompt: 核心规则 + 用户 prompt + 记忆/人格/情绪 + 时间
     let full_system = format!(
-        "{}\n\n{}\n\n{}\n\n{}\n\n{}",
-        CORE_RULES, reply_style, base_prompt, extra_context, time_prompt
+        "{}\n\n{}\n\n{}\n\n{}",
+        CORE_RULES, base_prompt, extra_context, time_prompt
     );
 
     let mut messages = vec![ChatMessage {

@@ -17,9 +17,6 @@ pub struct Config {
     pub self_qq: u64,
     #[serde(default)]
     pub admin_qq: u64,
-    #[serde(default = "default_reply_style")]
-    pub reply_style: String,
-
     #[serde(default)]
     pub ai: AiConfig,
     #[serde(default)]
@@ -211,9 +208,6 @@ pub struct VisionConfig {
     /// 识图模型
     #[serde(default = "default_vision_model")]
     pub model: String,
-    /// 识图提示词
-    #[serde(default = "default_vision_prompt")]
-    pub prompt: String,
     /// 最大回复 token 数
     #[serde(default = "default_vision_max_tokens")]
     pub max_tokens: u32,
@@ -225,7 +219,6 @@ impl Default for VisionConfig {
             api_key: String::new(),
             base_url: default_vision_base_url(),
             model: default_vision_model(),
-            prompt: default_vision_prompt(),
             max_tokens: default_vision_max_tokens(),
         }
     }
@@ -294,7 +287,6 @@ fn default_typing_speed() -> f64 { 5.0 }
 fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
-fn default_reply_style() -> String { "简短自然，一两句话即可，像朋友聊天".into() }
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
 fn default_auto_summarize_threshold() -> usize { 10 }
@@ -314,7 +306,6 @@ fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
 fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
 fn default_vision_model() -> String { "deepseek-chat".into() }
-fn default_vision_prompt() -> String { "用一句话简短描述这张图片的画面内容，不要解读含义，只描述你看到的。".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
 fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
@@ -348,7 +339,6 @@ base_url: "https://api.deepseek.com/v1"
 model: "deepseek-chat"
 self_qq: 0                  # 机器人自身 QQ 号 (群消息定向判断必填)
 admin_qq: 0                 # 管理员 QQ 号 (控制命令权限，0 = 所有人可用)
-reply_style: "简短自然，一两句话即可，像朋友聊天"  # 回复风格/长度指导
 
 # ── 识图功能 (可选) ─────────────────────────────────────────────
 # api_key 为空则禁用识图，图片消息会被忽略
@@ -356,7 +346,6 @@ vision:
   api_key: ""
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   model: "doubao-seed-1-8-251228"
-  prompt: "用一句话简短描述这张图片的画面内容，不要解读含义，只描述你看到的。"
   max_tokens: 256
 
 # ── 提示词文件 (放在 prompts/ 目录下) ───────────────────────────
@@ -463,7 +452,6 @@ pub fn init() {
                 prompts: default_prompts(),
                 self_qq: 0,
                 admin_qq: 0,
-                reply_style: default_reply_style(),
                 ai: AiConfig::default(),
                 conversation: ConversationConfig::default(),
                 memory: MemoryConfig::default(),

@@ -310,8 +310,6 @@ fn handle_simulate(body: &str, state: &mut State) -> serde_json::Value {
     let process_ctx_str = process_ctx.join("\n\n");
 
     // 5. 调用 AI 生成回复
-    let cfg = config::get();
-    let reply_style = format!("# 回复风格\n- {}", cfg.reply_style);
     let base_prompt = config::prompt();
     let time_prompt = format!("\n你的时间为：{}\n", chrono_now());
     let full_system = format!(
@@ -330,8 +328,8 @@ fn handle_simulate(body: &str, state: &mut State) -> serde_json::Value {
         - 回复要有人类的不完美：偶尔口语化、用语气词、不必每句都很有道理\n\
         - 不要写心灵鸡汤或人生哲理，像朋友随口聊天就好\n\
         \n\
-        {}\n\n{}\n\n{}\n\n{}\n\n{}",
-        reply_style, base_prompt, process_ctx_str, time_prompt, ""
+        {}\n\n{}\n\n{}\n\n{}",
+        base_prompt, process_ctx_str, time_prompt, ""
     );
 
     let ai_result = ai::chat(&full_system, "", &history, message);
@@ -881,7 +879,6 @@ fn main() {
                         "model": cfg.model,
                         "self_qq": cfg.self_qq,
                         "admin_qq": cfg.admin_qq,
-                        "reply_style": cfg.reply_style,
                     });
                     response("200 OK", "application/json", &info.to_string())
                 }

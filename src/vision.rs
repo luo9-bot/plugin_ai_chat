@@ -1,6 +1,9 @@
 use tracing::debug;
 use crate::config;
 
+/// 识图提示词
+const VISION_PROMPT: &str = "用一句话简短描述画面内容。不要提及「表情包」「图片」「截图」这些词，只描述画面里的人或物在做什么、什么表情。";
+
 /// 从消息中提取 [CQ:image,...] 的图片 URL
 pub fn extract_image_urls(message: &str) -> Vec<String> {
     let mut urls = Vec::new();
@@ -58,7 +61,6 @@ pub fn recognize(image_url: &str) -> Option<String> {
         return None;
     }
 
-    let prompt = cfg.vision.prompt.clone();
     let model = cfg.vision.model.clone();
     let max_tokens = cfg.vision.max_tokens;
 
@@ -73,7 +75,7 @@ pub fn recognize(image_url: &str) -> Option<String> {
                 },
                 {
                     "type": "input_text",
-                    "text": prompt
+                    "text": VISION_PROMPT
                 }
             ]
         }],
