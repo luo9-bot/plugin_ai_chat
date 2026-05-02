@@ -1217,6 +1217,11 @@ fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
 fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
 
+    // 当前对话用户标识 (群聊时让 AI 知道在和谁说话)
+    if group_id > 0 {
+        parts.push(format!("# 当前对话用户\nuser_id: {}", user_id));
+    }
+
     // 自我记忆 (bot 的内心想法)
     let self_mem = self_memory::get_context(config::get().self_reflection.max_thoughts.min(8));
     if !self_mem.is_empty() {
