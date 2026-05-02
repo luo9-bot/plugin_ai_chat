@@ -161,9 +161,10 @@ fn check_periodic() {
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
 
-    // 自我反思 (每30分钟一次)
+    // 自我反思 (从配置读取间隔)
+    let reflect_interval = config::get().self_reflection.interval;
     let last_reflect = unsafe { LAST_SELF_REFLECTION };
-    if now.saturating_sub(last_reflect) >= 1800 {
+    if now.saturating_sub(last_reflect) >= reflect_interval {
         unsafe { LAST_SELF_REFLECTION = now; }
         do_self_reflection();
     }
@@ -686,7 +687,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 
     // 1.5 自我记忆 (bot 的内心想法)
-    let self_mem = self_memory::get_context(3);
+    let self_mem = self_memory::get_context(config::get().self_reflection.max_thoughts.min(8));
     if !self_mem.is_empty() {
         context_parts.push(self_mem);
     }
@@ -889,7 +890,7 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
     let mut parts = Vec::new();
 
     // 自我记忆 (bot 的内心想法)
-    let self_mem = self_memory::get_context(5);
+    let self_mem = self_memory::get_context(config::get().self_reflection.max_thoughts.min(8));
     if !self_mem.is_empty() {
         parts.push(self_mem);
     }

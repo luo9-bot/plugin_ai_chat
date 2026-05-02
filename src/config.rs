@@ -30,6 +30,8 @@ pub struct Config {
     #[serde(default)]
     pub proactive: ProactiveConfig,
     #[serde(default)]
+    pub self_reflection: SelfReflectionConfig,
+    #[serde(default)]
     pub messages: Messages,
 }
 
@@ -175,6 +177,26 @@ impl Default for ProactiveConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct SelfReflectionConfig {
+    /// 自我反思间隔 (秒)，默认 1800 (30分钟)
+    #[serde(default = "default_reflection_interval")]
+    pub interval: u64,
+    /// 注入 prompt 的自我记忆条数上限，默认 8
+    /// 所有自我记忆都会永久保存，此值只控制每次对话注入多少条最近的想法
+    #[serde(default = "default_max_thoughts")]
+    pub max_thoughts: usize,
+}
+
+impl Default for SelfReflectionConfig {
+    fn default() -> Self {
+        Self {
+            interval: default_reflection_interval(),
+            max_thoughts: default_max_thoughts(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Messages {
     #[serde(default)]
@@ -224,7 +246,7 @@ fn default_temperature() -> f64 { 1.3 }
 fn default_top_p() -> f64 { 0.1 }
 fn default_max_tokens() -> u32 { 4096 }
 fn default_request_timeout() -> u64 { 60 }
-fn default_analysis_max_tokens() -> u32 { 800 }
+fn default_analysis_max_tokens() -> u32 { 10000 }
 fn default_analysis_temperature() -> f64 { 0.3 }
 fn default_max_history() -> usize { 10 }
 fn default_batch_timeout() -> u64 { 6000 }
@@ -248,6 +270,8 @@ fn default_proactive_interval() -> u64 { 7200 }
 fn default_max_ignore() -> u32 { 3 }
 fn default_low_mood_multiplier() -> f64 { 2.0 }
 fn default_check_interval() -> u64 { 60 }
+fn default_reflection_interval() -> u64 { 1800 }
+fn default_max_thoughts() -> usize { 8 }
 fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }
@@ -293,7 +317,7 @@ ai:
   top_p: 0.1                # 核采样 (0.0~1.0)，越低越集中
   max_tokens: 4096          # 最大回复 token
   request_timeout: 60       # 请求超时 (秒)
-  analysis_max_tokens: 800  # 分析任务最大 token (记忆/情绪分析)
+  analysis_max_tokens: 10000 # 分析任务最大 token (记忆/情绪/反思分析)
   analysis_temperature: 0.3 # 分析任务温度 (越低越确定)
 
 # ── 对话参数 ─────────────────────────────────────────────────────
@@ -328,6 +352,11 @@ proactive:
   max_ignore: 3              # 忽略次数上限
   low_mood_multiplier: 2.0   # 低情绪间隔倍率
   check_interval: 60         # 周期检查间隔 (秒)
+
+# ── 自我反思参数 ─────────────────────────────────────────────────
+self_reflection:
+  interval: 1800             # 自我反思间隔 (秒)，默认 1800 (30分钟)
+  max_thoughts: 8            # 注入 prompt 的自我记忆条数 (所有记忆永久保存)
 
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
@@ -387,6 +416,7 @@ pub fn init() {
                 memory: MemoryConfig::default(),
                 emotion: EmotionConfig::default(),
                 proactive: ProactiveConfig::default(),
+                self_reflection: SelfReflectionConfig::default(),
                 messages: Messages::default(),
             }
         }
@@ -417,11 +447,12 @@ fn load_all() {
     let emo_count = crate::emotion::user_count();
     let proactive_count = crate::proactive::user_count();
     let wm_groups = crate::working_memory::group_count();
+    let self_thoughts = crate::self_memory::load_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
 
     println!(
-        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, archive: {} working + {} long-term",
-        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, archive_wm, archive_lt
+        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, {} self-thoughts, archive: {} working + {} long-term",
+        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, self_thoughts, archive_wm, archive_lt
     );
 }
 

@@ -120,7 +120,7 @@ pub fn load_count() -> usize {
     store.thoughts.len()
 }
 
-/// 添加一条自我思考
+/// 添加一条自我思考 (永久保存，不会自动淘汰)
 pub fn add(content: &str, category: ThoughtCategory) {
     let mut store = SelfMemoryStore::load();
     let now = now_secs();
@@ -129,12 +129,13 @@ pub fn add(content: &str, category: ThoughtCategory) {
         category,
         created: now,
     });
-    // 保留最近 100 条
-    if store.thoughts.len() > 100 {
-        let drain_count = store.thoughts.len() - 100;
-        store.thoughts.drain(..drain_count);
-    }
     store.save();
+}
+
+/// 总共保存了多少条自我记忆
+pub fn total_count() -> usize {
+    let store = SelfMemoryStore::load();
+    store.thoughts.len()
 }
 
 /// 获取最近的自我思考上下文 (注入到 system prompt)
