@@ -33,6 +33,8 @@ pub struct Config {
     #[serde(default)]
     pub self_reflection: SelfReflectionConfig,
     #[serde(default)]
+    pub vision: VisionConfig,
+    #[serde(default)]
     pub messages: Messages,
 }
 
@@ -198,6 +200,43 @@ impl Default for SelfReflectionConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct VisionConfig {
+    /// 识图 API key，为空则禁用识图功能
+    #[serde(default)]
+    pub api_key: String,
+    /// API base URL
+    #[serde(default = "default_vision_base_url")]
+    pub base_url: String,
+    /// 识图模型
+    #[serde(default = "default_vision_model")]
+    pub model: String,
+    /// 识图提示词
+    #[serde(default = "default_vision_prompt")]
+    pub prompt: String,
+    /// 最大回复 token 数
+    #[serde(default = "default_vision_max_tokens")]
+    pub max_tokens: u32,
+}
+
+impl Default for VisionConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: default_vision_base_url(),
+            model: default_vision_model(),
+            prompt: default_vision_prompt(),
+            max_tokens: default_vision_max_tokens(),
+        }
+    }
+}
+
+impl VisionConfig {
+    pub fn enabled(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Messages {
     #[serde(default)]
@@ -273,6 +312,10 @@ fn default_low_mood_multiplier() -> f64 { 2.0 }
 fn default_check_interval() -> u64 { 60 }
 fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
+fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
+fn default_vision_model() -> String { "deepseek-chat".into() }
+fn default_vision_prompt() -> String { "用一句话简短描述这张图片的画面内容，不要解读含义，只描述你看到的。".into() }
+fn default_vision_max_tokens() -> u32 { 256 }
 fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }
@@ -306,6 +349,15 @@ model: "deepseek-chat"
 self_qq: 0                  # 机器人自身 QQ 号 (群消息定向判断必填)
 admin_qq: 0                 # 管理员 QQ 号 (控制命令权限，0 = 所有人可用)
 reply_style: "简短自然，一两句话即可，像朋友聊天"  # 回复风格/长度指导
+
+# ── 识图功能 (可选) ─────────────────────────────────────────────
+# api_key 为空则禁用识图，图片消息会被忽略
+vision:
+  api_key: ""
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seed-1-8-251228"
+  prompt: "用一句话简短描述这张图片的画面内容，不要解读含义，只描述你看到的。"
+  max_tokens: 256
 
 # ── 提示词文件 (放在 prompts/ 目录下) ───────────────────────────
 prompts: "default.txt"
@@ -418,6 +470,7 @@ pub fn init() {
                 emotion: EmotionConfig::default(),
                 proactive: ProactiveConfig::default(),
                 self_reflection: SelfReflectionConfig::default(),
+                vision: VisionConfig::default(),
                 messages: Messages::default(),
             }
         }

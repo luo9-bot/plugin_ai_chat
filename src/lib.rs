@@ -12,6 +12,7 @@ pub mod self_memory;
 #[cfg(feature = "plugin")]
 pub mod sender;
 pub mod state;
+pub mod vision;
 pub mod working_memory;
 
 // ── 测试模式下的 stub ────────────────────────────────────────
@@ -37,28 +38,21 @@ use std::time::Duration;
 use tracing::debug;
 
 /// AI 群聊回复决策提示词
-pub const DECIDE_REPLY_PROMPT: &str = r#"你是一个群聊中的成员，需要判断是否要回复当前消息。
+pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一条消息，判断你想不想回。
 
 返回 JSON（不要输出其他内容）:
 {"reply": true/false, "reason": "简短原因"}
 
-应该回复的情况 (reply: true):
-- 消息直接 @你 或提到你的名字
-- 你刚说了话，有人明确回应你（追问、评论、调侃、附和你的话）
-- 你和对方正在进行一对一的对话（连续互相发消息）
-- 消息是发给群里所有人的问题或话题，你想参与
+想象你真的是群里的一个人，看到这条消息你会怎么反应：
+- 有人 @你、叫你名字、明显在跟你说话 → 想回
+- 你刚发了言，有人接你的话 → 想回
+- 你俩正在来回聊着 → 想回
+- 群里聊的话题你感兴趣，想插一嘴 → 想回
+- 有人 @了别人，或者两个人在聊，你没参与 → 不想回
+- 有人自言自语、发牢骚、感叹一句就走了，你也没什么特别想说的 → 不想回
+- 你拿不准是不是在跟你说话 → 不想回
 
-不应该回复的情况 (reply: false):
-- 消息 @了其他人而不是你（即使你认识那个人）
-- 两个人在聊天，你没有参与其中
-- 一般性的感叹、牢骚、自言自语（除非你特别想插话）
-- 你不确定消息是否发给你的 → 不回复
-
-关键原则:
-- 群里有多个成员，消息可能是发给别人的，不要默认所有消息都和你有关
-- @了别人的消息 = 发给别人的，不要抢答
-- 区分"对方在和你说话" vs "对方在和别人说话" vs "对方在自言自语"
-- 像真人一样判断：你会回复的消息才回复，不要过度热情"#;
+群里不止你一个人，别把每条消息都当成在跟你说话。像真人一样判断就好。"#;
 
 thread_local! {
     static STATE: RefCell<state::State> = RefCell::new(state::State::new());
@@ -330,9 +324,11 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     }
 
     // ── 记录用户交互 + 情绪分析 + 工作记忆 (无论是否回复) ──
+    // 去除图片 CQ 码后再做情绪分析和工作记忆记录
+    let text_only = vision::strip_image_cq(trimmed);
     proactive::record_user_reply(user_id);
-    emotion::analyze_user_message(user_id, trimmed);
-    working_memory::record(group_id, user_id, trimmed, false);
+    emotion::analyze_user_message(user_id, &text_only);
+    working_memory::record(group_id, user_id, if text_only.is_empty() { "[图片]" } else { &text_only }, false);
 
     // ── 所有消息加入批次，由 AI 决策是否回复 ──
     with_state(|s| s.append_batch(group_id, user_id, trimmed));
@@ -883,9 +879,14 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     };
 
     let full_prompt = format!("{}\n\n{}", DECIDE_REPLY_PROMPT, context_parts.join("\n\n"));
+
+    // decide_reply 只用文本判断，不调用识图 API
+    let msg_text = vision::strip_image_cq(message);
+    let msg_display = if msg_text.is_empty() { "[图片]" } else { &msg_text };
+
     let content = format!(
         "{}\n\n需要判断是否回复的当前消息:\n[{}] {}",
-        personality_hint, user_id, message
+        personality_hint, user_id, msg_display
     );
 
     match ai::analyze(&full_prompt, &content) {
@@ -918,10 +919,37 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 }
 
 fn process_message(user_id: u64, group_id: u64, message: &str) {
-    let max_history = config::get().conversation.max_history;
+    let cfg = config::get();
+    let max_history = cfg.conversation.max_history;
 
-    // 追加用户消息到对话历史
-    with_state(|s| s.push_history(group_id, user_id, "user", message, max_history));
+    // ── 图片识别 (仅 vision 已配置时) ──
+    let image_descriptions: Vec<String> = if cfg.vision.enabled() {
+        let urls = vision::extract_image_urls(message);
+        urls.iter().filter_map(|url| vision::recognize(url)).collect()
+    } else {
+        Vec::new()
+    };
+
+    // 去除 CQ:image 标签，得到纯文本
+    let text_message = vision::strip_image_cq(message);
+
+    // 组装发给 AI 的消息：图片描述 + 纯文本
+    let ai_message = if image_descriptions.is_empty() {
+        if text_message.is_empty() { "[图片]".to_string() } else { text_message.clone() }
+    } else {
+        let img_ctx: Vec<String> = image_descriptions.iter()
+            .enumerate()
+            .map(|(i, d)| format!("[图片{}: {}]", i + 1, d))
+            .collect();
+        if text_message.is_empty() {
+            img_ctx.join("\n")
+        } else {
+            format!("{}\n{}", img_ctx.join("\n"), text_message)
+        }
+    };
+
+    // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
+    with_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
 
     let history = with_state(|s| {
         s.get_or_create_context(group_id, user_id).history.clone()
@@ -931,7 +959,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     let extra_context = build_context(user_id, group_id, &history);
 
     // 调用 AI
-    match ai::chat(config::prompt(), &extra_context, &history, message) {
+    match ai::chat(config::prompt(), &extra_context, &history, &ai_message) {
         Ok((reply, _)) => {
             // 从回复中解析情绪标签 (AI 自报告)
             let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
