@@ -863,8 +863,13 @@ fn process_expired_batches() {
     // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
     for (group_id, user_msgs) in group_msgs {
         let group_context: Vec<String> = user_msgs.iter()
-            .flat_map(|(uid, msg)| {
-                msg.lines().map(move |line| format!("[{}] {}", uid, line))
+            .map(|(uid, msg)| {
+                let lines: Vec<&str> = msg.lines().collect();
+                if lines.len() <= 1 {
+                    format!("[user_id:{}] {}", uid, msg)
+                } else {
+                    format!("[user_id:{}] {}", uid, lines.join("\n"))
+                }
             })
             .collect();
         let context_str = group_context.join("\n");
@@ -948,8 +953,13 @@ fn check_new_messages_for_group(group_id: u64) {
 
     // 构建群上下文
     let group_context: Vec<String> = new_batches.iter()
-        .flat_map(|(uid, msg)| {
-            msg.lines().map(move |line| format!("[{}] {}", uid, line))
+        .map(|(uid, msg)| {
+            let lines: Vec<&str> = msg.lines().collect();
+            if lines.len() <= 1 {
+                format!("[user_id:{}] {}", uid, msg)
+            } else {
+                format!("[user_id:{}] {}", uid, lines.join("\n"))
+            }
         })
         .collect();
     let context_str = group_context.join("\n");
@@ -1074,7 +1084,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     // 批次内每行都加 user_id 前缀，避免多行消息被误认为不同人
     let msg_lines: Vec<String> = msg_display.lines()
-        .map(|line| format!("[{}] {}", user_id, line))
+        .map(|line| format!("[user_id:{}] {}", user_id, line))
         .collect();
 
     let content = format!(

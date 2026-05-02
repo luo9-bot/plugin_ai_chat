@@ -122,10 +122,23 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
     if entries.is_empty() {
         return String::new();
     }
-    let lines: Vec<String> = entries.iter().map(|e| {
-        let tag = if e.bot_replied { "[已回复]" } else { "" };
-        format!("[{}]{} {}", e.user_id, tag, e.content)
-    }).collect();
+    // 合并同一用户的连续消息
+    let mut lines: Vec<String> = Vec::new();
+    let mut iter = entries.iter().peekable();
+    while let Some(first) = iter.next() {
+        let tag = if first.bot_replied { "[已回复]" } else { "" };
+        let mut block = first.content.clone();
+        while let Some(next) = iter.peek() {
+            if next.user_id == first.user_id && next.bot_replied == first.bot_replied {
+                block.push('\n');
+                block.push_str(&next.content);
+                iter.next();
+            } else {
+                break;
+            }
+        }
+        lines.push(format!("[user_id:{}]{} {}", first.user_id, tag, block));
+    }
     format!("# 群聊工作记忆 (最近消息)\n{}", lines.join("\n"))
 }
 
