@@ -33,9 +33,13 @@ use luo9_sdk::bus::Bus;
 #[cfg(feature = "plugin")]
 use luo9_sdk::payload::*;
 use std::cell::RefCell;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 use tracing::debug;
+
+/// 日志文件 non-blocking writer 的 guard，必须保持存活
+static FILE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 /// AI 群聊回复决策提示词
 pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一段对话，判断你想不想参与。
@@ -82,15 +86,34 @@ static mut LAST_SELF_REFLECTION: u64 = 0;
 #[cfg(feature = "plugin")]
 #[unsafe(no_mangle)]
 pub extern "C" fn plugin_main() {
-    // 初始化 tracing subscriber，只输出 ai_chat 的 debug 日志
-    use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("top_drluo_luo9_ai_chat=debug,warn"))
-        )
-        .with_target(false)
+    // 初始化 tracing subscriber：同时输出到控制台和日志文件
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    use tracing_appender::rolling;
+    let log_dir = std::env::current_dir()
+        .unwrap_or_default()
+        .join("data").join("plugin_ai_chat").join("logs");
+    std::fs::create_dir_all(&log_dir).ok();
+    let file_appender = rolling::daily(&log_dir, "ai_chat.log");
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    // 保留 guard 防止 non_blocking writer 被提前 drop
+    FILE_GUARD.set(_guard).ok();
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("top_drluo_luo9_ai_chat=debug,warn"));
+
+    let file_layer = fmt::layer()
+        .with_writer(file_writer)
         .with_ansi(false)
+        .with_target(false);
+
+    let stdout_layer = fmt::layer()
+        .with_target(false)
+        .with_ansi(false);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .with(stdout_layer)
         .init();
 
     config::init();
