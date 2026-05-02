@@ -7,6 +7,7 @@ pub mod emotion;
 pub mod memory;
 pub mod personality;
 pub mod proactive;
+pub mod self_memory;
 #[cfg(feature = "plugin")]
 pub mod sender;
 pub mod state;
@@ -74,6 +75,8 @@ where
 static mut LAST_PROACTIVE_CHECK: u64 = 0;
 /// 上次记忆审查时间
 static mut LAST_MEMORY_REVIEW: u64 = 0;
+/// 上次自我反思时间
+static mut LAST_SELF_REFLECTION: u64 = 0;
 
 // ── 插件入口 ────────────────────────────────────────────────────
 
@@ -157,6 +160,72 @@ fn check_periodic() {
     // 工作记忆清理 (每次周期检查都执行，轻量级)
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
+
+    // 自我反思 (每30分钟一次)
+    let last_reflect = unsafe { LAST_SELF_REFLECTION };
+    if now.saturating_sub(last_reflect) >= 1800 {
+        unsafe { LAST_SELF_REFLECTION = now; }
+        do_self_reflection();
+    }
+}
+
+/// 执行自我反思：收集最近对话上下文，调用 AI 生成内心想法
+fn do_self_reflection() {
+    // 收集最近有对话的用户上下文
+    let (recent_context, active_groups) = with_state(|s| {
+        let mut context_parts = Vec::new();
+        let mut groups = Vec::new();
+
+        // 从工作记忆中获取最近的群聊消息
+        for (&(gid, _), _) in &s.batches {
+            if gid > 0 && !groups.contains(&gid) {
+                groups.push(gid);
+            }
+        }
+
+        // 从活跃群组中获取
+        for &gid in &s.active_groups {
+            if !groups.contains(&gid) {
+                groups.push(gid);
+            }
+        }
+
+        // 取最近的群聊工作记忆作为上下文
+        for &gid in &groups {
+            let wm = working_memory::get_context(gid, 3600);
+            if !wm.is_empty() {
+                context_parts.push(wm);
+            }
+        }
+
+        // 取最近有对话的用户的私聊历史
+        for (&(gid, uid), ctx) in &s.contexts {
+            if gid == 0 && !ctx.history.is_empty() {
+                let recent: Vec<String> = ctx.history.iter()
+                    .rev()
+                    .take(4)
+                    .map(|(role, content)| format!("[{}] {}", role, content))
+                    .collect();
+                if !recent.is_empty() {
+                    context_parts.push(format!("用户{}的私聊:\n{}", uid, recent.join("\n")));
+                }
+            }
+        }
+
+        (context_parts.join("\n\n"), groups)
+    });
+
+    let (count, share) = self_memory::reflect(&recent_context, &active_groups);
+
+    // 如果反思产生了想分享的想法，主动发送
+    if let Some((content, group_id)) = share {
+        eprintln!("[ai_chat] self_reflect: sharing thought to group {}", group_id);
+        sender::send_msg(group_id, 0, &content);
+    }
+
+    if count == 0 {
+        eprintln!("[ai_chat] self_reflect: no new thoughts generated");
+    }
 }
 
 fn now_secs() -> u64 {
@@ -617,6 +686,12 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
         context_parts.push(personality_ctx);
     }
 
+    // 1.5 自我记忆 (bot 的内心想法)
+    let self_mem = self_memory::get_context(3);
+    if !self_mem.is_empty() {
+        context_parts.push(self_mem);
+    }
+
     // 2. 情绪状态
     let emotion_ctx = emotion::get_prompt_context(user_id);
     if !emotion_ctx.is_empty() {
@@ -813,6 +888,12 @@ fn send_group_reply_with_at(group_id: u64, user_id: u64, reply: &str) {
 /// 构建注入到 system prompt 的额外上下文
 fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
+
+    // 自我记忆 (bot 的内心想法)
+    let self_mem = self_memory::get_context(5);
+    if !self_mem.is_empty() {
+        parts.push(self_mem);
+    }
 
     // 记忆上下文
     let mem = memory::get_context(user_id);
