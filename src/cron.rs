@@ -2,6 +2,7 @@ use luo9_sdk::bus::Bus;
 use luo9_sdk::Bot;
 use serde_json::json;
 use std::ffi::CString;
+use tracing::debug;
 
 /// 处理 AI 回复中的定时任务请求
 ///
@@ -33,12 +34,12 @@ pub fn handle_cron_in_reply(reply: &str, group_id: u64) -> String {
                 }).to_string()
             });
             match Bus::topic("luo9_task_miso").publish(&req.to_string()) {
-                Ok(_) => println!("[ai_chat] cron task registered: {} [{}]", title, cron_exp),
-                Err(e) => eprintln!("[ai_chat] failed to register cron task: {:?}", e),
+                Ok(_) => debug!(title, cron_exp, "cron task registered"),
+                Err(e) => debug!(error = ?e, "failed to register cron task"),
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] failed to parse cron request: {}", e);
+            debug!(error = %e, "failed to parse cron request");
         }
     }
 

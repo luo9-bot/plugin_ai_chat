@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use tracing::debug;
 
 // ── 顶层配置 ────────────────────────────────────────────────────
 
@@ -396,13 +397,13 @@ pub fn init() {
     let config_path = data_path.join("config.yaml");
     if !config_path.exists() {
         fs::write(&config_path, DEFAULT_CONFIG_YAML).ok();
-        println!("[ai_chat] generated default config at {:?}", config_path);
+        debug!(path = ?config_path, "generated default config");
     }
 
     let config: Config = match fs::read_to_string(&config_path) {
         Ok(content) => serde_yaml::from_str(&content).expect("Failed to parse config.yaml"),
         Err(e) => {
-            eprintln!("[ai_chat] failed to read {:?}: {}, using defaults", config_path, e);
+            debug!(path = ?config_path, error = %e, "failed to read config, using defaults");
             Config {
                 api_key: String::new(),
                 base_url: "https://api.deepseek.com/v1".into(),
@@ -426,7 +427,7 @@ pub fn init() {
     let prompt_path = data_path.join("prompts").join(&config.prompts);
     if !prompt_path.exists() {
         fs::write(&prompt_path, DEFAULT_PROMPT_TXT).ok();
-        println!("[ai_chat] generated default prompt at {:?}", prompt_path);
+        debug!(path = ?prompt_path, "generated default prompt");
     }
 
     let prompt_content = match fs::read_to_string(&prompt_path) {
@@ -451,9 +452,19 @@ fn load_all() {
     let (archive_wm, archive_lt) = crate::archive::stats();
     let block_count = crate::blocklist::load_count();
 
-    println!(
-        "[ai_chat] data loaded from {:?}: {} users with memory, personality='{}' ({} snapshots), {} emotion states, {} proactive states, {} groups with working memory, {} self-thoughts, {} blocked users, archive: {} working + {} long-term",
-        data_dir(), mem_count, pers, snapshots, emo_count, proactive_count, wm_groups, self_thoughts, block_count, archive_wm, archive_lt
+    debug!(
+        path = ?data_dir(),
+        users = mem_count,
+        personality = %pers,
+        snapshots,
+        emotions = emo_count,
+        proactive = proactive_count,
+        wm_groups,
+        self_thoughts,
+        blocked = block_count,
+        archive_wm,
+        archive_lt,
+        "data loaded"
     );
 }
 

@@ -365,7 +365,7 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] post_analyze failed: {}", e);
+            debug!(error = %e, "post_analyze failed");
         }
     }
 

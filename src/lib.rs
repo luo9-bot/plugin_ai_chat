@@ -898,20 +898,20 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
                             let reply = v.get("reply").and_then(|r| r.as_bool()).unwrap_or(in_follow_up);
                             let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("");
                             if !reply {
-                                eprintln!("[ai_chat] decided not to reply to user {} in group {}: {}", user_id, group_id, reason);
+                                debug!(user_id, group_id, reason, "decided not to reply");
                             }
                             reply
                         })
                         .unwrap_or(in_follow_up) // JSON 解析失败 → follow-up 时回复
                 }
                 None => {
-                    eprintln!("[ai_chat] decide_reply: no JSON, follow_up={}", in_follow_up);
+                    debug!(in_follow_up, "decide_reply: no JSON in response");
                     in_follow_up // follow-up 窗口内默认回复
                 }
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] decide_reply AI error: {}, follow_up={}", e, in_follow_up);
+            debug!(error = %e, in_follow_up, "decide_reply: AI error");
             in_follow_up
         }
     }

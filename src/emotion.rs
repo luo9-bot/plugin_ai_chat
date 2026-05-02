@@ -252,7 +252,7 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
             }
         }
         Err(e) => {
-            eprintln!("[ai_chat] emotion AI analysis failed: {}, falling back to keyword", e);
+            debug!(error = %e, "emotion AI analysis failed, falling back to keyword");
             // fallback: 关键词分析
             let (detected, delta) = detect_emotion(user_message);
             if delta > 0.1 {
