@@ -82,7 +82,8 @@ static mut LAST_SELF_REFLECTION: u64 = 0;
 
 /// 轻量读取 config.yaml 中的 log 配置 (在完整 config::init 之前调用)
 fn read_log_config(log_dir: &std::path::Path) -> Option<config::LogConfig> {
-    let config_path = log_dir.parent()?.parent()?.join("config.yaml");
+    // log_dir = data/plugin_ai_chat/logs, config = data/plugin_ai_chat/config.yaml
+    let config_path = log_dir.parent()?.join("config.yaml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     #[derive(serde::Deserialize)]
     struct Partial { log: Option<config::LogConfig> }
@@ -95,6 +96,8 @@ pub extern "C" fn plugin_main() {
     // 初始化 tracing subscriber：同时输出到控制台和日志文件
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
     use tracing_appender::rolling;
+    use time::macros::format_description;
+
     let log_dir = std::env::current_dir()
         .unwrap_or_default()
         .join("data").join("plugin_ai_chat").join("logs");
@@ -114,14 +117,21 @@ pub extern "C" fn plugin_main() {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(format!("top_drluo_luo9_ai_chat={},warn", effective_level)));
 
+    // 使用东八区（北京时间）格式: 2026-05-03 14:30:45
+    let timer = fmt::time::LocalTime::new(
+        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]")
+    );
+
     let file_layer = fmt::layer()
         .with_writer(file_writer)
         .with_ansi(false)
-        .with_target(false);
+        .with_target(false)
+        .with_timer(timer.clone());
 
     let stdout_layer = fmt::layer()
         .with_target(false)
-        .with_ansi(false);
+        .with_ansi(false)
+        .with_timer(timer);
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -142,8 +152,10 @@ pub extern "C" fn plugin_main() {
 
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
+    let ver_sub = Bus::topic("luo9_version").subscribe().unwrap();
     let msg_topic = Bus::topic("luo9_message");
     let task_topic = Bus::topic("luo9_task");
+    let ver_topic = Bus::topic("luo9_version");
 
     loop {
         if let Some(json) = msg_topic.pop(msg_sub) {
@@ -168,6 +180,13 @@ pub extern "C" fn plugin_main() {
 
         // 每60秒检查一次主动消息和情绪衰减
         check_periodic();
+
+        // ── 版本查询 ──
+        if let Some(json) = ver_topic.pop(ver_sub) {
+            if luo9_sdk::version::is_version_query(&json) {
+                luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            }
+        }
 
         thread::sleep(Duration::from_millis(1));
     }
@@ -456,7 +475,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     // ── 管理员专属控制命令 ──
     if is_admin(user_id) {
         match trimmed {
-            "test_start" | "开启对话" => {
+            "start" | "开启对话" => {
                 let already = with_state(|s| s.active_groups.contains(&group_id));
                 if already {
                     info!(user_id, group_id, "cmd: group already active");

@@ -69,19 +69,11 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Prepare Windows artifacts
-        shell: bash
-        run: |
-          if [ -f "target/release/top_drluo_luo9_ai_chat.dll" ]; then
-            echo "Found dll"
-          fi
-          ls -la target/release/*.dll target/release/*.lib 2>/dev/null || echo "Checking..."
-
       - name: Verify build artifacts
         shell: bash
         run: |
           echo "Windows build artifacts:"
-          ls -la target/release/top_drluo_luo9_ai_chat.* || echo "No files found"
+          ls -la target/release/top_drluo_luo9_ai_chat.dll target/release/top_drluo_luo9_ai_chat.dll.lib
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
