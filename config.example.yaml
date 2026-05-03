@@ -202,6 +202,20 @@ self_reflection:
   post_conversation_delay_secs: 120
 
 
+# ── 日志配置 ─────────────────────────────────────────────────────
+log:
+  # 是否启用日志文件输出
+  # 日志会写入 data/plugin_ai_chat/logs/ 目录，按天滚动
+  enabled: true
+
+  # 日志级别: debug | info | warn | error
+  # debug = 所有详细信息 (API 请求/响应、决策过程等)
+  # info  = 关键流程 (消息收发、AI 回复、命令执行)
+  # warn  = 仅警告和错误
+  # error = 仅错误
+  level: "info"
+
+
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
   start:

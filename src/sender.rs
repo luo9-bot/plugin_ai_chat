@@ -2,6 +2,7 @@ use luo9_sdk::Bot;
 use std::ffi::CString;
 use std::thread;
 use std::time::Duration;
+use tracing::info;
 use crate::config;
 
 /// 消息分段分隔符
@@ -42,16 +43,21 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
 
 /// 直接发送单条消息 (无延迟)
 pub fn send_msg(group_id: u64, user_id: u64, text: &str) {
-    let msg = CString::new(text).unwrap();
     if group_id > 0 {
+        info!(group_id, user_id, content = text, "send: group msg");
+        let msg = CString::new(text).unwrap();
         Bot::send_group_msg(group_id, msg);
     } else {
+        info!(user_id, content = text, "send: private msg");
+        let msg = CString::new(text).unwrap();
         Bot::send_private_msg(user_id, msg);
     }
 }
 
 /// 发送带 @ 的群消息
 pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
-    let msg = CString::new(format!("[CQ:at,qq={}]\n{}", user_id, text)).unwrap();
+    let full = format!("[CQ:at,qq={}]\n{}", user_id, text);
+    info!(group_id, user_id, content = text, "send: at msg");
+    let msg = CString::new(full).unwrap();
     Bot::send_group_msg(group_id, msg);
 }

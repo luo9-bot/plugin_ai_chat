@@ -234,7 +234,7 @@ pub fn chat(
         .ok_or("API returned empty choices")?;
 
     let mut reply = choice.message.content.unwrap_or_default();
-    debug!(reply_len = reply.len(), "chat: received response");
+    debug!(reply_len = reply.len(), raw_reply = %reply, "chat: received response");
 
     // 去除 <think> 标签
     if let Some(pos) = reply.find("</think>") {

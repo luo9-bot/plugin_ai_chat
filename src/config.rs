@@ -33,6 +33,8 @@ pub struct Config {
     pub vision: VisionConfig,
     #[serde(default)]
     pub messages: Messages,
+    #[serde(default)]
+    pub log: LogConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -278,6 +280,25 @@ impl Default for ForgetMsg {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct LogConfig {
+    /// 是否启用日志文件输出，默认 true
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 日志级别: "debug" | "info" | "warn" | "error"，默认 "info"
+    #[serde(default = "default_log_level")]
+    pub level: String,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            level: default_log_level(),
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 fn default_prompts() -> String { "default.txt".into() }
@@ -296,6 +317,7 @@ fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
 fn default_action_descriptions() -> bool { true }
+fn default_log_level() -> String { "info".into() }
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
 fn default_auto_summarize_threshold() -> usize { 10 }
@@ -412,6 +434,11 @@ self_reflection:
   max_thoughts: 8            # 注入 prompt 的自我记忆条数 (所有记忆永久保存)
   post_conversation_delay_secs: 120  # 对话结束后多久触发反思 (秒)，默认 120 (2分钟)
 
+# ── 日志配置 ─────────────────────────────────────────────────────
+log:
+  enabled: true               # 是否启用日志文件
+  level: "info"               # 日志级别: debug | info | warn | error
+
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
   start:
@@ -472,6 +499,7 @@ pub fn init() {
                 self_reflection: SelfReflectionConfig::default(),
                 vision: VisionConfig::default(),
                 messages: Messages::default(),
+                log: LogConfig::default(),
             }
         }
     };

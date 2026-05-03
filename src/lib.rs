@@ -36,7 +36,7 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// 日志文件 non-blocking writer 的 guard，必须保持存活
 static FILE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
@@ -80,6 +80,15 @@ static mut LAST_SELF_REFLECTION: u64 = 0;
 
 // ── 插件入口 ────────────────────────────────────────────────────
 
+/// 轻量读取 config.yaml 中的 log 配置 (在完整 config::init 之前调用)
+fn read_log_config(log_dir: &std::path::Path) -> Option<config::LogConfig> {
+    let config_path = log_dir.parent()?.parent()?.join("config.yaml");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    #[derive(serde::Deserialize)]
+    struct Partial { log: Option<config::LogConfig> }
+    serde_yaml::from_str::<Partial>(&content).ok()?.log
+}
+
 #[cfg(feature = "plugin")]
 #[unsafe(no_mangle)]
 pub extern "C" fn plugin_main() {
@@ -95,8 +104,15 @@ pub extern "C" fn plugin_main() {
     // 保留 guard 防止 non_blocking writer 被提前 drop
     FILE_GUARD.set(_guard).ok();
 
+    // 从配置读取日志级别 (config.yaml 可能在 init 之前)
+    let log_config = read_log_config(&log_dir);
+    let log_level = log_config.as_ref().map(|c| c.level.as_str()).unwrap_or("info");
+    let log_enabled = log_config.as_ref().map(|c| c.enabled).unwrap_or(true);
+
+    // 禁用日志时用 error 级别，实际上不输出任何内容
+    let effective_level = if log_enabled { log_level } else { "error" };
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("top_drluo_luo9_ai_chat=debug,warn"));
+        .unwrap_or_else(|_| EnvFilter::new(format!("top_drluo_luo9_ai_chat={},warn", effective_level)));
 
     let file_layer = fmt::layer()
         .with_writer(file_writer)
@@ -167,6 +183,7 @@ fn check_periodic() {
         return;
     }
     unsafe { LAST_PROACTIVE_CHECK = now; }
+    debug!("periodic: starting check cycle");
 
     // 情绪衰减 + 主动消息检查
     with_state(|s| {
@@ -335,7 +352,7 @@ fn do_post_conversation_reflection(group_id: u64) {
         group_id,
         recent_messages: context_text.clone(),
     }];
-    let (count, _share) = self_memory::reflect("", &group_profiles);
+    let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
     debug!(group_id, count, "post_conversation_reflect completed");
 
     // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
@@ -422,6 +439,7 @@ fn is_admin(user_id: u64) -> bool {
 
 fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
+    info!(user_id, group_id, content = trimmed, "recv: group msg");
 
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
@@ -435,20 +453,24 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
             "test_start" | "开启对话" => {
                 let already = with_state(|s| s.active_groups.contains(&group_id));
                 if already {
+                    info!(user_id, group_id, "cmd: group already active");
                     sender::send_msg(group_id, user_id, &config::get().messages.start.redo);
                     return;
                 }
                 with_state(|s| { s.active_groups.insert(group_id); });
+                info!(user_id, group_id, "cmd: activated group");
                 sender::send_msg(group_id, user_id, &config::get().messages.start.success);
                 return;
             }
             "end" | "关闭对话" => {
                 let active = with_state(|s| s.active_groups.contains(&group_id));
                 if !active {
+                    info!(user_id, group_id, "cmd: group not active");
                     sender::send_msg(group_id, user_id, &config::get().messages.stop.redo);
                     return;
                 }
                 with_state(|s| { s.active_groups.remove(&group_id); });
+                info!(user_id, group_id, "cmd: deactivated group");
                 sender::send_msg(group_id, user_id, &config::get().messages.stop.success);
                 return;
             }
@@ -497,6 +519,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 
 fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
+    info!(user_id, content = trimmed, "recv: private msg");
 
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
@@ -547,25 +570,30 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
         "开!" | "开启对话" => {
             let already = with_state(|s| s.active.contains(&user_id));
             if already {
+                info!(user_id, "cmd: already active");
                 return Some(config::get().messages.start.redo.clone());
             }
             with_state(|s| { s.active.insert(user_id); });
+            info!(user_id, "cmd: activated private chat");
             Some(config::get().messages.start.success.clone())
         }
         "停!" | "关闭对话" => {
             let active = with_state(|s| s.active.contains(&user_id));
             if !active {
+                info!(user_id, "cmd: not active");
                 return Some(config::get().messages.stop.redo.clone());
             }
             with_state(|s| {
                 s.active.remove(&user_id);
                 s.batches.remove(&(0, user_id));
             });
+            info!(user_id, "cmd: deactivated private chat");
             Some(config::get().messages.stop.success.clone())
         }
         "遗忘对话" => {
             let has = with_state(|s| s.contexts.contains_key(&(0, user_id)));
             if !has {
+                info!(user_id, "cmd: no context to forget");
                 return Some(config::get().messages.forget.fail.clone());
             }
             let list = with_state(|s| {
@@ -583,7 +611,10 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
                 Some(list)
             });
             match list {
-                Some(list) => Some(format!("{}\n\n{}", config::get().messages.forget.success, list)),
+                Some(list) => {
+                    info!(user_id, "cmd: forgot conversation");
+                    Some(format!("{}\n\n{}", config::get().messages.forget.success, list))
+                },
                 None => Some(config::get().messages.forget.fail.clone()),
             }
         }
@@ -592,8 +623,10 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
             if has {
                 with_state(|s| s.forget_user(user_id));
                 memory::forget_all(user_id);
+                info!(user_id, "cmd: restarted conversation");
                 Some(config::get().messages.restart.success.clone())
             } else {
+                info!(user_id, "cmd: no context to restart");
                 Some(config::get().messages.restart.redo.clone())
             }
         }
@@ -827,6 +860,8 @@ fn process_expired_batches() {
     if expired.is_empty() {
         return;
     }
+
+    info!(count = expired.len(), "batch: processing expired batches");
 
     // 预合并: 短等待让尾部消息到达 (用户连发多条时的合并窗口)
     thread::sleep(Duration::from_millis(500));
@@ -1100,8 +1135,10 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
         Ok(parsed) => {
             let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(in_follow_up);
             let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
-            if !reply {
-                debug!(user_id, group_id, reason, "decided not to reply");
+            if reply {
+                info!(user_id, group_id, reason, "decide_reply: will reply");
+            } else {
+                debug!(user_id, group_id, reason, "decide_reply: skip");
             }
             reply
         }
@@ -1153,10 +1190,12 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     let extra_context = build_context(user_id, group_id, &history);
 
     // 调用 AI
+    info!(user_id, group_id, ai_message = %ai_message, "chat: calling AI");
     match ai::chat(config::prompt(), &extra_context, &history, &ai_message) {
         Ok((reply, _)) => {
             // 从回复中解析情绪标签 (AI 自报告)
             let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
+            info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "chat: got AI reply");
 
             // 追加 AI 回复到历史
             with_state(|s| s.push_history(group_id, user_id, "assistant", &cleaned_reply, max_history));
