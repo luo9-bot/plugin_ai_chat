@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "top_drluo_luo9_ai_chat"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "luo9_sdk",
  "once_cell",
