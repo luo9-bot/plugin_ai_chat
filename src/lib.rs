@@ -441,6 +441,12 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, group_id, content = trimmed, "recv: group msg");
 
+    // ── 自动回复过滤 (完全忽略) ──
+    if trimmed.starts_with("[自动回复]") {
+        debug!(user_id, group_id, "ignored auto-reply message");
+        return;
+    }
+
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
         debug!(user_id, group_id, "blocked message from blacklisted user");
@@ -520,6 +526,12 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, content = trimmed, "recv: private msg");
+
+    // ── 自动回复过滤 (完全忽略) ──
+    if trimmed.starts_with("[自动回复]") {
+        debug!(user_id, "ignored auto-reply message");
+        return;
+    }
 
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
