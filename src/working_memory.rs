@@ -49,15 +49,16 @@ impl WorkingMemoryStore {
     }
 }
 
-/// 记录一条群聊消息 (无论是否回复)
-pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) {
-    if group_id == 0 { return; }
+/// 记录一条群聊消息 (无论是否回复)，返回写入时间戳
+pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> u64 {
+    if group_id == 0 { return 0; }
     let mut store = WorkingMemoryStore::load();
+    let ts = now_secs();
     let group = store.groups.entry(group_id.to_string()).or_default();
     group.entries.push(Entry {
         user_id,
         content: content.to_string(),
-        timestamp: now_secs(),
+        timestamp: ts,
         bot_replied,
     });
     // 每群最多保留 200 条
@@ -66,6 +67,7 @@ pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) {
         group.entries.drain(0..drain_count);
     }
     store.save();
+    ts
 }
 
 /// 标记某用户最近的消息为已回复
@@ -168,6 +170,30 @@ pub fn cleanup(max_age_secs: u64) {
         crate::archive::archive_working_memory(to_archive);
         store.save();
     }
+}
+
+/// 用精确时间戳更新工作记忆中的 [图片] 为实际图片描述
+/// record_timestamps: handle_group_msg 阶段写入工作记忆时的时间戳
+pub fn update_image_content(group_id: u64, user_id: u64, image_descriptions: &[String], record_timestamps: &[u64]) {
+    if group_id == 0 || image_descriptions.is_empty() || record_timestamps.is_empty() { return; }
+    let mut store = WorkingMemoryStore::load();
+    let group = match store.groups.get_mut(&group_id.to_string()) {
+        Some(g) => g,
+        None => return,
+    };
+
+    // 用时间戳精确匹配每条工作记忆条目，替换其中的 [图片]
+    let mut desc_idx = 0usize;
+    for &ts in record_timestamps {
+        if desc_idx >= image_descriptions.len() { break; }
+        if let Some(entry) = group.entries.iter_mut().find(|e| e.user_id == user_id && e.timestamp == ts) {
+            while entry.content.contains("[图片]") && desc_idx < image_descriptions.len() {
+                entry.content = entry.content.replacen("[图片]", &format!("[图片: {}]", image_descriptions[desc_idx]), 1);
+                desc_idx += 1;
+            }
+        }
+    }
+    store.save();
 }
 
 /// 返回有工作记忆的群数量 (用于启动日志)

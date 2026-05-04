@@ -545,10 +545,10 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let text_only = vision::strip_image_cq(trimmed);
     proactive::record_user_reply(user_id);
     emotion::analyze_user_message(user_id, &text_only);
-    working_memory::record(group_id, user_id, if text_only.is_empty() { "[图片]" } else { &text_only }, false);
+    let record_ts = working_memory::record(group_id, user_id, if text_only.is_empty() { "[图片]" } else { &text_only }, false);
 
     // ── 所有消息加入批次，由 AI 决策是否回复 ──
-    with_state(|s| s.append_batch(group_id, user_id, trimmed));
+    with_state(|s| s.append_batch(group_id, user_id, trimmed, record_ts));
 }
 
 fn handle_private_msg(user_id: u64, msg: &str) {
@@ -599,7 +599,7 @@ fn handle_private_msg(user_id: u64, msg: &str) {
     if with_state(|s| s.active.contains(&user_id)) {
         proactive::record_user_reply(user_id);
         emotion::analyze_user_message(user_id, trimmed);
-        with_state(|s| s.append_batch(0, user_id, trimmed));
+        with_state(|s| s.append_batch(0, user_id, trimmed, 0));
     }
 }
 
@@ -880,8 +880,8 @@ fn process_expired_batches() {
     let cfg = config::get();
     let timeout = cfg.conversation.batch_timeout_ms;
 
-    // 收集所有过期批次: key = (group_id, user_id)
-    let expired: Vec<(u64, u64, String)> = {
+    // 收集所有过期批次: (group_id, user_id, messages, record_timestamps)
+    let expired: Vec<(u64, u64, String, Vec<u64>)> = {
         let mut result = Vec::new();
         with_state(|s| {
             let expired_keys: Vec<(u64, u64)> = s.batches.iter()
@@ -889,8 +889,8 @@ fn process_expired_batches() {
                 .map(|(&key, _)| key)
                 .collect();
             for (gid, uid) in expired_keys {
-                if let Some(msgs) = s.take_batch_for_processing(gid, uid) {
-                    result.push((gid, uid, msgs));
+                if let Some((msgs, timestamps)) = s.take_batch_for_processing(gid, uid) {
+                    result.push((gid, uid, msgs, timestamps));
                 }
             }
         });
@@ -905,34 +905,35 @@ fn process_expired_batches() {
 
     // 预合并: 短等待让尾部消息到达 (用户连发多条时的合并窗口)
     thread::sleep(Duration::from_millis(500));
-    let mut merged = Vec::new();
-    for (group_id, user_id, messages) in expired {
+    let mut merged: Vec<(u64, u64, String, Vec<u64>)> = Vec::new();
+    for (group_id, user_id, messages, mut timestamps) in expired {
         let mut final_msgs = messages;
-        if let Some(extra) = with_state(|s| s.take_batch_for_processing(group_id, user_id)) {
+        if let Some((extra, extra_ts)) = with_state(|s| s.take_batch_for_processing(group_id, user_id)) {
             final_msgs.push('\n');
             final_msgs.push_str(&extra);
+            timestamps.extend(extra_ts);
         }
-        merged.push((group_id, user_id, final_msgs));
+        merged.push((group_id, user_id, final_msgs, timestamps));
     }
 
     // 按群组聚合: 同一群的所有消息一起做 AI 决策
     let self_qq = cfg.self_qq;
     let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
 
-    let mut group_msgs: std::collections::HashMap<u64, Vec<(u64, String)>> = std::collections::HashMap::new();
-    let mut private_batches: Vec<(u64, String)> = Vec::new();
+    let mut group_msgs: std::collections::HashMap<u64, Vec<(u64, String, Vec<u64>)>> = std::collections::HashMap::new();
+    let mut private_batches: Vec<(u64, String, Vec<u64>)> = Vec::new();
 
-    for (group_id, user_id, messages) in merged {
+    for (group_id, user_id, messages, timestamps) in merged {
         if group_id > 0 {
-            group_msgs.entry(group_id).or_default().push((user_id, messages));
+            group_msgs.entry(group_id).or_default().push((user_id, messages, timestamps));
         } else {
-            private_batches.push((user_id, messages));
+            private_batches.push((user_id, messages, timestamps));
         }
     }
 
     // 处理私聊批次 (直接回复)
-    for (user_id, messages) in private_batches {
-        process_message(user_id, 0, &messages);
+    for (user_id, messages, timestamps) in private_batches {
+        process_message(user_id, 0, &messages, &timestamps);
         // 检查处理期间是否有新消息
         check_new_messages_for_user(user_id);
     }
@@ -940,7 +941,7 @@ fn process_expired_batches() {
     // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
     for (group_id, user_msgs) in group_msgs {
         let group_context: Vec<String> = user_msgs.iter()
-            .map(|(uid, msg)| {
+            .map(|(uid, msg, _)| {
                 let lines: Vec<&str> = msg.lines().collect();
                 if lines.len() <= 1 {
                     format!("[user_id:{}] {}", uid, msg)
@@ -951,16 +952,16 @@ fn process_expired_batches() {
             .collect();
         let context_str = group_context.join("\n");
 
-        for (user_id, messages) in &user_msgs {
+        for (user_id, messages, timestamps) in &user_msgs {
             // @机器人 → 直接回复 (唯一快速通道)
             if self_qq > 0 && messages.contains(&at_pattern) {
-                process_message(*user_id, group_id, messages);
+                process_message(*user_id, group_id, messages, timestamps);
                 continue;
             }
 
             // 所有非@消息: AI 决策 (传入群组上下文)
             if decide_reply(group_id, *user_id, messages, &context_str) {
-                process_message(*user_id, group_id, messages);
+                process_message(*user_id, group_id, messages, timestamps);
             }
             // 不回复的消息已记录在工作记忆中，对话后统一审查
         }
@@ -988,8 +989,8 @@ fn check_new_messages_for_user(user_id: u64) {
     }
 
     let new_msgs = with_state(|s| s.take_batch_for_processing(0, user_id));
-    if let Some(msgs) = new_msgs {
-        process_message(user_id, 0, &msgs);
+    if let Some((msgs, timestamps)) = new_msgs {
+        process_message(user_id, 0, &msgs, &timestamps);
     }
 }
 
@@ -1014,13 +1015,13 @@ fn check_new_messages_for_group(group_id: u64) {
     }
 
     // 收取该群所有新消息
-    let new_batches: Vec<(u64, String)> = with_state(|s| {
+    let new_batches: Vec<(u64, String, Vec<u64>)> = with_state(|s| {
         let keys: Vec<(u64, u64)> = s.batches.keys()
             .filter(|&&(gid, _)| gid == group_id)
             .copied()
             .collect();
         keys.into_iter()
-            .filter_map(|(gid, uid)| s.take_batch_for_processing(gid, uid).map(|msgs| (uid, msgs)))
+            .filter_map(|(gid, uid)| s.take_batch_for_processing(gid, uid).map(|(msgs, ts)| (uid, msgs, ts)))
             .collect()
     });
 
@@ -1030,7 +1031,7 @@ fn check_new_messages_for_group(group_id: u64) {
 
     // 构建群上下文
     let group_context: Vec<String> = new_batches.iter()
-        .map(|(uid, msg)| {
+        .map(|(uid, msg, _)| {
             let lines: Vec<&str> = msg.lines().collect();
             if lines.len() <= 1 {
                 format!("[user_id:{}] {}", uid, msg)
@@ -1041,11 +1042,11 @@ fn check_new_messages_for_group(group_id: u64) {
         .collect();
     let context_str = group_context.join("\n");
 
-    for (user_id, messages) in new_batches {
+    for (user_id, messages, timestamps) in new_batches {
         if self_qq > 0 && messages.contains(&at_pattern) {
-            process_message(user_id, group_id, &messages);
+            process_message(user_id, group_id, &messages, &timestamps);
         } else if decide_reply(group_id, user_id, &messages, &context_str) {
-            process_message(user_id, group_id, &messages);
+            process_message(user_id, group_id, &messages, &timestamps);
         }
     }
 
@@ -1189,7 +1190,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 }
 
-fn process_message(user_id: u64, group_id: u64, message: &str) {
+fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps: &[u64]) {
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
 
@@ -1218,6 +1219,11 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
             format!("{}\n{}", img_ctx.join("\n"), text_message)
         }
     };
+
+    // 图片识别完成后，用精确时间戳回写工作记忆中的 [图片] 为实际描述
+    if !image_descriptions.is_empty() && group_id > 0 {
+        working_memory::update_image_content(group_id, user_id, &image_descriptions, record_timestamps);
+    }
 
     // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
     with_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));

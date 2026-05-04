@@ -13,6 +13,8 @@ pub struct UserContext {
 pub struct MessageBatch {
     pub messages: String,
     pub last_update: Instant,
+    /// 每条消息对应的写入时间戳 (unix秒)，用于精确匹配工作记忆条目
+    pub record_timestamps: Vec<u64>,
 }
 
 /// 上下文键: (group_id, user_id)
@@ -110,17 +112,20 @@ impl State {
     }
 
     /// 追加消息到用户批次 (按 (group_id, user_id) 隔离)
-    pub fn append_batch(&mut self, group_id: u64, user_id: u64, message: &str) {
+    /// record_ts: 工作记忆写入时间戳，用于后续精确匹配更新图片描述
+    pub fn append_batch(&mut self, group_id: u64, user_id: u64, message: &str, record_ts: u64) {
         let key: CtxKey = (group_id, user_id);
         let now = Instant::now();
         if let Some(batch) = self.batches.get_mut(&key) {
             batch.messages.push('\n');
             batch.messages.push_str(message);
             batch.last_update = now;
+            batch.record_timestamps.push(record_ts);
         } else {
             self.batches.insert(key, MessageBatch {
                 messages: message.to_string(),
                 last_update: now,
+                record_timestamps: vec![record_ts],
             });
         }
     }
@@ -140,9 +145,9 @@ impl State {
 
     /// 取出批次消息用于处理
     /// 在 AI 处理期间如果有新消息到来，会追加到同一个槽位
-    pub fn take_batch_for_processing(&mut self, group_id: u64, user_id: u64) -> Option<String> {
+    pub fn take_batch_for_processing(&mut self, group_id: u64, user_id: u64) -> Option<(String, Vec<u64>)> {
         let key: CtxKey = (group_id, user_id);
-        self.batches.remove(&key).map(|batch| batch.messages)
+        self.batches.remove(&key).map(|batch| (batch.messages, batch.record_timestamps))
     }
 
     /// 检查并取出处理期间新到达的消息
