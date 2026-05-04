@@ -32,6 +32,8 @@ pub struct Config {
     #[serde(default)]
     pub mental_state: MentalStateConfig,
     #[serde(default)]
+    pub style: StyleConfig,
+    #[serde(default)]
     pub vision: VisionConfig,
     #[serde(default)]
     pub messages: Messages,
@@ -268,6 +270,29 @@ impl VisionConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct StyleConfig {
+    /// 单条回复最大字数，默认 30
+    #[serde(default = "default_max_reply_chars")]
+    pub max_reply_chars: usize,
+    /// 是否省略主语 ("我觉得无聊" → "无聊")，默认 true
+    #[serde(default = "default_true")]
+    pub omit_subject: bool,
+    /// 标点风格: "casual"(不加句号，用换行分隔) | "formal"(正常标点)，默认 "casual"
+    #[serde(default = "default_punctuation_style")]
+    pub punctuation_style: String,
+}
+
+impl Default for StyleConfig {
+    fn default() -> Self {
+        Self {
+            max_reply_chars: default_max_reply_chars(),
+            omit_subject: true,
+            punctuation_style: default_punctuation_style(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Messages {
     #[serde(default)]
@@ -369,6 +394,8 @@ fn default_concern_decay_rate() -> f32 { 0.1 }
 fn default_deliberations_max() -> usize { 8 }
 fn default_deliberation_decay_rate() -> f32 { 0.05 }
 fn default_defect_base_probability() -> f32 { 0.1 }
+fn default_max_reply_chars() -> usize { 30 }
+fn default_punctuation_style() -> String { "casual".into() }
 fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
 fn default_vision_model() -> String { "deepseek-chat".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
@@ -475,6 +502,12 @@ mental_state:
   deliberation_decay_rate: 0.05 # 考量衰减速率 (每小时)
   defect_base_probability: 0.1 # 缺陷基础触发概率
 
+# ── 回复风格 ─────────────────────────────────────────────────────
+style:
+  max_reply_chars: 30         # 单条回复最大字数
+  omit_subject: true          # 是否省略主语 ("我觉得无聊" → "无聊")
+  punctuation_style: "casual" # 标点风格: casual(不加句号) | formal(正常标点)
+
 # ── 日志配置 ─────────────────────────────────────────────────────
 log:
   enabled: true               # 是否启用日志文件
@@ -539,6 +572,7 @@ pub fn init() {
                 proactive: ProactiveConfig::default(),
                 self_reflection: SelfReflectionConfig::default(),
                 mental_state: MentalStateConfig::default(),
+                style: StyleConfig::default(),
                 vision: VisionConfig::default(),
                 messages: Messages::default(),
                 log: LogConfig::default(),

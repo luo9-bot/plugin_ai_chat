@@ -57,6 +57,13 @@ pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一段对话，判断
 - 有人自言自语、发牢骚、感叹一句就走了，你也没什么特别想说的 → 不想回
 - 你拿不准是不是在跟你说话 → 不想回
 
+特别注意多人对话场景（非常重要！）：
+- 仔细看消息的前后关系：如果A问了一个问题，B在回答A的问题，那B的话是对A说的，不是对你说的
+- 判断"接话"要看内容相关性：如果别人说的话和你之前说的内容毫无关系，那不是在接你的话
+- 两个人在来回聊天时（有明显的问答/互动模式），即使你之前参与过对话，也不要去打断他们
+- 如果你之前和某人聊过天，但现在他明显在和别人说话，不要插嘴
+- 看工作记忆中的对话流：如果最近几条消息明显是A→B的对话链，你不在其中，就不想回
+
 注意：你的名字和人设在上面的"你的身份"里。如果有人叫你的名字（哪怕加了感叹号、拆开了字），就是在叫你。
 
 群里不止你一个人，别把每条消息都当成在跟你说话。像真人一样判断就好。"#;
@@ -1174,7 +1181,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     match ai::analyze_with_tools(&full_prompt, &content, &[ai::decide_reply_tool()], None) {
         Ok(parsed) => {
-            let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(in_follow_up);
+            let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(false);
             let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
             if reply {
                 info!(user_id, group_id, reason, "decide_reply: will reply");
