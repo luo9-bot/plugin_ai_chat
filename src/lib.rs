@@ -6,6 +6,7 @@ pub mod config;
 pub mod cron;
 pub mod emotion;
 pub mod memory;
+pub mod mental_state;
 pub mod personality;
 pub mod proactive;
 pub mod self_memory;
@@ -254,6 +255,11 @@ fn check_periodic() {
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
 
+    // 心理状态衰减 (担忧 + 要考量)
+    let ms_cfg = &config::get().mental_state;
+    mental_state::decay_concerns(ms_cfg.concern_decay_rate);
+    mental_state::decay_deliberations(ms_cfg.deliberation_decay_rate);
+
     // 对话后反思: 对话结束一段时间后回顾刚结束的对话
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = with_state(|s| s.get_idle_groups(now, post_delay));
@@ -376,6 +382,9 @@ fn do_post_conversation_reflection(group_id: u64) {
 
     // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
     review_conversation_messages(group_id, &context_text);
+
+    // 3. 从对话中生成担忧和要考量
+    mental_state::generate_from_conversation(group_id, &context_text);
 }
 
 /// 对话消息审查提示词
@@ -1220,6 +1229,21 @@ fn process_message(user_id: u64, group_id: u64, message: &str) {
     // 组装额外上下文: 记忆 + 人格 + 情绪
     let extra_context = build_context(user_id, group_id, &history);
 
+    // 缺陷检查: 基于情绪状态和随机概率决定是否触发缺陷
+    let defect_instruction = {
+        let emo_state = emotion::get_state(user_id);
+        mental_state::check_defect(
+            emo_state.current,
+            emo_state.intensity,
+            config::get().mental_state.defect_base_probability,
+        )
+    };
+    let extra_context = if let Some(defect) = defect_instruction {
+        format!("{}\n\n# 当前状态\n{}", extra_context, mental_state::defect_to_instruction(defect))
+    } else {
+        extra_context
+    };
+
     // 调用 AI
     info!(user_id, group_id, ai_message = %ai_message, "chat: calling AI");
     match ai::chat(config::prompt(), &extra_context, &history, &ai_message) {
@@ -1322,6 +1346,15 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
     let emo = emotion::get_prompt_context(user_id);
     if !emo.is_empty() {
         parts.push(emo);
+    }
+
+    // 心理状态上下文 (担忧 + 要考量)
+    let mental_ctx = mental_state::get_prompt_context(
+        config::get().mental_state.concerns_max,
+        config::get().mental_state.deliberations_max,
+    );
+    if !mental_ctx.is_empty() {
+        parts.push(mental_ctx);
     }
 
     // 对话状态指令

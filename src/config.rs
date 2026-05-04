@@ -30,6 +30,8 @@ pub struct Config {
     #[serde(default)]
     pub self_reflection: SelfReflectionConfig,
     #[serde(default)]
+    pub mental_state: MentalStateConfig,
+    #[serde(default)]
     pub vision: VisionConfig,
     #[serde(default)]
     pub messages: Messages,
@@ -208,6 +210,32 @@ impl Default for SelfReflectionConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct MentalStateConfig {
+    #[serde(default = "default_concerns_max")]
+    pub concerns_max: usize,
+    #[serde(default = "default_concern_decay_rate")]
+    pub concern_decay_rate: f32,
+    #[serde(default = "default_deliberations_max")]
+    pub deliberations_max: usize,
+    #[serde(default = "default_deliberation_decay_rate")]
+    pub deliberation_decay_rate: f32,
+    #[serde(default = "default_defect_base_probability")]
+    pub defect_base_probability: f32,
+}
+
+impl Default for MentalStateConfig {
+    fn default() -> Self {
+        Self {
+            concerns_max: default_concerns_max(),
+            concern_decay_rate: default_concern_decay_rate(),
+            deliberations_max: default_deliberations_max(),
+            deliberation_decay_rate: default_deliberation_decay_rate(),
+            defect_base_probability: default_defect_base_probability(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct VisionConfig {
     /// 识图 API key，为空则禁用识图功能
     #[serde(default)]
@@ -336,6 +364,11 @@ fn default_check_interval() -> u64 { 60 }
 fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
 fn default_post_conversation_delay() -> u64 { 120 }
+fn default_concerns_max() -> usize { 5 }
+fn default_concern_decay_rate() -> f32 { 0.1 }
+fn default_deliberations_max() -> usize { 8 }
+fn default_deliberation_decay_rate() -> f32 { 0.05 }
+fn default_defect_base_probability() -> f32 { 0.1 }
 fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
 fn default_vision_model() -> String { "deepseek-chat".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
@@ -434,6 +467,14 @@ self_reflection:
   max_thoughts: 8            # 注入 prompt 的自我记忆条数 (所有记忆永久保存)
   post_conversation_delay_secs: 120  # 对话结束后多久触发反思 (秒)，默认 120 (2分钟)
 
+# ── 心理状态参数 (缺陷/担忧/考量) ──────────────────────────
+mental_state:
+  concerns_max: 5             # 最大活跃担忧数
+  concern_decay_rate: 0.1     # 担忧衰减速率 (每小时)
+  deliberations_max: 8        # 最大活跃考量数
+  deliberation_decay_rate: 0.05 # 考量衰减速率 (每小时)
+  defect_base_probability: 0.1 # 缺陷基础触发概率
+
 # ── 日志配置 ─────────────────────────────────────────────────────
 log:
   enabled: true               # 是否启用日志文件
@@ -497,6 +538,7 @@ pub fn init() {
                 emotion: EmotionConfig::default(),
                 proactive: ProactiveConfig::default(),
                 self_reflection: SelfReflectionConfig::default(),
+                mental_state: MentalStateConfig::default(),
                 vision: VisionConfig::default(),
                 messages: Messages::default(),
                 log: LogConfig::default(),
@@ -530,6 +572,7 @@ fn load_all() {
     let proactive_count = crate::proactive::user_count();
     let wm_groups = crate::working_memory::group_count();
     let self_thoughts = crate::self_memory::load_count();
+    let mental_count = crate::mental_state::load_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
     let block_count = crate::blocklist::load_count();
 
@@ -542,6 +585,7 @@ fn load_all() {
         proactive = proactive_count,
         wm_groups,
         self_thoughts,
+        mental_state = mental_count,
         blocked = block_count,
         archive_wm,
         archive_lt,
