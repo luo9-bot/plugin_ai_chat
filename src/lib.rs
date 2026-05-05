@@ -383,19 +383,55 @@ fn do_post_conversation_reflection(group_id: u64) {
     let max_timestamp = entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
     with_state(|s| { s.last_reviewed_timestamps.insert(group_id, max_timestamp); });
 
-    // 1. 自我反思
-    let group_profiles = vec![self_memory::GroupProfile {
-        group_id,
-        recent_messages: context_text.clone(),
-    }];
-    let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
-    debug!(group_id, count, "post_conversation_reflect completed");
+    // 检查内容是否与上次反思时足够相似，避免对同一话题反复思考
+    let normalized = normalize_for_compare(&context_text);
+    let should_reflect = with_state(|s| {
+        if let Some(prev) = s.last_reflected_content.get(&group_id) {
+            content_overlap(prev, &normalized) < 0.5
+        } else {
+            true
+        }
+    });
+
+    if should_reflect {
+        // 1. 自我反思
+        let group_profiles = vec![self_memory::GroupProfile {
+            group_id,
+            recent_messages: context_text.clone(),
+        }];
+        let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
+        debug!(group_id, count, "post_conversation_reflect completed");
+
+        with_state(|s| { s.last_reflected_content.insert(group_id, normalized); });
+    } else {
+        debug!(group_id, "post_conversation_reflect skipped (similar content)");
+    }
 
     // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
     review_conversation_messages(group_id, &context_text);
 
     // 3. 从对话中生成担忧和要考量
     mental_state::generate_from_conversation(group_id, &context_text);
+}
+
+/// 标准化文本用于内容比较：只保留中文字符和字母数字
+fn normalize_for_compare(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric() || (*c >= '\u{4e00}' && *c <= '\u{9fff}'))
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// 计算两段文本的字符重叠比例 (取较短文本为分母)
+fn content_overlap(a: &str, b: &str) -> f32 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    let shorter_chars: Vec<char> = shorter.chars().collect();
+    let longer_set: std::collections::HashSet<char> = longer.chars().collect();
+    let overlap = shorter_chars.iter().filter(|c| longer_set.contains(c)).count();
+    overlap as f32 / shorter_chars.len() as f32
 }
 
 /// 对话消息审查提示词
@@ -1269,6 +1305,47 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 }
 
+/// 清理 AI 回复：移除自记忆标签，将中文字符间的空格转为分段符
+fn clean_reply(reply: &str) -> String {
+    // 1. 移除自记忆分类标签 [经历] [反思] [计划] [感受]
+    const SELF_TAGS: &[&str] = &["[经历]", "[反思]", "[计划]", "[感受]"];
+    let mut result = reply.to_string();
+    for tag in SELF_TAGS {
+        result = result.replace(tag, "");
+    }
+
+    // 2. 将中文字符之间的空格转为 |^| 分段符
+    let chars: Vec<char> = result.chars().collect();
+    let mut out = String::with_capacity(result.len());
+    for i in 0..chars.len() {
+        if chars[i] == ' ' && i > 0 && i + 1 < chars.len()
+            && is_cjk(chars[i - 1]) && is_cjk(chars[i + 1])
+        {
+            out.push_str("|^|");
+        } else {
+            out.push(chars[i]);
+        }
+    }
+
+    // 3. 规范化连续分段符
+    out.replace("|^||^|", "|^|")
+}
+
+fn is_cjk(ch: char) -> bool {
+    matches!(ch,
+        '\u{4E00}'..='\u{9FFF}'   |  // CJK Unified Ideographs
+        '\u{3400}'..='\u{4DBF}'   |  // CJK Extension A
+        '\u{F900}'..='\u{FAFF}'   |  // CJK Compatibility Ideographs
+        '\u{20000}'..='\u{2A6DF}' |  // CJK Extension B
+        '\u{2A700}'..='\u{2B73F}' |  // CJK Extension C
+        '\u{2B740}'..='\u{2B81F}' |  // CJK Extension D
+        '\u{3001}'..='\u{3003}'   |  // 、。〃
+        '\u{300C}'..='\u{3011}'   |  // 「」『』【】
+        '\u{FF01}'..='\u{FF5E}'   |  // Fullwidth ASCII (，？！ etc.)
+        '\u{2026}'                   // …
+    )
+}
+
 fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps: &[u64]) {
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
@@ -1335,6 +1412,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
         Ok((reply, _)) => {
             // 从回复中解析情绪标签 (AI 自报告)
             let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
+            let cleaned_reply = clean_reply(&cleaned_reply);
             info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "chat: got AI reply");
 
             // 追加 AI 回复到历史
