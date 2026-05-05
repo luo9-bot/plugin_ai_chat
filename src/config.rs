@@ -39,6 +39,8 @@ pub struct Config {
     pub messages: Messages,
     #[serde(default)]
     pub log: LogConfig,
+    #[serde(default)]
+    pub sync: SyncConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -352,6 +354,40 @@ impl Default for LogConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct SyncConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub api_url: String,
+    #[serde(default = "default_db_name")]
+    pub db_name: String,
+    #[serde(default)]
+    pub mongodb_uri: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub expose: bool,
+}
+
+fn default_db_name() -> String { "memory_default".into() }
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_url: String::new(),
+            db_name: default_db_name(),
+            mongodb_uri: String::new(),
+            display_name: String::new(),
+            icon: String::new(),
+            expose: false,
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 fn default_prompts() -> String { "default.txt".into() }
@@ -513,6 +549,19 @@ log:
   enabled: true               # 是否启用日志文件
   level: "info"               # 日志级别: debug | info | warn | error
 
+# ── 远程同步 (可选) ─────────────────────────────────────────────
+# 将自我记忆同步到远程 MongoDB (通过 memory-viewer API)
+# 安全机制: 首次运行自动生成 ECC 密钥对 (data/plugin_ai_chat/ecc_key.pem)
+#           所有写入请求通过 ECDSA-P256 签名验证，无需手动配置密钥
+sync:
+  enabled: false              # 是否启用远程同步
+  api_url: ""                 # memory-viewer API 地址，如 "https://xxx.vercel.app"
+  db_name: "memory_default"   # 数据库名称 (每个实例应该不同)
+  mongodb_uri: ""             # MongoDB 连接字符串，注册时传递给网页端
+  display_name: ""            # 显示名称 (暴露时在网页端显示)
+  icon: "💭"                  # 显示图标
+  expose: false               # 是否向主网页暴露 (允许被其他用户浏览)
+
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
   start:
@@ -576,6 +625,7 @@ pub fn init() {
                 vision: VisionConfig::default(),
                 messages: Messages::default(),
                 log: LogConfig::default(),
+                sync: SyncConfig::default(),
             }
         }
     };
@@ -596,6 +646,9 @@ pub fn init() {
     let _ = PROMPT.set(prompt_content);
 
     load_all();
+
+    // 注册到远程注册表 (如果配置了暴露)
+    crate::self_memory::register_to_registry();
 }
 
 fn load_all() {

@@ -2,6 +2,7 @@ pub mod ai;
 pub mod archive;
 pub mod blocklist;
 pub mod config;
+pub mod crypto;
 #[cfg(feature = "plugin")]
 pub mod cron;
 pub mod emotion;
@@ -149,6 +150,9 @@ pub extern "C" fn plugin_main() {
 
     config::init();
     debug!(model = %config::get().model, "plugin loaded");
+
+    // 初始化 ECC 密钥对 (在注册之前)
+    crypto::init();
 
     // 初始化定时器，避免启动时立即触发
     let now = now_secs();
@@ -876,6 +880,74 @@ fn handle_admin_command(msg: &str) -> Option<String> {
             return Some(format!("已将用户{}移出黑名单", uid));
         }
         return Some("格式: 移除黑名单:QQ号".into());
+    }
+
+    // ── 远程记忆管理命令 ──────────────────────────────────────────
+
+    if msg == "同步想法" {
+        return match crate::self_memory::sync_all_to_remote() {
+            Ok(count) => Some(format!("已同步 {} 条想法到远程", count)),
+            Err(e) => Some(format!("同步失败: {}", e)),
+        };
+    }
+
+    if let Some(keyword) = msg.strip_prefix("删除想法:") {
+        let keyword = keyword.trim();
+        if keyword.is_empty() {
+            return Some("格式: 删除想法:关键词".into());
+        }
+        return match crate::self_memory::remote_search_delete(keyword) {
+            Ok(count) => Some(format!("已软删除 {} 条包含「{}」的想法", count, keyword)),
+            Err(e) => Some(format!("删除失败: {}", e)),
+        };
+    }
+
+    if msg == "查看已删除" {
+        return match crate::self_memory::remote_list_deleted() {
+            Ok(data) => {
+                let thoughts = data.get("thoughts").and_then(|v| v.as_array());
+                match thoughts {
+                    Some(arr) if !arr.is_empty() => {
+                        let mut lines = vec![format!("已删除的记忆 ({}):", arr.len())];
+                        for (i, t) in arr.iter().enumerate().take(20) {
+                            let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                            let content = t.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                            let preview = if content.chars().count() > 30 {
+                                format!("{}...", content.chars().take(30).collect::<String>())
+                            } else {
+                                content.to_string()
+                            };
+                            lines.push(format!("{}. [{}] {}", i + 1, id, preview));
+                        }
+                        if arr.len() > 20 {
+                            lines.push(format!("... 还有 {} 条", arr.len() - 20));
+                        }
+                        lines.push("\n恢复命令: 恢复想法:ID".into());
+                        Some(lines.join("\n"))
+                    }
+                    _ => Some("没有已删除的记忆".into()),
+                }
+            }
+            Err(e) => Some(format!("查询失败: {}", e)),
+        };
+    }
+
+    if let Some(id) = msg.strip_prefix("恢复想法:") {
+        let id = id.trim();
+        if id.is_empty() {
+            return Some("格式: 恢复想法:ID".into());
+        }
+        return match crate::self_memory::remote_restore(id) {
+            Ok(()) => Some(format!("已恢复记忆 {}", id)),
+            Err(e) => Some(format!("恢复失败: {}", e)),
+        };
+    }
+
+    if msg == "清理过期想法" {
+        return match crate::self_memory::remote_purge() {
+            Ok(count) => Some(format!("已永久清理 {} 条过期记忆", count)),
+            Err(e) => Some(format!("清理失败: {}", e)),
+        };
     }
 
     None
