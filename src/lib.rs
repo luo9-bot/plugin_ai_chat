@@ -1300,6 +1300,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
 /// 群聊回复：模拟打字延迟，分段发送
 fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
     let cfg = config::get();
+    let reply = sender::normalize_segment_sep(reply);
 
     // 优先按 |^| 分割，没有则按自然段落（换行）分割
     let segments: Vec<&str> = if reply.contains("|^|") {

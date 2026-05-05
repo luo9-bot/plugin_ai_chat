@@ -8,12 +8,25 @@ use crate::config;
 /// 消息分段分隔符
 const SEGMENT_SEP: &str = "|^|";
 
+/// 规范化消息分段分隔符：将 AI 生成的不完整 "|^" 或 "^|" 补全为 "|^|"
+pub fn normalize_segment_sep(reply: &str) -> String {
+    if !reply.contains('^') {
+        return reply.to_string();
+    }
+    reply.replace("|^|", "\x00SEP\x00")
+         .replace("|^", "|^|")
+         .replace("^|", "|^|")
+         .replace("\x00SEP\x00", "|^|")
+}
+
 /// 发送消息，带打字模拟延迟
 ///
 /// 将 AI 回复按 `|^|` 分割为多条消息，逐条发送
 /// 没有 `|^|` 则按自然段落（双换行）分割
 pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
     let conv = &config::get().conversation;
+    let normalized = normalize_segment_sep(reply);
+    let reply = &normalized;
 
     let parts: Vec<&str> = if reply.contains(SEGMENT_SEP) {
         reply.split(SEGMENT_SEP).filter(|s| !s.trim().is_empty()).collect()
