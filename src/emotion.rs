@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// AI 情绪分析提示词
 const ANALYZE_PROMPT: &str = r#"分析以下对话中用户的情绪状态。根据用户的消息内容、语气和上下文判断情绪。
@@ -176,6 +176,7 @@ pub fn decay(user_id: u64) {
 }
 
 pub fn analyze_user_message(user_id: u64, message: &str) {
+    info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
     let mut state = get_state(user_id);
     let now = now_secs();
 

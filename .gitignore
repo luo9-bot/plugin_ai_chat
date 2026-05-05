@@ -6,3 +6,5 @@ data/
 *.dylib
 
 .claude/
+
+memory_viewer.html

@@ -1,4 +1,4 @@
-use tracing::debug;
+use tracing::{debug, info};
 use crate::config;
 
 /// 识图提示词
@@ -56,6 +56,7 @@ pub fn strip_image_cq(message: &str) -> String {
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
 pub fn recognize(image_url: &str) -> Option<String> {
+    info!(url = %image_url, "vision: 开始识别图片");
     let cfg = config::get();
     if !cfg.vision.enabled() {
         return None;

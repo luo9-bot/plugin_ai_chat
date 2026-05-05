@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
 
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::config;
 use crate::emotion;
@@ -259,6 +259,7 @@ pub fn add_date_reminder(user_id: u64, date: &str, description: &str) {
 // ── 主动消息检查 ────────────────────────────────────────────────
 
 pub fn check_proactive_messages(user_id: u64, group_id: u64) {
+    info!(user_id, group_id, "proactive: 检查主动消息");
     let (enabled, quiet_start, quiet_end, interval, max_ignore, low_mood_mult) = effective_config();
     if !enabled {
         return;

@@ -727,6 +727,7 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
 // ── 人格管理命令 ────────────────────────────────────────────────
 
 fn handle_personality_command(msg: &str) -> Option<String> {
+    debug!(msg, "handle_personality_command: 检查命令");
     if msg == "查看人格" {
         let ctx = personality::get_prompt_context();
         return Some(format!("当前人格设定:\n{}", ctx));
@@ -774,6 +775,7 @@ fn handle_personality_command(msg: &str) -> Option<String> {
 // ── 主动对话命令 ────────────────────────────────────────────────
 
 fn handle_proactive_command(msg: &str) -> Option<String> {
+    debug!(msg, "handle_proactive_command: 检查命令");
     match msg {
         "开启主动对话" => {
             proactive::set_enabled(true);
@@ -813,6 +815,7 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
 fn handle_admin_command(msg: &str) -> Option<String> {
+    debug!(msg, "handle_admin_command: 检查命令");
     match msg {
         "查看群聊" => {
             let groups = with_state(|s| s.active_groups.iter().copied().collect::<Vec<u64>>());
@@ -1192,6 +1195,7 @@ fn check_new_messages_for_group(group_id: u64) {
 /// 综合记忆、对话上下文、人格特质和消息内容，判断是否需要回复
 /// group_context: 同一群中所有待处理消息的拼接，用于理解连续对话
 fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str) -> bool {
+    debug!(user_id, group_id, "decide_reply: 开始决策");
     let cfg = config::get();
 
     // self_qq 未配置时，回复所有消息
@@ -1459,7 +1463,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
             working_memory::mark_replied(group_id, user_id);
         }
         Err(e) => {
-            debug!(user_id, group_id, error = %e, "AI chat error");
+            info!(user_id, group_id, error = %e, "process_message: AI 调用失败");
             sender::send_msg(group_id, user_id, "睡着了...");
         }
     }

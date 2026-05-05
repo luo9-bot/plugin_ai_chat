@@ -263,6 +263,7 @@ pub fn reflect(
     recent_context: &str,
     group_profiles: &[GroupProfile],
 ) -> (usize, Option<(String, u64)>) {
+    info!("self_reflect: 开始自我反思");
     // 构建反思上下文
     let mut context_parts = Vec::new();
 
@@ -418,7 +419,7 @@ fn sync_to_remote(thought: &SelfThought) {
 
     match req.send(json.as_bytes()) {
         Ok(_) => debug!("sync_to_remote: ok"),
-        Err(e) => debug!("sync_to_remote: error {}", e),
+        Err(e) => info!("sync_to_remote: error {}", e),
     }
 }
 
@@ -486,7 +487,10 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
     let headers = sign_headers();
     debug!(bytes = json.len(), "sync_all_to_remote: 请求体准备完成");
 
-    let mut req = ureq::post(&api_url("/bulk-sync"))
+    let url = api_url("/bulk-sync");
+    debug!(url = %url, "sync_all_to_remote: 发送请求");
+
+    let mut req = ureq::post(&url)
         .header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);

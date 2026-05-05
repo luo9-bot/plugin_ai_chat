@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// AI 记忆审查提示词
 const REVIEW_PROMPT: &str = r#"你是一个记忆管理助手。审查以下记忆列表和最近的对话，决定是否需要整理。
@@ -529,6 +529,7 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
 
 /// AI 驱动的记忆审查 (定期调用，整合和修正所有用户的记忆)
 pub fn ai_review_all() {
+    info!("memory_review: 开始审查所有用户记忆");
     let store = MemoryStore::load();
 
     for (user_id_str, user_memory) in &store.users {
