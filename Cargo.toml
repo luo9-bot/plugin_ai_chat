@@ -1,8 +1,8 @@
 [package]
 name = "top_drluo_luo9_ai_chat"
-version = "3.1.0"
+version = "3.1.1"
 edition = "2024"
-description = "AI Chat plugin for Luo9 Bot"
+description = "AI 对话插件"
 authors = ["drluo"]
 
 [features]
