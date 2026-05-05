@@ -451,10 +451,15 @@ pub fn register_to_registry() {
     });
     let json = body.to_string();
     let url = format!("{}/api/registry", cfg.sync.api_url.trim_end_matches('/'));
+    let headers = sign_headers();
 
-    match ureq::post(&url)
-        .header("Content-Type", "application/json")
-        .send(json.as_bytes())
+    let mut req = ureq::post(&url)
+        .header("Content-Type", "application/json");
+    for (k, v) in &headers {
+        req = req.header(k, v);
+    }
+
+    match req.send(json.as_bytes())
     {
         Ok(_) => info!("register_to_registry: 注册成功"),
         Err(e) => info!("register_to_registry: 注册失败 {}", e),
