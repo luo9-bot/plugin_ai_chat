@@ -35,13 +35,37 @@ use luo9_sdk::bus::Bus;
 #[cfg(feature = "plugin")]
 use luo9_sdk::payload::*;
 use std::cell::RefCell;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info};
 
 /// 日志文件 non-blocking writer 的 guard，必须保持存活
 static FILE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
+/// 跨线程共享状态 (对话历史、回复时间、bot消息等)
+static SHARED_STATE: OnceLock<RwLock<state::SharedState>> = OnceLock::new();
+
+fn shared_state() -> &'static RwLock<state::SharedState> {
+    SHARED_STATE.get_or_init(|| RwLock::new(state::SharedState::new()))
+}
+
+pub(crate) fn with_shared_state<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut state::SharedState) -> R,
+{
+    let mut s = shared_state().write().unwrap();
+    f(&mut s)
+}
+
+pub(crate) fn read_shared_state<F, R>(f: F) -> R
+where
+    F: FnOnce(&state::SharedState) -> R,
+{
+    let s = shared_state().read().unwrap();
+    f(&s)
+}
 
 /// AI 群聊回复决策提示词
 pub const DECIDE_REPLY_PROMPT: &str = r#"你在群里看到一段对话，判断你想不想参与。
@@ -81,11 +105,11 @@ where
 }
 
 /// 上次主动消息检查时间
-static mut LAST_PROACTIVE_CHECK: u64 = 0;
+static LAST_PROACTIVE_CHECK: AtomicU64 = AtomicU64::new(0);
 /// 上次记忆审查时间
-static mut LAST_MEMORY_REVIEW: u64 = 0;
+static LAST_MEMORY_REVIEW: AtomicU64 = AtomicU64::new(0);
 /// 上次自我反思时间
-static mut LAST_SELF_REFLECTION: u64 = 0;
+static LAST_SELF_REFLECTION: AtomicU64 = AtomicU64::new(0);
 
 // ── 插件入口 ────────────────────────────────────────────────────
 
@@ -159,11 +183,9 @@ pub extern "C" fn plugin_main() {
 
     // 初始化定时器，避免启动时立即触发
     let now = now_secs();
-    unsafe {
-        LAST_PROACTIVE_CHECK = now;
-        LAST_MEMORY_REVIEW = now;
-        LAST_SELF_REFLECTION = now;
-    }
+    LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
+    LAST_MEMORY_REVIEW.store(now, Ordering::Relaxed);
+    LAST_SELF_REFLECTION.store(now, Ordering::Relaxed);
 
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
@@ -211,57 +233,57 @@ pub extern "C" fn plugin_main() {
 
 fn check_periodic() {
     let now = now_secs();
-    let last = unsafe { LAST_PROACTIVE_CHECK };
+    let last = LAST_PROACTIVE_CHECK.load(Ordering::Relaxed);
     let interval = config::get().proactive.check_interval;
     if now.saturating_sub(last) < interval {
         return;
     }
-    unsafe { LAST_PROACTIVE_CHECK = now; }
+    LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
     debug!("periodic: starting check cycle");
 
-    // 情绪衰减 + 主动消息检查
+    // 情绪衰减 + 主动消息检查 (分步获取锁，释放后再调用 proactive/emotion)
+    let mut all_users: Vec<(u64, u64)> = Vec::new();
+
+    // 私聊活跃用户 (thread_local State)
     with_state(|s| {
-        // 私聊活跃用户
-        let private_users: Vec<(u64, u64)> = s.active.iter().map(|&uid| (uid, 0u64)).collect();
-
-        // 群聊: 从 contexts 中获取所有有对话历史的群聊用户
-        let mut group_users: Vec<(u64, u64)> = s.contexts.iter()
-            .filter(|((gid, _), _)| *gid > 0 && s.active_groups.contains(gid))
-            .map(|((gid, uid), _)| (*uid, *gid))
-            .collect();
-
-        // 也包含当前有活跃批次的用户
-        for (&(gid, uid), _) in &s.batches {
-            if gid > 0 {
-                group_users.push((uid, gid));
-            }
-        }
-
-        group_users.sort_unstable();
-        group_users.dedup();
-
-        let private_count = private_users.len();
-        let group_count = group_users.len();
-
-        let mut all_users: Vec<(u64, u64)> = private_users;
-        all_users.extend(group_users);
-
-        debug!(
-            private_count,
-            group_count,
-            "proactive: checking users"
-        );
-
-        for (user_id, group_id) in all_users {
-            emotion::decay(user_id);
-            proactive::check_proactive_messages(user_id, group_id);
+        for &uid in &s.active {
+            all_users.push((uid, 0u64));
         }
     });
 
+    // 群聊用户: 从 SharedState 获取 contexts，从 State 获取 active_groups
+    let active_groups: std::collections::HashSet<u64> = with_state(|s| s.active_groups.clone());
+    read_shared_state(|s| {
+        for (&(gid, uid), ctx) in &s.contexts {
+            if gid > 0 && active_groups.contains(&gid) && !ctx.history.is_empty() {
+                all_users.push((uid, gid));
+            }
+        }
+    });
+
+    // 也包含当前有活跃批次的用户 (thread_local State)
+    with_state(|s| {
+        for (&(gid, uid), _) in &s.batches {
+            if gid > 0 {
+                all_users.push((uid, gid));
+            }
+        }
+    });
+
+    all_users.sort_unstable();
+    all_users.dedup();
+    debug!(count = all_users.len(), "proactive: checking users");
+
+    // 锁已释放，安全调用 proactive/emotion
+    for (user_id, group_id) in &all_users {
+        emotion::decay(*user_id);
+        proactive::check_proactive_messages(*user_id, *group_id);
+    }
+
     // 定期记忆审查 (每小时一次)
-    let last_review = unsafe { LAST_MEMORY_REVIEW };
+    let last_review = LAST_MEMORY_REVIEW.load(Ordering::Relaxed);
     if now.saturating_sub(last_review) >= 3600 {
-        unsafe { LAST_MEMORY_REVIEW = now; }
+        LAST_MEMORY_REVIEW.store(now, Ordering::Relaxed);
         memory::ai_review_all();
     }
 
@@ -276,18 +298,19 @@ fn check_periodic() {
 
     // 对话后反思: 对话结束一段时间后回顾刚结束的对话
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
-    let idle_groups = with_state(|s| s.get_idle_groups(now, post_delay));
+    let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
     for group_id in idle_groups {
-        with_state(|s| {
-            s.reflected_groups.insert(group_id);
-            s.last_review_times.insert(group_id, now);
-        });
+        with_shared_state(|s| { s.reflected_groups.insert(group_id); });
+        with_state(|s| { s.last_review_times.insert(group_id, now); });
         do_post_conversation_reflection(group_id);
     }
 
     // 长时间对话的定期审查：对话还在继续，但距离上次审查已经很久
     let review_interval = config::get().self_reflection.interval;
-    let active_review_groups = with_state(|s| s.get_groups_needing_review(now, review_interval, post_delay));
+    let conv_times = read_shared_state(|s| s.last_conversation_times.clone());
+    let active_review_groups = with_state(|s| {
+        state::get_groups_needing_review(&conv_times, &s.last_review_times, now, review_interval, post_delay)
+    });
     for group_id in active_review_groups {
         with_state(|s| { s.last_review_times.insert(group_id, now); });
         do_post_conversation_reflection(group_id);
@@ -295,28 +318,22 @@ fn check_periodic() {
 
     // 定时空闲反思 (从配置读取间隔)
     let reflect_interval = config::get().self_reflection.interval;
-    let last_reflect = unsafe { LAST_SELF_REFLECTION };
+    let last_reflect = LAST_SELF_REFLECTION.load(Ordering::Relaxed);
     if now.saturating_sub(last_reflect) >= reflect_interval {
-        unsafe { LAST_SELF_REFLECTION = now; }
+        LAST_SELF_REFLECTION.store(now, Ordering::Relaxed);
         do_self_reflection();
     }
 }
 
 /// 执行自我反思：收集最近对话上下文，调用 AI 生成内心想法
 fn do_self_reflection() {
-    // 收集群组列表和私聊上下文
-    let (recent_context, group_ids) = with_state(|s| {
+    // 收集群组列表 (thread_local) 和私聊上下文 (shared)
+    let group_ids: Vec<u64> = with_state(|s| {
+        s.active_groups.iter().filter(|&&gid| gid > 0).copied().collect()
+    });
+
+    let recent_context = read_shared_state(|s| {
         let mut context_parts = Vec::new();
-        let mut groups = Vec::new();
-
-        // 从活跃群组中获取
-        for &gid in &s.active_groups {
-            if gid > 0 {
-                groups.push(gid);
-            }
-        }
-
-        // 取最近有对话的用户的私聊历史
         for (&(gid, uid), ctx) in &s.contexts {
             if gid == 0 && !ctx.history.is_empty() {
                 let recent: Vec<String> = ctx.history.iter()
@@ -329,8 +346,7 @@ fn do_self_reflection() {
                 }
             }
         }
-
-        (context_parts.join("\n\n"), groups)
+        context_parts.join("\n\n")
     });
 
     // 构建群组画像：每个群的最近消息，让 AI 理解每个群是干什么的
@@ -562,7 +578,7 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
         }
 
         // 通用管理员命令 (群聊/私聊均可使用)
-        if let Some(reply) = handle_admin_command(trimmed) {
+        if let Some(reply) = handle_admin_command(trimmed, group_id, user_id) {
             sender::send_msg(group_id, user_id, &reply);
             return;
         }
@@ -625,7 +641,7 @@ fn handle_private_msg(user_id: u64, msg: &str) {
 
     // 通用管理员命令
     if is_admin(user_id) {
-        if let Some(reply) = handle_admin_command(trimmed) {
+        if let Some(reply) = handle_admin_command(trimmed, 0, user_id) {
             sender::send_msg(0, user_id, &reply);
             return;
         }
@@ -681,37 +697,27 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
             Some(config::get().messages.stop.success.clone())
         }
         "遗忘对话" => {
-            let has = with_state(|s| s.contexts.contains_key(&(0, user_id)));
-            if !has {
+            let history = read_shared_state(|s| s.get_history_clone(0, user_id));
+            if history.is_empty() {
                 info!(user_id, "cmd: no context to forget");
                 return Some(config::get().messages.forget.fail.clone());
             }
-            let list = with_state(|s| {
-                let history = &s.contexts[&(0, user_id)].history;
-                if history.is_empty() {
-                    return None;
-                }
-                let list = history
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (role, content))| format!("{}. [{}] {}", i + 1, role, content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                s.forget_user(user_id);
-                Some(list)
-            });
-            match list {
-                Some(list) => {
-                    info!(user_id, "cmd: forgot conversation");
-                    Some(format!("{}\n\n{}", config::get().messages.forget.success, list))
-                },
-                None => Some(config::get().messages.forget.fail.clone()),
-            }
+            let list = history
+                .iter()
+                .enumerate()
+                .map(|(i, (role, content))| format!("{}. [{}] {}", i + 1, role, content))
+                .collect::<Vec<_>>()
+                .join("\n");
+            with_shared_state(|s| s.forget_user_shared(user_id));
+            with_state(|s| s.forget_user_local(user_id));
+            info!(user_id, "cmd: forgot conversation");
+            Some(format!("{}\n\n{}", config::get().messages.forget.success, list))
         }
         "重启对话" => {
-            let has = with_state(|s| s.contexts.contains_key(&(0, user_id)));
+            let has = read_shared_state(|s| s.contexts.contains_key(&(0, user_id)));
             if has {
-                with_state(|s| s.forget_user(user_id));
+                with_shared_state(|s| s.forget_user_shared(user_id));
+                with_state(|s| s.forget_user_local(user_id));
                 memory::forget_all(user_id);
                 info!(user_id, "cmd: restarted conversation");
                 Some(config::get().messages.restart.success.clone())
@@ -814,7 +820,7 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
-fn handle_admin_command(msg: &str) -> Option<String> {
+fn handle_admin_command(msg: &str, group_id: u64, user_id: u64) -> Option<String> {
     debug!(msg, "handle_admin_command: 检查命令");
     match msg {
         "查看群聊" => {
@@ -903,10 +909,10 @@ fn handle_admin_command(msg: &str) -> Option<String> {
             }
             with_state(|s| {
                 s.add_blacklist(uid);
-                // 同时关闭该用户的私聊和清理批次
                 s.active.remove(&uid);
-                s.forget_user(uid);
+                s.forget_user_local(uid);
             });
+            with_shared_state(|s| s.forget_user_shared(uid));
             return Some(format!("已拉黑用户{}，该用户的所有消息将被忽略", uid));
         }
         return Some("格式: 拉黑:QQ号".into());
@@ -927,11 +933,13 @@ fn handle_admin_command(msg: &str) -> Option<String> {
     // ── 远程记忆管理命令 ──────────────────────────────────────────
 
     if msg == "同步想法" {
-        thread::spawn(|| {
-            match crate::self_memory::sync_all_to_remote() {
-                Ok(count) => info!(count, "sync_all_to_remote: ok"),
-                Err(e) => debug!("sync_all_to_remote: error {}", e),
-            }
+        let (gid, uid) = (group_id, user_id);
+        thread::spawn(move || {
+            let result = match crate::self_memory::sync_all_to_remote() {
+                Ok(count) => { info!(count, "sync_all_to_remote: ok"); format!("同步完成，共 {} 条", count) }
+                Err(e) => { debug!("sync_all_to_remote: error {}", e); format!("同步失败: {}", e) }
+            };
+            sender::send_msg(gid, uid, &result);
         });
         return Some("正在同步想法到远程...".into());
     }
@@ -942,11 +950,13 @@ fn handle_admin_command(msg: &str) -> Option<String> {
             return Some("格式: 删除想法:关键词".into());
         }
         let kw = keyword.clone();
+        let (gid, uid) = (group_id, user_id);
         thread::spawn(move || {
-            match crate::self_memory::remote_search_delete(&kw) {
-                Ok(count) => info!(count, keyword = %kw, "remote_search_delete: ok"),
-                Err(e) => debug!("remote_search_delete: error {}", e),
-            }
+            let result = match crate::self_memory::remote_search_delete(&kw) {
+                Ok(count) => { info!(count, keyword = %kw, "remote_search_delete: ok"); format!("已删除 {} 条包含「{}」的想法", count, kw) }
+                Err(e) => { debug!("remote_search_delete: error {}", e); format!("删除失败: {}", e) }
+            };
+            sender::send_msg(gid, uid, &result);
         });
         return Some(format!("正在删除包含「{}」的想法...", keyword));
     }
@@ -988,21 +998,25 @@ fn handle_admin_command(msg: &str) -> Option<String> {
             return Some("格式: 恢复想法:ID".into());
         }
         let id_clone = id.clone();
+        let (gid, uid) = (group_id, user_id);
         thread::spawn(move || {
-            match crate::self_memory::remote_restore(&id_clone) {
-                Ok(()) => info!(id = %id_clone, "remote_restore: ok"),
-                Err(e) => debug!("remote_restore: error {}", e),
-            }
+            let result = match crate::self_memory::remote_restore(&id_clone) {
+                Ok(()) => { info!(id = %id_clone, "remote_restore: ok"); format!("已恢复记忆 {}", id_clone) }
+                Err(e) => { debug!("remote_restore: error {}", e); format!("恢复失败: {}", e) }
+            };
+            sender::send_msg(gid, uid, &result);
         });
         return Some(format!("正在恢复记忆 {}...", id));
     }
 
     if msg == "清理过期想法" {
-        thread::spawn(|| {
-            match crate::self_memory::remote_purge() {
-                Ok(count) => info!(count, "remote_purge: ok"),
-                Err(e) => debug!("remote_purge: error {}", e),
-            }
+        let (gid, uid) = (group_id, user_id);
+        thread::spawn(move || {
+            let result = match crate::self_memory::remote_purge() {
+                Ok(count) => { info!(count, "remote_purge: ok"); format!("已清理 {} 条过期记忆", count) }
+                Err(e) => { debug!("remote_purge: error {}", e); format!("清理失败: {}", e) }
+            };
+            sender::send_msg(gid, uid, &result);
         });
         return Some("正在清理过期记忆...".into());
     }
@@ -1013,11 +1027,13 @@ fn handle_admin_command(msg: &str) -> Option<String> {
             return Some("格式: 删除想法ID:ID".into());
         }
         let id_clone = id.clone();
+        let (gid, uid) = (group_id, user_id);
         thread::spawn(move || {
-            match crate::self_memory::remote_delete(&id_clone) {
-                Ok(()) => info!(id = %id_clone, "remote_delete: ok"),
-                Err(e) => debug!("remote_delete: error {}", e),
-            }
+            let result = match crate::self_memory::remote_delete(&id_clone) {
+                Ok(()) => { info!(id = %id_clone, "remote_delete: ok"); format!("已删除记忆 {}", id_clone) }
+                Err(e) => { debug!("remote_delete: error {}", e); format!("删除失败: {}", e) }
+            };
+            sender::send_msg(gid, uid, &result);
         });
         return Some(format!("正在删除记忆 {}...", id));
     }
@@ -1138,7 +1154,7 @@ fn process_expired_batches() {
             }
 
             // 记录对话活跃时间 (用于对话后反思)
-            with_state(|s| s.record_conversation(group_id, now_secs()));
+            with_shared_state(|s| s.record_conversation(group_id, now_secs()));
         });
     }
 }
@@ -1158,7 +1174,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 
     // 检查是否在 follow-up 窗口内 (机器人刚在群里回过话)
-    let in_follow_up = with_state(|s| {
+    let in_follow_up = read_shared_state(|s| {
         s.is_in_follow_up(group_id, 0, cfg.conversation.reply_follow_up_secs)
     });
 
@@ -1204,8 +1220,8 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 
     // 4. 与该用户的历史对话
-    let recent_history = with_state(|s| {
-        s.get_or_create_context(group_id, user_id).history.iter()
+    let recent_history = read_shared_state(|s| {
+        s.get_history_clone(group_id, user_id).iter()
             .rev()
             .take(6)
             .map(|(role, content)| format!("[{}]: {}", role, content))
@@ -1216,9 +1232,8 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     }
 
     // 5. 机器人在群里最近的消息 (关键：让用户回应能被识别为"接话")
-    let bot_msgs = with_state(|s| {
+    let bot_msgs = read_shared_state(|s| {
         s.get_recent_bot_messages(group_id, 600, 5)
-            .into_iter().map(|m| m.to_string()).collect::<Vec<_>>()
     });
     if !bot_msgs.is_empty() {
         context_parts.push(format!("# 你在群里最近的消息\n{}", bot_msgs.join("\n")));
@@ -1358,10 +1373,10 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
     }
 
     // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
-    with_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
+    with_shared_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
 
-    let history = with_state(|s| {
-        s.get_or_create_context(group_id, user_id).history.clone()
+    let history = read_shared_state(|s| {
+        s.get_history_clone(group_id, user_id)
     });
 
     // 组装额外上下文: 记忆 + 人格 + 情绪
@@ -1392,7 +1407,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
             info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "chat: got AI reply");
 
             // 追加 AI 回复到历史
-            with_state(|s| s.push_history(group_id, user_id, "assistant", &cleaned_reply, max_history));
+            with_shared_state(|s| s.push_history(group_id, user_id, "assistant", &cleaned_reply, max_history));
 
             // 处理定时任务嵌入
             let final_reply = cron::handle_cron_in_reply(&cleaned_reply, group_id);
@@ -1406,7 +1421,7 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
             }
 
             // 记录回复时间 (用于群聊对话跟进判断)
-            with_state(|s| {
+            with_shared_state(|s| {
                 s.record_reply(group_id, user_id);
                 if group_id > 0 {
                     s.record_bot_message(group_id, &final_reply);
@@ -1507,9 +1522,8 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
 
     // Bot 自己最近的消息 (帮助保持一致性)
     if group_id > 0 {
-        let bot_msgs: Vec<String> = with_state(|s| {
+        let bot_msgs = read_shared_state(|s| {
             s.get_recent_bot_messages(group_id, 600, 5)
-                .into_iter().map(|m| m.to_string()).collect()
         });
         if !bot_msgs.is_empty() {
             parts.push(format!("# 你在群里最近发过的消息\n{}", bot_msgs.join("\n")));

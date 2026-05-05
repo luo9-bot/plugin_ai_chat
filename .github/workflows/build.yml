@@ -1,4 +1,7 @@
-name: Build and Release Plugin
+# Luo9 插件标准构建 workflow
+# 无需修改此文件，所有信息自动从 Cargo.toml 读取
+# 修改 description 字段即可更新 Release 显示名称
+name: Build Plugin
 
 on:
   push:
@@ -8,19 +11,18 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  PLUGIN_NAME: "top_drluo_luo9_ai_chat"
 
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
+      - name: Checkout 代码
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and build
+      - name: 缓存 Cargo
         uses: actions/cache@v4
         with:
           path: |
@@ -30,33 +32,27 @@ jobs:
           key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-cargo-
 
-      - name: Build release
+      - name: 构建 Release
         run: cargo build --release
 
-      - name: Verify build artifacts
-        run: |
-          echo "Linux build artifacts:"
-          ls -la target/release/libtop_drluo_luo9_ai_chat.so
-          file target/release/libtop_drluo_luo9_ai_chat.so
-
-      - name: Upload artifacts
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ai_chat-linux
-          path: target/release/libtop_drluo_luo9_ai_chat.so
+          name: plugin-linux
+          path: target/release/*.so
           if-no-files-found: error
           retention-days: 7
 
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout code
+      - name: Checkout 代码
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and build
+      - name: 缓存 Cargo
         uses: actions/cache@v4
         with:
           path: |
@@ -66,22 +62,16 @@ jobs:
           key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: windows-cargo-
 
-      - name: Build release
+      - name: 构建 Release
         run: cargo build --release
 
-      - name: Verify build artifacts
-        shell: bash
-        run: |
-          echo "Windows build artifacts:"
-          ls -la target/release/top_drluo_luo9_ai_chat.dll target/release/top_drluo_luo9_ai_chat.dll.lib
-
-      - name: Upload artifacts
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ai_chat-windows
+          name: plugin-windows
           path: |
-            target/release/top_drluo_luo9_ai_chat.dll
-            target/release/top_drluo_luo9_ai_chat.dll.lib
+            target/release/*.dll
+            target/release/*.dll.lib
           if-no-files-found: error
           retention-days: 7
 
@@ -92,44 +82,48 @@ jobs:
       contents: write
       actions: read
     steps:
-      - name: Checkout code
+      - name: Checkout 代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: 下载所有产物
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Extract version from tag
+      - name: 读取 Cargo.toml 信息
+        id: meta
+        run: |
+          CRATE_NAME=$(grep '^name' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          DESCRIPTION=$(grep '^description' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          [ -z "$DESCRIPTION" ] && DESCRIPTION="$CRATE_NAME"
+          echo "crate_name=$CRATE_NAME" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+
+      - name: 提取版本号
         id: version
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Generate Release Notes
+      - name: 生成 Release Notes
         run: |
-          cat > RELEASE_NOTES.md << 'EOF'
-          # top.drluo.luo9-ai-chat 插件发布
+          cat > RELEASE_NOTES.md << EOF
+          # ${{ steps.meta.outputs.description }} v${{ steps.version.outputs.version }}
 
-          AI 对话插件 - 记忆/人格/情绪/主动对话系统
-
-          ## 文件说明
-          - Linux: libtop_drluo_luo9_ai_chat.so (动态链接库)
-          - Windows: top_drluo_luo9_ai_chat.dll (动态链接库)
-
-          ## 安装说明
-          将对应的动态库文件放置到 Luo9 Bot 插件目录中。
-
-          ## 配置
-          1. 复制 config.example.yaml 为 config.yaml
-          2. 填入 API 配置
-          3. 在 prompts/ 目录下放置提示词文件
+          ## 安装
+          将对应平台的动态库文件复制到 Luo9 Bot 插件目录即可。
           EOF
 
-      - name: Determine if prerelease
+          if [ -f "CHANGELOG.md" ]; then
+            echo "" >> RELEASE_NOTES.md
+            echo "## 变更日志" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            cat CHANGELOG.md >> RELEASE_NOTES.md
+          fi
+
+      - name: 判断是否为预发布
         id: prerelease
         run: |
           TAG="${{ github.ref_name }}"
@@ -139,44 +133,15 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create plugin package
-        run: |
-          mkdir -p plugin_package/linux
-          mkdir -p plugin_package/windows
-          mkdir -p plugin_package/prompts
-
-          cp artifacts/ai_chat-linux/libtop_drluo_luo9_ai_chat.so plugin_package/linux/
-          cp artifacts/ai_chat-windows/top_drluo_luo9_ai_chat.dll plugin_package/windows/
-          cp artifacts/ai_chat-windows/top_drluo_luo9_ai_chat.dll.lib plugin_package/windows/ 2>/dev/null || true
-          cp prompts/*.txt plugin_package/prompts/
-          cp config.example.yaml plugin_package/
-
-          cat > plugin_package/README.md << 'EOF'
-          # top.drluo.luo9-ai-chat
-
-          ## 安装
-          Linux: 将 linux/libtop_drluo_luo9_ai_chat.so 复制到插件目录
-          Windows: 将 windows/top_drluo_luo9_ai_chat.dll 复制到插件目录
-
-          ## 配置
-          复制 config.example.yaml 为 config.yaml，填入 API 配置。
-          将 prompts/ 目录复制到插件目录。
-          EOF
-
-          cd plugin_package
-          zip -r ../ai_chat-${{ github.ref_name }}.zip .
-          cd ..
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ai_chat ${{ steps.version.outputs.version }}
+          name: ${{ steps.meta.outputs.description }} ${{ steps.version.outputs.version }}
           tag_name: ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
           files: |
-            ai_chat-${{ github.ref_name }}.zip
-            artifacts/ai_chat-linux/libtop_drluo_luo9_ai_chat.so
-            artifacts/ai_chat-windows/top_drluo_luo9_ai_chat.dll
+            artifacts/plugin-linux/*
+            artifacts/plugin-windows/*
           draft: false
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
         env:
@@ -187,10 +152,10 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Delete artifacts
+      - name: 清理 CI 产物
         uses: geekyeggo/delete-artifact@v5
         with:
           name: |
-            ai_chat-linux
-            ai_chat-windows
+            plugin-linux
+            plugin-windows
           failOnError: false

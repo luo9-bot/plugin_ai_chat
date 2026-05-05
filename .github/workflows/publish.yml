@@ -1,0 +1,147 @@
+# Luo9 插件发布 workflow
+# 当 Release 创建时，自动向注册表仓库提交 PR
+# 前置条件：在组织 Settings > Secrets 中添加 APP_ID 和 APP_PRIVATE_KEY
+name: Publish to Registry
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: "!github.event.release.prerelease"
+    steps:
+      - name: Checkout 插件仓库
+        uses: actions/checkout@v4
+
+      - name: 获取 App Token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: registry
+
+      - name: 读取 Cargo.toml 信息
+        id: meta
+        run: |
+          CRATE_NAME=$(grep '^name' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          DESCRIPTION=$(grep '^description' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          SDK_VERSION=$(grep 'luo9_sdk' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          [ -z "$DESCRIPTION" ] && DESCRIPTION="$CRATE_NAME"
+          [ -z "$SDK_VERSION" ] && SDK_VERSION="unknown"
+          echo "crate_name=$CRATE_NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+          echo "sdk_version=$SDK_VERSION" >> $GITHUB_OUTPUT
+
+      - name: 设置注册表信息
+        id: reg
+        run: |
+          CRATE_NAME="${{ steps.meta.outputs.crate_name }}"
+          echo "branch=publish-${CRATE_NAME}-${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+          echo "linux_asset=lib${CRATE_NAME}.so" >> $GITHUB_OUTPUT
+          echo "windows_asset=lib${CRATE_NAME}.dll" >> $GITHUB_OUTPUT
+
+      - name: 克隆注册表仓库
+        run: |
+          git clone https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/luo9-bot/registry.git registry
+
+      - name: 更新注册表
+        run: |
+          cd registry
+
+          # 获取当前 registry.json（远程版本，避免本地缓存过期）
+          curl -fsSL https://raw.githubusercontent.com/luo9-bot/registry/main/registry.json -o registry.json 2>/dev/null || true
+
+          CRATE_NAME="${{ steps.meta.outputs.crate_name }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          DESCRIPTION="${{ steps.meta.outputs.description }}"
+          SDK_VERSION="${{ steps.meta.outputs.sdk_version }}"
+          TAG="${{ github.event.release.tag_name }}"
+          REPO="${{ github.repository }}"
+          LINUX_ASSET="${{ steps.reg.outputs.linux_asset }}"
+          WINDOWS_ASSET="${{ steps.reg.outputs.windows_asset }}"
+
+          # 如果 registry.json 不存在或为空，初始化
+          if [ ! -s registry.json ]; then
+            echo '{"plugins":{},"bot":{"repo":"luoy-oss/luo9_bot","versions":[]}}' > registry.json
+          fi
+
+          # 检查插件是否已存在
+          if jq -e ".plugins.\"$CRATE_NAME\"" registry.json > /dev/null 2>&1; then
+            # 插件已存在，检查版本是否重复
+            EXISTS=$(jq ".plugins.\"$CRATE_NAME\".versions | map(select(.version == \"$VERSION\")) | length" registry.json)
+            if [ "$EXISTS" -gt 0 ]; then
+              echo "版本 $VERSION 已存在，跳过"
+              exit 0
+            fi
+
+            # 在已有插件的 versions 数组头部插入新版本
+            jq ".plugins.\"$CRATE_NAME\".versions = [{\"version\":\"$VERSION\",\"tag\":\"$TAG\",\"sdk_version\":\"$SDK_VERSION\",\"assets\":{\"windows-x86_64\":\"$WINDOWS_ASSET\",\"linux-x86_64\":\"$LINUX_ASSET\"}}] + .plugins.\"$CRATE_NAME\".versions" registry.json > tmp.json
+            mv tmp.json registry.json
+            echo "action=updated" >> $GITHUB_OUTPUT
+          else
+            # 添加新插件
+            jq ".plugins.\"$CRATE_NAME\" = {\"description\":\"$DESCRIPTION\",\"repo\":\"$REPO\",\"config_files\":[],\"versions\":[{\"version\":\"$VERSION\",\"tag\":\"$TAG\",\"sdk_version\":\"$SDK_VERSION\",\"assets\":{\"windows-x86_64\":\"$WINDOWS_ASSET\",\"linux-x86_64\":\"$LINUX_ASSET\"}}]}" registry.json > tmp.json
+            mv tmp.json registry.json
+            echo "action=added" >> $GITHUB_OUTPUT
+          fi
+
+          # 验证 JSON 有效性
+          jq empty registry.json
+
+      - name: 提交 PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          cd registry
+          BRANCH="${{ steps.reg.outputs.branch }}"
+          CRATE_NAME="${{ steps.meta.outputs.crate_name }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          ACTION="${{ steps.action.outputs.action }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add registry.json
+          git commit -m "publish: ${CRATE_NAME} v${VERSION}"
+          git push origin "$BRANCH"
+
+          if [ "$ACTION" = "added" ]; then
+            TITLE="publish: 新插件 ${CRATE_NAME} v${VERSION}"
+            BODY="## 新插件注册
+
+          | 字段 | 值 |
+          |------|------|
+          | 插件 | \`${CRATE_NAME}\` |
+          | 版本 | v${VERSION} |
+          | 说明 | ${{ steps.meta.outputs.description }} |
+          | SDK | v${{ steps.meta.outputs.sdk_version }} |
+          | 仓库 | [${{ github.repository }}](https://github.com/${{ github.repository }}) |
+
+          ### 下载地址
+          - Linux: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/${{ steps.reg.outputs.linux_asset }}
+          - Windows: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/${{ steps.reg.outputs.windows_asset }}
+          "
+          else
+            TITLE="publish: ${CRATE_NAME} v${VERSION}"
+            BODY="## 插件更新
+
+          | 字段 | 值 |
+          |------|------|
+          | 插件 | \`${CRATE_NAME}\` |
+          | 版本 | v${VERSION} |
+          | 说明 | ${{ steps.meta.outputs.description }} |
+          "
+          fi
+
+          gh pr create \
+            --repo luo9-bot/registry \
+            --head "$BRANCH" \
+            --base main \
+            --title "$TITLE" \
+            --body "$BODY"

@@ -553,9 +553,8 @@ pub fn ai_review_all() {
         }).collect();
 
         // 获取最近对话历史 (取私聊上下文作为代表)
-        let recent_history = crate::with_state(|s| {
-            let ctx = s.get_or_create_context(0, user_id);
-            ctx.history.iter()
+        let recent_history = crate::read_shared_state(|s| {
+            s.get_history_clone(0, user_id).iter()
                 .rev()
                 .take(8)
                 .map(|(role, content)| format!("[{}]: {}", role, content))
