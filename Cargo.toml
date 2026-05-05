@@ -5,6 +5,9 @@ edition = "2024"
 description = "AI 对话插件"
 authors = ["drluo"]
 
+[package.metadata]
+tags = ["ai", "chat"]
+
 [features]
 default = ["plugin"]
 plugin = []

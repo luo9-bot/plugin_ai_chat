@@ -51,6 +51,7 @@ jobs:
           git clone https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/luo9-bot/registry.git registry
 
       - name: 更新注册表
+        id: registry
         run: |
           cd registry
 
@@ -71,22 +72,24 @@ jobs:
             echo '{"plugins":{},"bot":{"repo":"luoy-oss/luo9_bot","versions":[]}}' > registry.json
           fi
 
-          # 检查插件是否已存在
-          if jq -e ".plugins.\"$CRATE_NAME\"" registry.json > /dev/null 2>&1; then
+          # 检查插件是否已存在（使用 --arg 绑定变量，避免下划线等特殊字符被 jq 误解）
+          if jq --arg name "$CRATE_NAME" -e '.plugins[$name]' registry.json > /dev/null 2>&1; then
             # 插件已存在，检查版本是否重复
-            EXISTS=$(jq ".plugins.\"$CRATE_NAME\".versions | map(select(.version == \"$VERSION\")) | length" registry.json)
+            EXISTS=$(jq --arg name "$CRATE_NAME" --arg ver "$VERSION" '.plugins[$name].versions | map(select(.version == $ver)) | length' registry.json)
             if [ "$EXISTS" -gt 0 ]; then
               echo "版本 $VERSION 已存在，跳过"
               exit 0
             fi
 
             # 在已有插件的 versions 数组头部插入新版本
-            jq ".plugins.\"$CRATE_NAME\".versions = [{\"version\":\"$VERSION\",\"tag\":\"$TAG\",\"sdk_version\":\"$SDK_VERSION\",\"assets\":{\"windows-x86_64\":\"$WINDOWS_ASSET\",\"linux-x86_64\":\"$LINUX_ASSET\"}}] + .plugins.\"$CRATE_NAME\".versions" registry.json > tmp.json
+            jq --arg name "$CRATE_NAME" --arg ver "$VERSION" --arg tag "$TAG" --arg sdk "$SDK_VERSION" --arg win "$WINDOWS_ASSET" --arg lin "$LINUX_ASSET" \
+              '.plugins[$name].versions = [{"version":$ver,"tag":$tag,"sdk_version":$sdk,"assets":{"windows-x86_64":$win,"linux-x86_64":$lin}}] + .plugins[$name].versions' registry.json > tmp.json
             mv tmp.json registry.json
             echo "action=updated" >> $GITHUB_OUTPUT
           else
             # 添加新插件
-            jq ".plugins.\"$CRATE_NAME\" = {\"description\":\"$DESCRIPTION\",\"repo\":\"$REPO\",\"config_files\":[],\"versions\":[{\"version\":\"$VERSION\",\"tag\":\"$TAG\",\"sdk_version\":\"$SDK_VERSION\",\"assets\":{\"windows-x86_64\":\"$WINDOWS_ASSET\",\"linux-x86_64\":\"$LINUX_ASSET\"}}]}" registry.json > tmp.json
+            jq --arg name "$CRATE_NAME" --arg desc "$DESCRIPTION" --arg repo "$REPO" --arg ver "$VERSION" --arg tag "$TAG" --arg sdk "$SDK_VERSION" --arg win "$WINDOWS_ASSET" --arg lin "$LINUX_ASSET" \
+              '.plugins[$name] = {"description":$desc,"repo":$repo,"config_files":[],"versions":[{"version":$ver,"tag":$tag,"sdk_version":$sdk,"assets":{"windows-x86_64":$win,"linux-x86_64":$lin}}]}' registry.json > tmp.json
             mv tmp.json registry.json
             echo "action=added" >> $GITHUB_OUTPUT
           fi
@@ -102,7 +105,18 @@ jobs:
           BRANCH="${{ steps.reg.outputs.branch }}"
           CRATE_NAME="${{ steps.meta.outputs.crate_name }}"
           VERSION="${{ steps.meta.outputs.version }}"
-          ACTION="${{ steps.action.outputs.action }}"
+          TAG="${{ github.event.release.tag_name }}"
+          ACTION="${{ steps.registry.outputs.action }}"
+          LINUX_ASSET="${{ steps.reg.outputs.linux_asset }}"
+          WINDOWS_ASSET="${{ steps.reg.outputs.windows_asset }}"
+          REPO_URL="https://github.com/${{ github.repository }}"
+
+          # tag 为空时指向 latest release
+          if [ -n "$TAG" ]; then
+            DOWNLOAD_URL="${REPO_URL}/releases/download/${TAG}"
+          else
+            DOWNLOAD_URL="${REPO_URL}/releases/latest/download"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -121,11 +135,11 @@ jobs:
           | 版本 | v${VERSION} |
           | 说明 | ${{ steps.meta.outputs.description }} |
           | SDK | v${{ steps.meta.outputs.sdk_version }} |
-          | 仓库 | [${{ github.repository }}](https://github.com/${{ github.repository }}) |
+          | 仓库 | [${{ github.repository }}](${REPO_URL}) |
 
           ### 下载地址
-          - Linux: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/${{ steps.reg.outputs.linux_asset }}
-          - Windows: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/${{ steps.reg.outputs.windows_asset }}
+          - Linux: ${DOWNLOAD_URL}/${LINUX_ASSET}
+          - Windows: ${DOWNLOAD_URL}/${WINDOWS_ASSET}
           "
           else
             TITLE="publish: ${CRATE_NAME} v${VERSION}"
