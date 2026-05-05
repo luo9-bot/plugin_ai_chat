@@ -16,9 +16,9 @@ fn key_path() -> std::path::PathBuf {
 /// 生成或加载 ECC 密钥对 (首次运行自动生成)
 pub fn init() {
     let key = load_or_generate();
+    let _ = SIGNING_KEY.set(key);
     let pubkey_hex = public_key_hex();
     debug!(public_key = %pubkey_hex, "crypto: ECC key ready");
-    let _ = SIGNING_KEY.set(key);
 }
 
 fn load_or_generate() -> SigningKey {

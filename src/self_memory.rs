@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::SystemTime;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::config;
 use crate::emotion;
@@ -439,6 +439,8 @@ pub fn register_to_registry() {
         cfg.sync.icon.clone()
     };
 
+    info!(db_name = %cfg.sync.db_name, display_name = %display_name, "register_to_registry: 注册中");
+
     let body = serde_json::json!({
         "db_name": cfg.sync.db_name,
         "display_name": display_name,
@@ -453,17 +455,20 @@ pub fn register_to_registry() {
         .header("Content-Type", "application/json")
         .send(json.as_bytes())
     {
-        Ok(_) => debug!("register_to_registry: ok"),
-        Err(e) => debug!("register_to_registry: error {}", e),
+        Ok(_) => info!("register_to_registry: 注册成功"),
+        Err(e) => info!("register_to_registry: 注册失败 {}", e),
     }
 }
 
 /// 将全部本地想法同步到远程
 pub fn sync_all_to_remote() -> Result<usize, String> {
     let store = SelfMemoryStore::load();
-    if store.thoughts.is_empty() {
+    let total = store.thoughts.len();
+    if total == 0 {
         return Err("本地没有想法".into());
     }
+
+    info!(total, "sync_all_to_remote: 开始同步");
 
     let thoughts: Vec<serde_json::Value> = store.thoughts.iter().map(|t| {
         serde_json::json!({
@@ -479,6 +484,7 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
     });
     let json = body.to_string();
     let headers = sign_headers();
+    debug!(bytes = json.len(), "sync_all_to_remote: 请求体准备完成");
 
     let mut req = ureq::post(&api_url("/bulk-sync"))
         .header("Content-Type", "application/json");
@@ -489,17 +495,23 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
     let mut resp = req.send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
+    let status = resp.status().as_u16();
+    debug!(status, "sync_all_to_remote: 收到响应");
+
     let resp_str = resp.body_mut().read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
     let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let inserted = resp_json.get("inserted").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    info!(total, inserted, "sync_all_to_remote: 同步完成");
     Ok(inserted as usize)
 }
 
 /// 关键词搜索远程记忆
 pub fn remote_search(keyword: &str) -> Result<serde_json::Value, String> {
+    debug!(keyword, "remote_search: 搜索中");
+
     let body = serde_json::json!({
         "keyword": keyword,
         "action": "search",
@@ -522,11 +534,14 @@ pub fn remote_search(keyword: &str) -> Result<serde_json::Value, String> {
     let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    debug!(keyword, "remote_search: 搜索完成");
     Ok(resp_json)
 }
 
 /// 关键词批量软删除远程记忆
 pub fn remote_search_delete(keyword: &str) -> Result<u64, String> {
+    info!(keyword, "remote_search_delete: 开始删除");
+
     let body = serde_json::json!({
         "keyword": keyword,
         "action": "delete",
@@ -550,11 +565,14 @@ pub fn remote_search_delete(keyword: &str) -> Result<u64, String> {
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let deleted = resp_json.get("deleted").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    info!(keyword, deleted, "remote_search_delete: 完成");
     Ok(deleted)
 }
 
 /// 恢复远程已删除的记忆
 pub fn remote_restore(id: &str) -> Result<(), String> {
+    info!(id, "remote_restore: 恢复中");
+
     let body = serde_json::json!({
         "action": "restore",
         "db_name": db_name(),
@@ -571,11 +589,14 @@ pub fn remote_restore(id: &str) -> Result<(), String> {
     req.send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
+    info!(id, "remote_restore: 恢复成功");
     Ok(())
 }
 
 /// 获取远程已删除记忆列表
 pub fn remote_list_deleted() -> Result<serde_json::Value, String> {
+    debug!("remote_list_deleted: 查询中");
+
     let url = format!("{}?db={}&include_deleted=true&deleted_only=true",
         api_url(""), db_name());
 
@@ -588,11 +609,14 @@ pub fn remote_list_deleted() -> Result<serde_json::Value, String> {
     let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    debug!("remote_list_deleted: 查询完成");
     Ok(resp_json)
 }
 
 /// 清理远程超过30天的已删除记忆
 pub fn remote_purge() -> Result<u64, String> {
+    info!("remote_purge: 开始清理过期记忆");
+
     let body = serde_json::json!({
         "db_name": db_name(),
     });
@@ -614,5 +638,6 @@ pub fn remote_purge() -> Result<u64, String> {
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let purged = resp_json.get("purged").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    info!(purged, "remote_purge: 清理完成");
     Ok(purged)
 }

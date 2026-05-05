@@ -154,8 +154,8 @@ pub extern "C" fn plugin_main() {
     // 初始化 ECC 密钥对 (在注册之前)
     crypto::init();
 
-    // 注册到远程注册表 (需要 crypto 已初始化)
-    crate::self_memory::register_to_registry();
+    // 注册到远程注册表 (后台线程，不阻塞启动)
+    thread::spawn(|| crate::self_memory::register_to_registry());
 
     // 初始化定时器，避免启动时立即触发
     let now = now_secs();
@@ -924,24 +924,32 @@ fn handle_admin_command(msg: &str) -> Option<String> {
     // ── 远程记忆管理命令 ──────────────────────────────────────────
 
     if msg == "同步想法" {
-        return match crate::self_memory::sync_all_to_remote() {
-            Ok(count) => Some(format!("已同步 {} 条想法到远程", count)),
-            Err(e) => Some(format!("同步失败: {}", e)),
-        };
+        thread::spawn(|| {
+            match crate::self_memory::sync_all_to_remote() {
+                Ok(count) => info!(count, "sync_all_to_remote: ok"),
+                Err(e) => debug!("sync_all_to_remote: error {}", e),
+            }
+        });
+        return Some("正在同步想法到远程...".into());
     }
 
     if let Some(keyword) = msg.strip_prefix("删除想法:") {
-        let keyword = keyword.trim();
+        let keyword = keyword.trim().to_string();
         if keyword.is_empty() {
             return Some("格式: 删除想法:关键词".into());
         }
-        return match crate::self_memory::remote_search_delete(keyword) {
-            Ok(count) => Some(format!("已软删除 {} 条包含「{}」的想法", count, keyword)),
-            Err(e) => Some(format!("删除失败: {}", e)),
-        };
+        let kw = keyword.clone();
+        thread::spawn(move || {
+            match crate::self_memory::remote_search_delete(&kw) {
+                Ok(count) => info!(count, keyword = %kw, "remote_search_delete: ok"),
+                Err(e) => debug!("remote_search_delete: error {}", e),
+            }
+        });
+        return Some(format!("正在删除包含「{}」的想法...", keyword));
     }
 
     if msg == "查看已删除" {
+        // 这个命令返回数据给用户，仍需同步执行
         return match crate::self_memory::remote_list_deleted() {
             Ok(data) => {
                 let thoughts = data.get("thoughts").and_then(|v| v.as_array());
@@ -972,21 +980,28 @@ fn handle_admin_command(msg: &str) -> Option<String> {
     }
 
     if let Some(id) = msg.strip_prefix("恢复想法:") {
-        let id = id.trim();
+        let id = id.trim().to_string();
         if id.is_empty() {
             return Some("格式: 恢复想法:ID".into());
         }
-        return match crate::self_memory::remote_restore(id) {
-            Ok(()) => Some(format!("已恢复记忆 {}", id)),
-            Err(e) => Some(format!("恢复失败: {}", e)),
-        };
+        let id_clone = id.clone();
+        thread::spawn(move || {
+            match crate::self_memory::remote_restore(&id_clone) {
+                Ok(()) => info!(id = %id_clone, "remote_restore: ok"),
+                Err(e) => debug!("remote_restore: error {}", e),
+            }
+        });
+        return Some(format!("正在恢复记忆 {}...", id));
     }
 
     if msg == "清理过期想法" {
-        return match crate::self_memory::remote_purge() {
-            Ok(count) => Some(format!("已永久清理 {} 条过期记忆", count)),
-            Err(e) => Some(format!("清理失败: {}", e)),
-        };
+        thread::spawn(|| {
+            match crate::self_memory::remote_purge() {
+                Ok(count) => info!(count, "remote_purge: ok"),
+                Err(e) => debug!("remote_purge: error {}", e),
+            }
+        });
+        return Some("正在清理过期记忆...".into());
     }
 
     None
@@ -1049,46 +1064,46 @@ fn process_expired_batches() {
         }
     }
 
-    // 处理私聊批次 (直接回复)
+    // 处理私聊批次 (独立线程，不阻塞主循环)
     for (user_id, messages, timestamps) in private_batches {
-        process_message(user_id, 0, &messages, &timestamps);
-        // 检查处理期间是否有新消息
-        check_new_messages_for_user(user_id);
+        thread::spawn(move || {
+            process_message(user_id, 0, &messages, &timestamps);
+        });
     }
 
-    // 处理群聊批次: 把整个群的消息作为上下文一起做 AI 决策
+    // 处理群聊批次: 独立线程，不阻塞主循环
     for (group_id, user_msgs) in group_msgs {
-        let group_context: Vec<String> = user_msgs.iter()
-            .map(|(uid, msg, _)| {
-                let lines: Vec<&str> = msg.lines().collect();
-                if lines.len() <= 1 {
-                    format!("[user_id:{}] {}", uid, msg)
-                } else {
-                    format!("[user_id:{}] {}", uid, lines.join("\n"))
+        let at_pattern = at_pattern.clone();
+        thread::spawn(move || {
+            let group_context: Vec<String> = user_msgs.iter()
+                .map(|(uid, msg, _)| {
+                    let lines: Vec<&str> = msg.lines().collect();
+                    if lines.len() <= 1 {
+                        format!("[user_id:{}] {}", uid, msg)
+                    } else {
+                        format!("[user_id:{}] {}", uid, lines.join("\n"))
+                    }
+                })
+                .collect();
+            let context_str = group_context.join("\n");
+
+            for (user_id, messages, timestamps) in &user_msgs {
+                // @机器人 → 直接回复 (唯一快速通道)
+                if self_qq > 0 && messages.contains(&at_pattern) {
+                    process_message(*user_id, group_id, messages, timestamps);
+                    continue;
                 }
-            })
-            .collect();
-        let context_str = group_context.join("\n");
 
-        for (user_id, messages, timestamps) in &user_msgs {
-            // @机器人 → 直接回复 (唯一快速通道)
-            if self_qq > 0 && messages.contains(&at_pattern) {
-                process_message(*user_id, group_id, messages, timestamps);
-                continue;
+                // 所有非@消息: AI 决策 (传入群组上下文)
+                if decide_reply(group_id, *user_id, messages, &context_str) {
+                    process_message(*user_id, group_id, messages, timestamps);
+                }
+                // 不回复的消息已记录在工作记忆中，对话后统一审查
             }
 
-            // 所有非@消息: AI 决策 (传入群组上下文)
-            if decide_reply(group_id, *user_id, messages, &context_str) {
-                process_message(*user_id, group_id, messages, timestamps);
-            }
-            // 不回复的消息已记录在工作记忆中，对话后统一审查
-        }
-
-        // 记录对话活跃时间 (用于对话后反思)
-        with_state(|s| s.record_conversation(group_id, now_secs()));
-
-        // 处理完成后检查整个群是否有新消息 (而非逐用户检查)
-        check_new_messages_for_group(group_id);
+            // 记录对话活跃时间 (用于对话后反思)
+            with_state(|s| s.record_conversation(group_id, now_secs()));
+        });
     }
 }
 
