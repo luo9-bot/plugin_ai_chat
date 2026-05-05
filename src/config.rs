@@ -646,9 +646,6 @@ pub fn init() {
     let _ = PROMPT.set(prompt_content);
 
     load_all();
-
-    // 注册到远程注册表 (如果配置了暴露)
-    crate::self_memory::register_to_registry();
 }
 
 fn load_all() {

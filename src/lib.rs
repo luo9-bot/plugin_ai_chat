@@ -154,6 +154,9 @@ pub extern "C" fn plugin_main() {
     // 初始化 ECC 密钥对 (在注册之前)
     crypto::init();
 
+    // 注册到远程注册表 (需要 crypto 已初始化)
+    crate::self_memory::register_to_registry();
+
     // 初始化定时器，避免启动时立即触发
     let now = now_secs();
     unsafe {
