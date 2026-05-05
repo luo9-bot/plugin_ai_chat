@@ -1007,6 +1007,39 @@ fn handle_admin_command(msg: &str) -> Option<String> {
         return Some("正在清理过期记忆...".into());
     }
 
+    if let Some(id) = msg.strip_prefix("删除想法ID:") {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Some("格式: 删除想法ID:ID".into());
+        }
+        let id_clone = id.clone();
+        thread::spawn(move || {
+            match crate::self_memory::remote_delete(&id_clone) {
+                Ok(()) => info!(id = %id_clone, "remote_delete: ok"),
+                Err(e) => debug!("remote_delete: error {}", e),
+            }
+        });
+        return Some(format!("正在删除记忆 {}...", id));
+    }
+
+    if msg == "想法统计" {
+        return match crate::self_memory::remote_stats() {
+            Ok(data) => {
+                let total = data.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+                let deleted = data.get("deleted").and_then(|v| v.as_u64()).unwrap_or(0);
+                let reflection = data.get("reflection").and_then(|v| v.as_u64()).unwrap_or(0);
+                let experience = data.get("experience").and_then(|v| v.as_u64()).unwrap_or(0);
+                let plan = data.get("plan").and_then(|v| v.as_u64()).unwrap_or(0);
+                let feeling = data.get("feeling").and_then(|v| v.as_u64()).unwrap_or(0);
+                Some(format!(
+                    "记忆统计:\n总计: {} (已删除: {})\n脑海涟漪: {}\n日常片段: {}\n小小念头: {}\n心情碎片: {}",
+                    total, deleted, reflection, experience, plan, feeling
+                ))
+            }
+            Err(e) => Some(format!("查询失败: {}", e)),
+        };
+    }
+
     None
 }
 

@@ -522,9 +522,8 @@ pub fn remote_search(keyword: &str) -> Result<serde_json::Value, String> {
     debug!(keyword, "remote_search: 搜索中");
 
     let body = serde_json::json!({
-        "keyword": keyword,
-        "action": "search",
         "db_name": db_name(),
+        "keyword": keyword,
     });
     let json = body.to_string();
     let headers = sign_headers();
@@ -552,9 +551,9 @@ pub fn remote_search_delete(keyword: &str) -> Result<u64, String> {
     info!(keyword, "remote_search_delete: 开始删除");
 
     let body = serde_json::json!({
+        "db_name": db_name(),
         "keyword": keyword,
         "action": "delete",
-        "db_name": db_name(),
     });
     let json = body.to_string();
     let headers = sign_headers();
@@ -576,6 +575,29 @@ pub fn remote_search_delete(keyword: &str) -> Result<u64, String> {
     let deleted = resp_json.get("deleted").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
     info!(keyword, deleted, "remote_search_delete: 完成");
     Ok(deleted)
+}
+
+/// 按 ID 删除单条远程记忆 (软删除)
+pub fn remote_delete(id: &str) -> Result<(), String> {
+    info!(id, "remote_delete: 删除中");
+
+    let body = serde_json::json!({
+        "db_name": db_name(),
+    });
+    let json = body.to_string();
+    let headers = sign_headers();
+
+    let mut req = ureq::delete(&api_url(&format!("/{}", id)))
+        .header("Content-Type", "application/json");
+    for (k, v) in &headers {
+        req = req.header(k, v);
+    }
+
+    req.force_send_body().send(json.as_bytes())
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    info!(id, "remote_delete: 删除成功");
+    Ok(())
 }
 
 /// 恢复远程已删除的记忆
@@ -649,4 +671,23 @@ pub fn remote_purge() -> Result<u64, String> {
     let purged = resp_json.get("purged").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
     info!(purged, "remote_purge: 清理完成");
     Ok(purged)
+}
+
+/// 获取远程记忆分类统计
+pub fn remote_stats() -> Result<serde_json::Value, String> {
+    debug!("remote_stats: 查询中");
+
+    let url = format!("{}/stats?db={}", api_url(""), db_name());
+
+    let mut resp = ureq::get(&url)
+        .call()
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    let resp_str = resp.body_mut().read_to_string()
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    debug!("remote_stats: 查询完成");
+    Ok(resp_json)
 }
