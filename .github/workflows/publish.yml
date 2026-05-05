@@ -47,7 +47,7 @@ jobs:
         run: |
           CRATE_NAME="${{ steps.meta.outputs.crate_name }}"
           echo "linux_asset=lib${CRATE_NAME}.so" >> $GITHUB_OUTPUT
-          echo "windows_asset=lib${CRATE_NAME}.dll" >> $GITHUB_OUTPUT
+          echo "windows_asset=${CRATE_NAME}.dll" >> $GITHUB_OUTPUT
 
       - name: 通知注册表
         run: |
