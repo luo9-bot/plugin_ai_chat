@@ -33,6 +33,18 @@ vision:
 
 prompts: "default.txt"
 
+# ── 远程同步 (可选) ─────────────────────────────────────────────
+# 将自我记忆同步到远程 MongoDB，通过 memory-viewer 网页浏览
+# 安全机制: 首次运行自动生成 ECC 密钥对 (data/plugin_ai_chat/ecc_key.pem)
+#           所有写入请求通过 ECDSA-P256 签名验证，无需手动配置密钥
+sync:
+  enabled: false              # 是否启用远程同步
+  api_url: ""                 # memory-viewer API 地址，如 "https://xxx.vercel.app"
+  db_name: "memory_default"   # 数据库名称 (每个实例应该不同)
+  mongodb_uri: ""             # MongoDB 连接字符串，注册时传递给网页端
+  display_name: ""            # 显示名称 (暴露时在网页端显示)
+  icon: "💭"                  # 显示图标
+  expose: false               # 是否向主网页暴露 (允许被其他用户浏览)
 
 # ── AI 调用参数 ─────────────────────────────────────────────────
 ai:
