@@ -1492,11 +1492,14 @@ fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
     let cfg = config::get();
     let reply = sender::normalize_segment_sep(reply);
 
-    // 优先按 |^| 分割，没有则按自然段落（换行）分割
+    // 按 |^| 分割后，每段再按换行分割，展平为最终消息列表
     let segments: Vec<&str> = if reply.contains("|^|") {
-        reply.split("|^|").filter(|s| !s.trim().is_empty()).collect()
+        reply.split("|^|")
+            .flat_map(|s| s.split('\n'))
+            .filter(|s| !s.trim().is_empty())
+            .collect()
     } else {
-        reply.split("\n").filter(|s| !s.trim().is_empty()).collect()
+        reply.split('\n').filter(|s| !s.trim().is_empty()).collect()
     };
 
     for (i, segment) in segments.iter().enumerate() {

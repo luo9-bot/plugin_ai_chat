@@ -553,3 +553,241 @@ pub fn describe(user_id: u64) -> String {
     let state = get_state(user_id);
     format!("{}({:.1})", state.current.description(), state.intensity)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── detect_crisis ──
+
+    #[test]
+    fn crisis_severe_suicide() {
+        assert_eq!(detect_crisis("我想自杀"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_self_harm() {
+        assert_eq!(detect_crisis("我一直在自残"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_want_to_die() {
+        assert_eq!(detect_crisis("我真的想死"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_no_will_to_live() {
+        assert_eq!(detect_crisis("我不想活了"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_cant_go_on() {
+        assert_eq!(detect_crisis("活不下去了"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_jump() {
+        assert_eq!(detect_crisis("我想跳楼"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_wrist() {
+        assert_eq!(detect_crisis("我想割腕"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_goodbye_world() {
+        assert_eq!(detect_crisis("这个世界没什么好留恋的"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_end_life() {
+        assert_eq!(detect_crisis("我想结束生命"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_nothing_matters() {
+        assert_eq!(detect_crisis("死了算了"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_severe_in_sentence() {
+        // 关键词出现在长句中
+        assert_eq!(detect_crisis("我觉得活着没意思，什么都不想做"), CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_mild_exhausted() {
+        assert_eq!(detect_crisis("活着好累"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_no_one_cares() {
+        assert_eq!(detect_crisis("感觉没有人在乎我"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_collapsed() {
+        assert_eq!(detect_crisis("我崩溃了"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_no_hope() {
+        assert_eq!(detect_crisis("看不到希望"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_meaningless() {
+        assert_eq!(detect_crisis("一切都没有意义"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_want_to_disappear() {
+        assert_eq!(detect_crisis("我想消失"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_mild_trapped() {
+        assert_eq!(detect_crisis("感觉自己被困住了"), CrisisLevel::Mild);
+    }
+
+    #[test]
+    fn crisis_none_normal_message() {
+        assert_eq!(detect_crisis("今天天气不错"), CrisisLevel::None);
+    }
+
+    #[test]
+    fn crisis_none_happy_message() {
+        assert_eq!(detect_crisis("太好了！终于考过了！"), CrisisLevel::None);
+    }
+
+    #[test]
+    fn crisis_none_slightly_sad() {
+        // 普通难过不算危机
+        assert_eq!(detect_crisis("有点难过"), CrisisLevel::None);
+    }
+
+    #[test]
+    fn crisis_none_tired() {
+        assert_eq!(detect_crisis("好累啊不想动"), CrisisLevel::None);
+    }
+
+    #[test]
+    fn crisis_severe_overrides_mild() {
+        // 同时包含 severe 和 mild 关键词时，severe 优先
+        assert_eq!(detect_crisis("活着好累，想死了算了"), CrisisLevel::Severe);
+    }
+
+    // ── CrisisLevel ──
+
+    #[test]
+    fn crisis_level_ordering() {
+        assert!(CrisisLevel::None < CrisisLevel::Mild);
+        assert!(CrisisLevel::Mild < CrisisLevel::Severe);
+    }
+
+    #[test]
+    fn crisis_level_is_crisis() {
+        assert!(!CrisisLevel::None.is_crisis());
+        assert!(CrisisLevel::Mild.is_crisis());
+        assert!(CrisisLevel::Severe.is_crisis());
+    }
+
+    #[test]
+    fn crisis_level_default() {
+        assert_eq!(CrisisLevel::default(), CrisisLevel::None);
+    }
+
+    #[test]
+    fn crisis_level_serde_roundtrip() {
+        let levels = vec![CrisisLevel::None, CrisisLevel::Mild, CrisisLevel::Severe];
+        for level in levels {
+            let json = serde_json::to_string(&level).unwrap();
+            let deserialized: CrisisLevel = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, level);
+        }
+    }
+
+    // ── get_crisis_context ──
+
+    #[test]
+    fn crisis_context_none_empty() {
+        assert!(get_crisis_context(CrisisLevel::None).is_empty());
+    }
+
+    #[test]
+    fn crisis_context_mild_has_hotline() {
+        let ctx = get_crisis_context(CrisisLevel::Mild);
+        assert!(ctx.contains("400-161-9995"));
+    }
+
+    #[test]
+    fn crisis_context_severe_has_hotline() {
+        let ctx = get_crisis_context(CrisisLevel::Severe);
+        assert!(ctx.contains("400-161-9995"));
+        assert!(ctx.contains("110"));
+        assert!(ctx.contains("120"));
+    }
+
+    // ── detect_emotion (keyword-based) ──
+
+    #[test]
+    fn emotion_happy() {
+        let (emo, delta) = detect_emotion("太好了！终于！");
+        assert_eq!(emo, EmotionType::Happy);
+        assert!(delta > 0.0);
+    }
+
+    #[test]
+    fn emotion_sad() {
+        let (emo, delta) = detect_emotion("好难过，呜呜");
+        assert_eq!(emo, EmotionType::Sad);
+        assert!(delta > 0.0);
+    }
+
+    #[test]
+    fn emotion_angry() {
+        let (emo, delta) = detect_emotion("气死了，受够了！");
+        assert_eq!(emo, EmotionType::Angry);
+        assert!(delta > 0.0);
+    }
+
+    #[test]
+    fn emotion_neutral() {
+        let (emo, delta) = detect_emotion("嗯");
+        // "嗯" 是 neutral 但 delta 很小
+        assert_eq!(emo, EmotionType::Neutral);
+        assert!(delta > 0.0);
+    }
+
+    #[test]
+    fn emotion_exclaim_excited() {
+        // 纯感叹号（无其他关键词匹配）
+        let (emo, _) = detect_emotion("什么情况！！！");
+        assert_eq!(emo, EmotionType::Excited);
+    }
+
+    // ── EmotionType ──
+
+    #[test]
+    fn emotion_type_from_str_roundtrip() {
+        let types = [
+            ("happy", EmotionType::Happy),
+            ("sad", EmotionType::Sad),
+            ("angry", EmotionType::Angry),
+            ("neutral", EmotionType::Neutral),
+        ];
+        for (s, expected) in types {
+            assert_eq!(EmotionType::from_str(s), expected);
+            assert_eq!(EmotionType::from_str(expected.as_str()), expected);
+        }
+    }
+
+    #[test]
+    fn emotion_type_chinese_input() {
+        assert_eq!(EmotionType::from_str("开心"), EmotionType::Happy);
+        assert_eq!(EmotionType::from_str("难过"), EmotionType::Sad);
+        assert_eq!(EmotionType::from_str("生气"), EmotionType::Angry);
+        assert_eq!(EmotionType::from_str("担忧"), EmotionType::Worried);
+    }
+}
