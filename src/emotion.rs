@@ -29,6 +29,26 @@ intensity 为 0.0~1.0 的浮点数，表示情绪强度。
 用户说 "嗯，知道了" → {"emotion":"neutral","intensity":0.2}
 用户说 "好累啊不想动" → {"emotion":"tired","intensity":0.6}"#;
 
+/// 危机等级：用于检测用户是否处于自残/自杀等极端情境
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub enum CrisisLevel {
+    None,
+    Mild,   // 情绪低落、消极，需要关注
+    Severe, // 明确的自残/自杀信号，需要立即干预
+}
+
+impl Default for CrisisLevel {
+    fn default() -> Self {
+        CrisisLevel::None
+    }
+}
+
+impl CrisisLevel {
+    pub fn is_crisis(&self) -> bool {
+        *self >= CrisisLevel::Mild
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EmotionType {
     Neutral,
@@ -98,6 +118,12 @@ pub struct EmotionState {
     pub last_interaction: u64,
     pub interaction_rate: f32,
     pub history: Vec<(EmotionType, u64)>,
+    /// 最近一次检测到的危机等级
+    #[serde(default)]
+    pub crisis_level: CrisisLevel,
+    /// 上次危机干预时间（用于避免短时间内重复干预）
+    #[serde(default)]
+    pub last_crisis_intervention: u64,
 }
 
 impl Default for EmotionState {
@@ -110,6 +136,8 @@ impl Default for EmotionState {
             last_interaction: now,
             interaction_rate: 0.0,
             history: Vec::new(),
+            crisis_level: CrisisLevel::None,
+            last_crisis_intervention: 0,
         }
     }
 }
@@ -175,7 +203,7 @@ pub fn decay(user_id: u64) {
     update_state(user_id, state);
 }
 
-pub fn analyze_user_message(user_id: u64, message: &str) {
+pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
     let mut state = get_state(user_id);
     let now = now_secs();
@@ -208,6 +236,10 @@ pub fn analyze_user_message(user_id: u64, message: &str) {
 
     state.last_update = now;
     update_state(user_id, state);
+
+    // 危机信号检测
+    let crisis = detect_crisis(message);
+    update_crisis(user_id, crisis)
 }
 
 /// AI 驱动的情绪分析 (发送回复后调用，用于更精准的情绪状态更新)
@@ -363,6 +395,114 @@ fn detect_emotion(message: &str) -> (EmotionType, f32) {
 
     (best_emotion, best_delta)
 }
+
+/// 危机信号关键词检测
+///
+/// 返回检测到的危机等级。Severe 需要立即干预，Mild 需要关注。
+pub fn detect_crisis(message: &str) -> CrisisLevel {
+    // 严重危机：明确的自残/自杀意图
+    let severe_keywords: &[&str] = &[
+        "自杀", "自残", "想死", "不想活", "活不下去", "去死", "死掉算了",
+        "跳楼", "割腕", "吃药", "上吊", "跳河", "跳海", "遗书",
+        "活着没意思", "活着没意义", "不想活了", "活够了", "死了算了",
+        "解脱吧", "结束生命", "结束自己", "一了百了", "不如死了",
+        "自杀算了", "想去死", "想离开这个世界", "这个世界没什么好留恋",
+    ];
+
+    for kw in severe_keywords {
+        if message.contains(kw) {
+            return CrisisLevel::Severe;
+        }
+    }
+
+    // 轻度危机：极度消极、绝望情绪
+    let mild_keywords: &[&str] = &[
+        "不想活", "活着好累", "活着好痛苦", "崩溃了", "撑不下去",
+        "没有人在乎", "没有人在意", "没有人爱我", "所有人都讨厌我",
+        "我是多余的", "这个世界不需要我", "我很没用", "活着好没意思",
+        "好绝望", "绝望了", "看不到希望", "没有希望", "没有未来",
+        "没有意义", "一切都没有意义", "什么都不想做", "什么都不重要",
+        "好痛苦", "太痛苦了", "受不了了", "真的受不了了",
+        "不想面对", "想消失", "想逃", "逃不掉", "被困住了",
+    ];
+
+    for kw in mild_keywords {
+        if message.contains(kw) {
+            return CrisisLevel::Mild;
+        }
+    }
+
+    CrisisLevel::None
+}
+
+/// 更新危机等级并返回是否需要立即干预
+///
+/// 干预冷却期：同一次危机干预后 30 分钟内不重复触发（但危机等级始终更新）
+pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
+    if level == CrisisLevel::None {
+        return false;
+    }
+
+    let mut state = get_state(user_id);
+    let now = now_secs();
+    state.crisis_level = level;
+
+    // 严重危机立即干预，轻度危机在冷却期外干预
+    let should_intervene = match level {
+        CrisisLevel::Severe => {
+            // 严重危机：每次都需要干预
+            state.last_crisis_intervention = now;
+            true
+        }
+        CrisisLevel::Mild => {
+            // 轻度危机：30分钟冷却
+            if now.saturating_sub(state.last_crisis_intervention) >= 1800 {
+                state.last_crisis_intervention = now;
+                true
+            } else {
+                false
+            }
+        }
+        CrisisLevel::None => false,
+    };
+
+    update_state(user_id, state);
+    should_intervene
+}
+
+/// 获取危机干预的指令上下文，注入到 system prompt
+pub fn get_crisis_context(crisis: CrisisLevel) -> String {
+    match crisis {
+        CrisisLevel::None => String::new(),
+        CrisisLevel::Mild => CRISIS_MILD_PROMPT.to_string(),
+        CrisisLevel::Severe => CRISIS_SEVERE_PROMPT.to_string(),
+    }
+}
+
+const CRISIS_MILD_PROMPT: &str = r#"# 紧急状态
+你注意到对方的情绪非常低落，可能正处于心理危机边缘。请你：
+- 先用你角色的语气表达真诚的关心，不要冷冰冰的
+- 认真倾听，不要急着给建议或说"振作起来"之类的话
+- 让对方知道有人在意他/她
+- 在对话的合适位置，自然地提及：如果感觉很难受，可以跟身边信任的人聊聊，或者拨打心理援助热线
+- 24小时心理援助热线：全国 400-161-9995 | 北京 010-82951332 | 希望24热线 400-161-9995
+- 保持温和耐心，不要说教"#;
+
+const CRISIS_SEVERE_PROMPT: &str = r#"# 极度紧急状态 ⚠️
+你察觉到对方正在表达自残或自杀的意图。这是非常严重的信号。请你：
+- 第一时间用你角色的语气表达真诚的关心和担忧，让对方感受到有人在乎
+- 绝对不要忽视、敷衍、或转移话题
+- 不要说"别想太多"、"会好的"这种空洞的话
+- 直接但温和地回应："我听到你说的了，我很担心你"
+- 让对方知道：这种感受是可以被理解的，但生命很重要
+- 务必在回复中包含求助信息：
+  · 全国24小时心理援助热线：400-161-9995
+  · 北京心理危机研究与干预中心：010-82951332
+  · 生命热线：400-821-1215
+  · 如果情况紧急，请拨打 110 或 120
+- 鼓励对方现在就拨打热线，或者联系身边信任的人
+- 你的回复要温暖、真诚、不慌张，像一个真正关心对方的朋友
+- 回复可以长一些，分几段发送，不要急着结束对话"#;
 
 pub fn get_prompt_context(user_id: u64) -> String {
     let state = get_state(user_id);

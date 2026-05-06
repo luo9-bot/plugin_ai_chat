@@ -617,6 +617,9 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     with_state(|s| s.append_batch(group_id, user_id, trimmed, record_ts));
 }
 
+/// 私聊关闭时间：2026年7月14日 00:00:00 (UTC+8)
+const PRIVATE_CHAT_CLOSE_TS: u64 = 1783958400; // 2026-07-14 00:00:00 UTC+8
+
 fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, content = trimmed, "recv: private msg");
@@ -630,6 +633,31 @@ fn handle_private_msg(user_id: u64, msg: &str) {
     // ── 黑名单拦截 (完全忽略) ──
     if with_state(|s| s.is_blacklisted(user_id)) {
         debug!(user_id, "blocked private message from blacklisted user");
+        return;
+    }
+
+    // ── 私聊关闭检查 (2026-07-14 起) ──
+    let now = now_secs();
+    if now >= PRIVATE_CHAT_CLOSE_TS {
+        // 仅允许退出命令
+        match trimmed {
+            "停!" | "关闭对话" => {
+                with_state(|s| {
+                    s.active.remove(&user_id);
+                    s.batches.remove(&(0, user_id));
+                });
+                info!(user_id, "cmd: deactivated private chat (after close date)");
+                sender::send_msg(0, user_id, &config::get().messages.stop.success);
+            }
+            _ => {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    info!("private chat closed: date threshold reached");
+                });
+                sender::send_msg(0, user_id,
+                    "私聊服务已于 2026年7月14日 关闭，无法进行私聊对话。\n如有需要，请在群聊中与我互动。");
+            }
+        }
         return;
     }
 
@@ -1146,6 +1174,14 @@ fn process_expired_batches() {
                     continue;
                 }
 
+                // 危机信号 → 强制回复，不经过 decide_reply
+                let crisis = emotion::get_state(*user_id).crisis_level;
+                if crisis.is_crisis() {
+                    tracing::warn!(user_id = *user_id, group_id, level = ?crisis, "crisis: 群聊危机信号，强制回复");
+                    process_message(*user_id, group_id, messages, timestamps);
+                    continue;
+                }
+
                 // 所有非@消息: AI 决策 (传入群组上下文)
                 if decide_reply(group_id, *user_id, messages, &context_str) {
                     process_message(*user_id, group_id, messages, timestamps);
@@ -1396,6 +1432,19 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
     } else {
         extra_context
     };
+
+    // 危机检测：检查用户是否处于心理危机状态，注入干预指令
+    let crisis_level = emotion::get_state(user_id).crisis_level;
+    let crisis_ctx = emotion::get_crisis_context(crisis_level);
+    let extra_context = if crisis_ctx.is_empty() {
+        extra_context
+    } else {
+        format!("{}\n\n{}", extra_context, crisis_ctx)
+    };
+
+    if crisis_level.is_crisis() {
+        tracing::warn!(user_id, group_id, level = ?crisis_level, "crisis: 检测到危机信号，注入干预指令");
+    }
 
     // 调用 AI
     info!(user_id, group_id, ai_message = %ai_message, "chat: calling AI");
