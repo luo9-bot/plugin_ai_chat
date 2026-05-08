@@ -32,13 +32,13 @@ import WorkingMemory from './views/WorkingMemory.vue'
 import PersonalityView from './views/PersonalityView.vue'
 import EmotionView from './views/EmotionView.vue'
 import MentalState from './views/MentalState.vue'
-import BlocklistView from './views/BlocklistView.vue'
 import ProactiveView from './views/ProactiveView.vue'
 import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
 import AntiInjectionView from './views/AntiInjectionView.vue'
 import ConversationsView from './views/ConversationsView.vue'
+import ConfigView from './views/ConfigView.vue'
 
 const loggedIn = ref(false)
 const tokenInput = ref('')
@@ -46,19 +46,19 @@ const loginErr = ref('')
 const currentTab = ref('self-thoughts')
 
 const tabs = [
+  { id: 'config', name: '⚙️ 配置', comp: ConfigView },
+  { id: 'conversations', name: '💬 对话管理', comp: ConversationsView },
   { id: 'self-thoughts', name: '🧠 自我记忆', comp: SelfThoughts },
   { id: 'memory', name: '📦 用户记忆', comp: UserMemory },
   { id: 'working-memory', name: '💬 工作记忆', comp: WorkingMemory },
   { id: 'personality', name: '🎭 人格', comp: PersonalityView },
   { id: 'emotion', name: '😊 情绪', comp: EmotionView },
   { id: 'mental-state', name: '🧬 心理状态', comp: MentalState },
-  { id: 'conversations', name: '💬 对话管理', comp: ConversationsView },
-  { id: 'blocklist', name: '🚫 黑名单', comp: BlocklistView },
   { id: 'proactive', name: '📢 主动对话', comp: ProactiveView },
+  { id: 'anti-injection', name: '🛡️ 防注入', comp: AntiInjectionView },
   { id: 'archive', name: '📦 归档', comp: ArchiveView },
   { id: 'backups', name: '💾 备份', comp: BackupsView },
   { id: 'sync', name: '🔄 同步', comp: SyncView },
-  { id: 'anti-injection', name: '🛡️ 防注入', comp: AntiInjectionView },
 ]
 
 const tabComponent = computed(() => tabs.find(t => t.id === currentTab.value)?.comp)

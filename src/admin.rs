@@ -592,8 +592,23 @@ fn handle_personality(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
                 return ok(serde_json::json!({"snapshots": snapshots}));
             }
             let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let store: serde_json::Value =
+            let mut store: serde_json::Value =
                 serde_json::from_str(&data).unwrap_or(serde_json::json!({}));
+            // 文件不存在时填充默认值
+            if store.get("current").is_none() {
+                store["current"] = serde_json::json!({
+                    "name": "default",
+                    "template": "default",
+                    "traits": {
+                        "humor": 0.5, "warmth": 0.6, "curiosity": 0.5,
+                        "formality": 0.3, "verbosity": 0.4, "empathy": 0.6
+                    },
+                    "custom_prompt": ""
+                });
+            }
+            if store.get("snapshots").is_none() {
+                store["snapshots"] = serde_json::json!({});
+            }
             ok(store)
         }
         Method::Put => {
@@ -647,7 +662,14 @@ fn handle_personality(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
                     &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
                 )
                 .unwrap_or(serde_json::json!({}));
-                let current = store.get("current").cloned().unwrap_or(serde_json::json!({}));
+                let current = store.get("current").cloned().unwrap_or(serde_json::json!({
+                    "name": "default", "template": "default",
+                    "traits": {"humor": 0.5, "warmth": 0.6, "curiosity": 0.5, "formality": 0.3, "verbosity": 0.4, "empathy": 0.6},
+                    "custom_prompt": ""
+                }));
+                if store.get("snapshots").is_none() {
+                    store["snapshots"] = serde_json::json!({});
+                }
                 let snapshots = store
                     .get_mut("snapshots")
                     .and_then(|v| v.as_object_mut())
@@ -1239,8 +1261,9 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"backups") => handle_backups(&method, &api_segs[1..], &body),
         Some(&"sync") => handle_sync(&method, &api_segs[1..], &body),
-        Some(&"anti-injection") => handle_anti_injection(&method, api_segs, &body),
+        Some(&"anti-injection") => handle_anti_injection(&method, &api_segs[1..], &body),
         Some(&"conversations") => handle_conversations(&method, &api_segs[1..]),
+        Some(&"config") => handle_config(&method, &body),
         _ => err(404, "not found"),
     }
 }
@@ -1341,6 +1364,128 @@ fn handle_anti_injection(
                 }
                 _ => err(404, "unknown action"),
             }
+        }
+        _ => err(405, "method not allowed"),
+    }
+}
+
+// ── 配置管理 ──────────────────────────────────────────────────
+
+/// 按 config.example.yaml 的逻辑顺序重排 JSON key
+fn reorder_config_keys(val: &serde_json::Value) -> serde_json::Value {
+    use serde_json::json;
+    let obj = match val.as_object() {
+        Some(o) => o,
+        None => return val.clone(),
+    };
+    let get = |k: &str| obj.get(k).cloned().unwrap_or(json!(null));
+    // 顶层顺序
+    let ordered = json!({
+        "api_key": get("api_key"),
+        "base_url": get("base_url"),
+        "model": get("model"),
+        "self_qq": get("self_qq"),
+        "admin_qq": get("admin_qq"),
+        "prompts": get("prompts"),
+        "vision": get("vision"),
+        "sync": get("sync"),
+        "admin": get("admin"),
+        "ai": get("ai"),
+        "conversation": get("conversation"),
+        "memory": get("memory"),
+        "emotion": get("emotion"),
+        "proactive": get("proactive"),
+        "self_reflection": get("self_reflection"),
+        "mental_state": get("mental_state"),
+        "style": get("style"),
+        "log": get("log"),
+        "anti_injection": get("anti_injection"),
+        "whitelist": get("whitelist"),
+        "blacklist": get("blacklist"),
+        "auto_start_users": get("auto_start_users"),
+        "messages": get("messages"),
+    });
+    ordered
+}
+
+fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    let config_path = config::data_dir().join("config.yaml");
+    match method {
+        Method::Get => {
+            let data = match std::fs::read_to_string(&config_path) {
+                Ok(d) => d,
+                Err(_) => return err(404, "config.yaml not found"),
+            };
+            let mut cfg: serde_json::Value = match serde_yaml::from_str(&data) {
+                Ok(v) => v,
+                Err(e) => return err(500, &format!("parse config: {}", e)),
+            };
+            // 脱敏：隐藏 api_key
+            if let Some(obj) = cfg.as_object_mut() {
+                if let Some(key) = obj.get_mut("api_key") {
+                    if let Some(s) = key.as_str() {
+                        if s.len() > 8 {
+                            *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
+                        }
+                    }
+                }
+                if let Some(v) = obj.get_mut("vision").and_then(|v| v.as_object_mut()) {
+                    if let Some(key) = v.get_mut("api_key") {
+                        if let Some(s) = key.as_str() {
+                            if s.len() > 8 {
+                                *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
+                            }
+                        }
+                    }
+                }
+            }
+            ok(cfg)
+        }
+        Method::Put => {
+            let new_cfg: serde_json::Value = match serde_json::from_slice(body) {
+                Ok(v) => v,
+                Err(e) => return err(400, &format!("invalid json: {}", e)),
+            };
+            // 读取现有配置以保留被脱敏的字段
+            let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+            let existing_cfg: serde_json::Value = serde_yaml::from_str(&existing).unwrap_or(serde_json::json!({}));
+
+            // 合并：新配置中包含 "..." 的字段保留原值
+            let mut merged = new_cfg.clone();
+            if let (Some(new_obj), Some(old_obj)) = (merged.as_object_mut(), existing_cfg.as_object()) {
+                // api_key
+                if let Some(key) = new_obj.get("api_key").and_then(|v| v.as_str()) {
+                    if key.contains("...") {
+                        if let Some(old_key) = old_obj.get("api_key") {
+                            new_obj.insert("api_key".to_string(), old_key.clone());
+                        }
+                    }
+                }
+                // vision.api_key
+                if let (Some(new_vis), Some(old_vis)) = (
+                    new_obj.get_mut("vision").and_then(|v| v.as_object_mut()),
+                    old_obj.get("vision").and_then(|v| v.as_object())
+                ) {
+                    if let Some(key) = new_vis.get("api_key").and_then(|v| v.as_str()) {
+                        if key.contains("...") {
+                            if let Some(old_key) = old_vis.get("api_key") {
+                                new_vis.insert("api_key".to_string(), old_key.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 按 config.example.yaml 顺序重排 key 后转为 YAML
+            let ordered = reorder_config_keys(&merged);
+            let yaml = match serde_yaml::to_string(&ordered) {
+                Ok(y) => y,
+                Err(e) => return err(500, &format!("serialize: {}", e)),
+            };
+            if let Err(e) = std::fs::write(&config_path, &yaml) {
+                return err(500, &format!("write config: {}", e));
+            }
+            ok(serde_json::json!({"ok": true, "message": "配置已保存，重启插件后生效"}))
         }
         _ => err(405, "method not allowed"),
     }

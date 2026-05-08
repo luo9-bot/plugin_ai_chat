@@ -37,6 +37,10 @@ pub struct SharedState {
     pub last_conversation_times: HashMap<u64, u64>,
     /// 已触发过对话后反思的群组，新消息到达时清除
     pub reflected_groups: HashSet<u64>,
+    /// 活跃群聊集合 (由主线程同步，供管理线程读取)
+    pub active_groups: HashSet<u64>,
+    /// 活跃私聊用户集合 (由主线程同步，供管理线程读取)
+    pub active_users: HashSet<u64>,
 }
 
 impl SharedState {
@@ -47,7 +51,15 @@ impl SharedState {
             contexts: HashMap::new(),
             last_conversation_times: HashMap::new(),
             reflected_groups: HashSet::new(),
+            active_groups: HashSet::new(),
+            active_users: HashSet::new(),
         }
+    }
+
+    /// 同步活跃对话状态（由主线程调用）
+    pub fn sync_active(&mut self, groups: &HashSet<u64>, users: &HashSet<u64>) {
+        self.active_groups = groups.clone();
+        self.active_users = users.clone();
     }
 
     /// 记录机器人回复了某用户 (group_id=0 表示私聊)

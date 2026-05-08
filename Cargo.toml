@@ -1,9 +1,9 @@
 [package]
-name = "top_drluo_luo9_ai_chat"
-version = "3.4.0"
+name = "plugin_ai_chat"
+version = "4.0.0"
 edition = "2024"
 description = "AI 对话插件"
-authors = ["drluo"]
+authors = ["luoy-oss"]
 
 [package.metadata]
 tags = ["ai", "chat"]
