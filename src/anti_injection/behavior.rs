@@ -27,13 +27,14 @@ impl Reputation {
         (self.content * 0.5 + self.spam * 0.2 + self.trust * 0.3).clamp(0.0, 1.0)
     }
 
-    /// 惩罚系数
+    /// 惩罚系数（基于内容信誉，更敏感）
     pub fn penalty_multiplier(&self) -> f32 {
-        let c = self.combined();
-        if c >= 0.8 { 1.0 }
-        else if c >= 0.5 { 1.5 }
-        else if c >= 0.3 { 2.5 }
-        else { 4.0 }
+        let c = self.content;
+        if c >= 0.9 { 1.0 }
+        else if c >= 0.7 { 1.5 }
+        else if c >= 0.5 { 2.5 }
+        else if c >= 0.3 { 4.0 }
+        else { 6.0 }
     }
 }
 
@@ -111,11 +112,12 @@ impl UserBehavior {
         if severity >= 3.0 {
             self.high_severity_count += 1;
         }
-        // 内容信誉下降（非线性）
-        let penalty = 0.05 * severity * (1.0 + self.violation_count as f32 * 0.1);
+        // 内容信誉下降：高严重度违规立即产生显著惩罚
+        let base_penalty = 0.15 * severity;
+        let repeat_factor = 1.0 + self.violation_count as f32 * 0.2;
+        let penalty = base_penalty * repeat_factor;
         self.reputation.content = (self.reputation.content - penalty).max(0.0);
-        // 信任信誉也下降
-        self.reputation.trust = (self.reputation.trust - penalty * 0.5).max(0.0);
+        self.reputation.trust = (self.reputation.trust - penalty * 0.6).max(0.0);
     }
 
     /// 记录频率违规（不降低 content reputation）
@@ -123,29 +125,30 @@ impl UserBehavior {
         self.reputation.spam = (self.reputation.spam - 0.05).max(0.0);
     }
 
-    /// 信誉恢复
+    /// 信誉恢复（允许完全恢复，但速度较慢）
     pub fn recover_reputation(&mut self) {
         if let Some(last) = self.last_violation {
             let elapsed = last.elapsed().as_secs() as f32;
-            let recovery = (elapsed / 3600.0) * 0.02;
-            self.reputation.content = (self.reputation.content + recovery).min(0.8);
-            self.reputation.trust = (self.reputation.trust + recovery * 0.5).min(0.8);
+            let recovery = (elapsed / 7200.0) * 0.01; // 每2小时恢复1%
+            self.reputation.content = (self.reputation.content + recovery).min(1.0);
+            self.reputation.trust = (self.reputation.trust + recovery * 0.5).min(1.0);
         }
-        // spam 信誉恢复更快
         self.reputation.spam = (self.reputation.spam + 0.01).min(1.0);
         self.severity_score = (self.severity_score - 0.1).max(0.0);
     }
 
     /// 是否应该静默封禁
     pub fn should_silent_ban(&self) -> bool {
-        self.reputation.content < 0.2
-            && self.reputation.trust < 0.3
+        self.reputation.content < 0.3
             && self.high_severity_count >= 2
     }
 }
 
 /// 全局用户行为存储
 static USER_BEHAVIORS: LazyLock<DashMap<u64, UserBehavior>> = LazyLock::new(DashMap::new);
+
+/// 全局上下文关联器（用于检测跨消息攻击）
+static CONTEXT_CORRELATORS: LazyLock<DashMap<u64, super::context::ContextCorrelator>> = LazyLock::new(DashMap::new);
 
 /// 获取用户行为记录（可变引用）
 pub fn with_behavior_mut<F, R>(user_id: u64, f: F) -> R
@@ -172,9 +175,22 @@ pub fn recover_reputation(user_id: u64) {
     with_behavior_mut(user_id, |b| b.recover_reputation());
 }
 
-/// 记录消息
+/// 记录消息（同时更新上下文关联器）
 pub fn record_message(user_id: u64, normalized: &str) {
     with_behavior_mut(user_id, |b| b.record_message(normalized));
+    // 更新上下文关联器
+    let mut correlator = CONTEXT_CORRELATORS
+        .entry(user_id)
+        .or_insert_with(|| super::context::ContextCorrelator::new(10, 300));
+    correlator.record(normalized);
+}
+
+/// 获取上下文关联器的多视图段（用于检测跨消息攻击）
+pub fn get_context_segments(user_id: u64) -> Vec<String> {
+    match CONTEXT_CORRELATORS.get(&user_id) {
+        Some(c) => c.get_all_views(),
+        None => Vec::new(),
+    }
 }
 
 /// 记录违规
@@ -355,17 +371,31 @@ mod tests {
     #[test]
     fn test_penalty_multiplier_levels() {
         let mut rep = Reputation::default();
-        rep.content = 1.0; rep.trust = 1.0; rep.spam = 1.0;
+        rep.content = 1.0;
         assert_eq!(rep.penalty_multiplier(), 1.0);
 
-        rep.content = 0.5; rep.trust = 0.5; rep.spam = 0.5;
+        rep.content = 0.8;
         assert_eq!(rep.penalty_multiplier(), 1.5);
 
-        rep.content = 0.2; rep.trust = 0.2; rep.spam = 0.2;
+        rep.content = 0.5;
         assert_eq!(rep.penalty_multiplier(), 2.5);
 
-        rep.content = 0.0; rep.trust = 0.0; rep.spam = 0.0;
+        rep.content = 0.3;
         assert_eq!(rep.penalty_multiplier(), 4.0);
+
+        rep.content = 0.0;
+        assert_eq!(rep.penalty_multiplier(), 6.0);
+    }
+
+    #[test]
+    fn test_first_violation_penalty() {
+        let mut behavior = UserBehavior::default();
+        // 第一次高严重度违规 (severity=3.0，如 Sexual)
+        behavior.record_violation(3.0);
+        // penalty = 0.15 * 3.0 * 1.0 = 0.45, content: 1.0 -> 0.55
+        assert!(behavior.reputation.content < 0.6);
+        // penalty_multiplier 应该 > 1.0
+        assert!(behavior.reputation.penalty_multiplier() > 1.0);
     }
 
     #[test]
@@ -383,8 +413,7 @@ mod tests {
     fn test_silent_ban_condition() {
         let mut behavior = UserBehavior::default();
         assert!(!behavior.should_silent_ban());
-        behavior.reputation.content = 0.1;
-        behavior.reputation.trust = 0.2;
+        behavior.reputation.content = 0.2;
         behavior.high_severity_count = 2;
         assert!(behavior.should_silent_ban());
     }

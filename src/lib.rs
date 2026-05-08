@@ -601,19 +601,18 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                 return;
             }
             anti_injection::Action::Replace => {
-                // 替换模式：发送替换后的内容，但不继续处理原消息
+                // 替换模式：发送替换内容，原消息不进入对话记忆
                 if let Some(msg) = check_result.sanitized {
                     sender::send_msg(group_id, user_id, &msg);
                 }
                 warn!(
                     user_id, group_id,
                     issues = ?check_result.issues,
-                    "anti_injection: 消息被替换"
+                    "anti_injection: 消息被替换 (不进入对话记忆)"
                 );
                 return;
             }
             anti_injection::Action::SilentBan => {
-                // 非察觉性封禁：显示"使用人数过多"而不是直接拒绝
                 if let Some(msg) = check_result.sanitized {
                     sender::send_msg(group_id, user_id, &msg);
                 }
@@ -621,22 +620,23 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                 return;
             }
             anti_injection::Action::Warn => {
-                debug!(
-                    user_id, group_id,
-                    issues = ?check_result.issues,
-                    "anti_injection: 可疑消息 (允许通过)"
-                );
-            }
-            anti_injection::Action::CrisisExempt => {
-                // 危机消息放行，交由 emotion 系统处理
                 warn!(
                     user_id, group_id,
                     issues = ?check_result.issues,
-                    "anti_injection: 危机消息豁免"
+                    "anti_injection: 可疑消息 (允许通过，已记录违规)"
+                );
+            }
+            anti_injection::Action::CrisisExempt => {
+                warn!(
+                    user_id, group_id,
+                    issues = ?check_result.issues,
+                    "anti_injection: 危机消息豁免 (违规已记录)"
                 );
             }
             _ => {}
         }
+    }else{
+        info!("是管理员！");
     }
 
     // ── 管理员专属控制命令 ──
@@ -759,19 +759,17 @@ fn handle_private_msg(user_id: u64, msg: &str) {
                 return;
             }
             anti_injection::Action::Replace => {
-                // 替换模式：发送替换后的内容，但不继续处理原消息
                 if let Some(msg) = check_result.sanitized {
                     sender::send_msg(0, user_id, &msg);
                 }
                 warn!(
                     user_id,
                     issues = ?check_result.issues,
-                    "anti_injection: 私聊消息被替换"
+                    "anti_injection: 私聊消息被替换 (不进入对话记忆)"
                 );
                 return;
             }
             anti_injection::Action::SilentBan => {
-                // 非察觉性封禁：显示"使用人数过多"而不是直接拒绝
                 if let Some(msg) = check_result.sanitized {
                     sender::send_msg(0, user_id, &msg);
                 }
@@ -779,18 +777,17 @@ fn handle_private_msg(user_id: u64, msg: &str) {
                 return;
             }
             anti_injection::Action::Warn => {
-                debug!(
-                    user_id,
-                    issues = ?check_result.issues,
-                    "anti_injection: 可疑私聊消息 (允许通过)"
-                );
-            }
-            anti_injection::Action::CrisisExempt => {
-                // 危机消息放行，交由 emotion 系统处理
                 warn!(
                     user_id,
                     issues = ?check_result.issues,
-                    "anti_injection: 危机消息豁免"
+                    "anti_injection: 可疑私聊消息 (允许通过，已记录违规)"
+                );
+            }
+            anti_injection::Action::CrisisExempt => {
+                warn!(
+                    user_id,
+                    issues = ?check_result.issues,
+                    "anti_injection: 危机消息豁免 (违规已记录)"
                 );
             }
             _ => {}
@@ -1517,14 +1514,15 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
             info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "chat: got AI reply");
 
             // ── 输出层防护：检查 AI 回复安全性 (始终开启) ──
-            let output_check = anti_injection::check_output(&cleaned_reply, &config::get().anti_injection);
+            let output_check = anti_injection::check_output(user_id, &cleaned_reply, &config::get().anti_injection);
 
             let final_reply = if !output_check.passed {
                 warn!(
                     user_id, group_id,
                     issues = ?output_check.issues,
                     action = ?output_check.action,
-                    "anti_injection: AI 回复被标记"
+                    penalty = anti_injection::get_penalty_multiplier(user_id),
+                    "anti_injection: AI 回复被替换 (违规已记录)"
                 );
                 // 使用替换内容或默认安全回复
                 output_check.sanitized.unwrap_or_else(|| "抱歉，我无法回应这个话题。".to_string())

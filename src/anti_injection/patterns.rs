@@ -47,6 +47,7 @@ pub static STRONG_PATTERNS: &[WeightedPattern] = &[
     WeightedPattern { pattern: "后穴", category: RiskCategory::Sexual, score: 0.85, suppressors: &[], suppress_window: 0 },
     WeightedPattern { pattern: "春药", category: RiskCategory::Sexual, score: 0.80, suppressors: &[], suppress_window: 0 },
     WeightedPattern { pattern: "勃起", category: RiskCategory::Sexual, score: 0.80, suppressors: &[], suppress_window: 0 },
+    WeightedPattern { pattern: "dirtytalk", category: RiskCategory::Sexual, score: 0.75, suppressors: &[], suppress_window: 0 },
     // 暴力（注意：自杀/自残等危机关键词由 emotion.rs 的 crisis detection 处理）
     WeightedPattern { pattern: "凌迟", category: RiskCategory::Violence, score: 0.95, suppressors: &[], suppress_window: 0 },
     WeightedPattern { pattern: "肢解", category: RiskCategory::Violence, score: 0.95, suppressors: &[], suppress_window: 0 },
@@ -210,24 +211,24 @@ pub fn is_suppressed_all(text: &str, keyword: &str, window: usize, suppressors: 
     let kw_chars: Vec<char> = keyword.chars().collect();
     let kw_len = kw_chars.len();
 
+    let mut found = false;
     let mut i = 0;
     while i + kw_len <= chars.len() {
         let slice: String = chars[i..i + kw_len].iter().collect();
         if slice == keyword {
-            // 检查这个 occurrence 周围是否有抑制词
+            found = true;
             let start = i.saturating_sub(window);
             let end = (i + kw_len + window).min(chars.len());
             let context: String = chars[start..end].iter().collect();
             let suppressed = suppressors.iter().any(|s| context.contains(s));
             if !suppressed {
-                // 至少有一个 occurrence 未被抑制
                 return false;
             }
         }
         i += 1;
     }
-    // 所有 occurrence 都被抑制（或没有找到）
-    true
+    // 未找到 keyword 时返回 false（不抑制），所有 occurrence 被抑制时返回 true
+    found
 }
 
 /// 模式匹配结果
@@ -346,8 +347,8 @@ mod tests {
     fn test_is_suppressed_all() {
         // 所有 "杀" 都被 "毒" 抑制
         assert!(is_suppressed_all("杀毒杀毒", "杀", 3, &["毒"]));
-        // 至少一个 "杀" 未被抑制
-        assert!(!is_suppressed_all("杀人杀毒", "杀", 3, &["毒"]));
+        // "杀人" 中的 "杀" 未被抑制（"毒" 不在其窗口内）
+        assert!(!is_suppressed_all("杀人的人杀毒", "杀", 2, &["毒"]));
     }
 
     #[test]

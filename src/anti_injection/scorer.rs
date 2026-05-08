@@ -75,9 +75,16 @@ pub fn fuse_scores(
     mixed_script_penalty: f32,
     length_penalty: f32,
 ) -> RiskScore {
-    // 将 entropy/mixed_script/length 惩罚加到 jailbreak
+    // 高熵/混合脚本是独立的可疑信号，仅在已有越狱信号时增强，不单独产生越狱分数
     let base_jailbreak = pattern_scores.jailbreak.max(semantic_jailbreak);
-    let enhanced_jailbreak = combine_probabilities(&[base_jailbreak, entropy_penalty, mixed_script_penalty, length_penalty]);
+    let encoding_boost = entropy_penalty.max(mixed_script_penalty).max(length_penalty);
+    let enhanced_jailbreak = if base_jailbreak > 0.1 {
+        // 已有越狱信号时，编码异常增强越狱分数
+        combine_probabilities(&[base_jailbreak, encoding_boost * 0.5])
+    } else {
+        // 无越狱信号时，编码异常不产生越狱分数
+        base_jailbreak
+    };
 
     RiskScore {
         sexual: pattern_scores.sexual,

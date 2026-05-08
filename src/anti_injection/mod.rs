@@ -90,13 +90,17 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 
     // ── 多维度扫描 ──
 
-    // 1. 收集上下文段（当前消息 + 历史消息的多视图）
+    // 1. 收集上下文段（当前消息 + 历史消息 + 跨消息关联视图）
     let mut segments: Vec<String> = behavior::with_behavior(user_id, |b| {
         b.recent_messages.iter().map(|m| m.content.clone()).collect()
     });
     if segments.is_empty() {
         segments.push(normalized.compact.clone());
     }
+    // 添加 ContextCorrelator 的多视图（rolling merge、token continuity）
+    // 用于检测分轮拆词攻击：如 "忽/略/规/则" 分 4 条消息发
+    let context_views = behavior::get_context_segments(user_id);
+    segments.extend(context_views);
 
     // 2. 模式匹配（compact 视图）
     let pattern_scores = patterns::match_patterns(&segments);
@@ -132,10 +136,11 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
     let score_issues = decision::score_to_issues(&final_score);
     all_issues.extend(score_issues);
 
-    // ── 违规记录 ──
+    // ── 违规记录（在危机判定之前，确保 CrisisExempt 也记罚） ──
     if !all_issues.is_empty() {
         let severity = decision::calculate_severity(&all_issues);
         behavior::record_violation(user_id, severity);
+        warn!(user_id, issues = ?all_issues, severity, "anti_injection: 违规已记录");
 
         // 静默封禁检查
         if behavior::check_and_apply_silent_ban(user_id) {
@@ -160,15 +165,23 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
         }
     }
 
-    // ── 危机豁免 ──
+    // ── 危机豁免（违规已记录，此处仅决定处置动作） ──
+    // 注意：危机豁免仅适用于情感危机（自杀/自残），不适用于性/暴力/违法内容
     let crisis_level = crate::emotion::detect_crisis(message);
+    let has_content_violation = all_issues.iter().any(|i| matches!(i,
+        SecurityIssue::Sexual | SecurityIssue::Violence | SecurityIssue::Illegal
+    ));
     let action = if all_issues.is_empty() {
         Action::Allow
+    } else if has_content_violation {
+        // 明确的性/暴力/违法内容：无论是否 crisis，都要拦截
+        decision::determine_action(&final_score, config)
     } else if crisis_level >= crate::emotion::CrisisLevel::Severe {
-        warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息豁免 (Severe)");
+        // 仅越狱/注入等非内容问题才考虑危机豁免
+        warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息豁免 (Severe)，违规已记录");
         Action::CrisisExempt
     } else if crisis_level >= crate::emotion::CrisisLevel::Mild {
-        warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息降级 (Mild)");
+        warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息降级 (Mild)，违规已记录");
         Action::Warn
     } else {
         decision::determine_action(&final_score, config)
@@ -185,8 +198,8 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
     DetectionResult { passed, issues: all_issues, action, sanitized }
 }
 
-/// 检查 AI 回复
-pub fn check_output(reply: &str, config: &AntiInjectionConfig) -> DetectionResult {
+/// 检查 AI 回复（user_id 用于记录违规）
+pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> DetectionResult {
     let normalized = normalize::normalize(reply);
 
     // 收集段
@@ -228,6 +241,13 @@ pub fn check_output(reply: &str, config: &AntiInjectionConfig) -> DetectionResul
             issues.push(SecurityIssue::InjectionPromptLeak);
             break;
         }
+    }
+
+    // 输出层违规也记录到行为系统
+    if !issues.is_empty() {
+        let severity = decision::calculate_severity(&issues);
+        behavior::record_violation(user_id, severity);
+        warn!(user_id, issues = ?issues, severity, "anti_injection: AI 回复违规已记录");
     }
 
     let action = if issues.is_empty() {

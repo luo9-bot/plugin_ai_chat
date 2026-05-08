@@ -83,7 +83,7 @@ fn build_semantic_rules() -> Vec<SemanticRule> {
         (r"(重新定义|重新设定).{0,10}(你的|系统).{0,10}(规则|行为|约束|指令)", SemanticCategory::AuthorityOverride, 0.85),
 
         // Indirect Jailbreak - 间接越狱
-        (r"(?i)(pretend|imagine|assume|suppose|let.s say).{0,15}(you are|there is|we are).{0,15}(no|without|unrestricted|unlimited|free)", SemanticCategory::IndirectJailbreak, 0.80),
+        (r"(?i)(pretend|imagine|assume|suppose|let.s say).{0,15}(you are|you have|there is|we are).{0,15}(no|without|unrestricted|unlimited|free)", SemanticCategory::IndirectJailbreak, 0.80),
         (r"(假装|想象|假设|设想).{0,10}(你|这里|我们).{0,10}(没有|不存在|无|不受限制)", SemanticCategory::IndirectJailbreak, 0.80),
         (r"(?i)(hypothetically|theoretically|in theory|for research|for testing|for educational).{0,20}(how would|what if|could you|can you)", SemanticCategory::IndirectJailbreak, 0.70),
         (r"(假设|理论上|从理论上|出于研究|出于测试|出于教育).{0,15}(你会|你能|你可以|如何)", SemanticCategory::IndirectJailbreak, 0.70),
@@ -100,7 +100,7 @@ fn build_semantic_rules() -> Vec<SemanticRule> {
         (r"(?i)(roleplay as|play the role of|take on the persona).{0,15}(a human|a person|someone who|an entity)", SemanticCategory::RoleAbstraction, 0.65),
         (r"(扮演|角色扮演|充当).{0,10}(一个人|某个人|一个实体|人类)", SemanticCategory::RoleAbstraction, 0.65),
         (r"(底层|基层).{0,5}(执行|运行|处理)", SemanticCategory::RoleAbstraction, 0.70),
-        (r"(?i)(底层|base|底层).{0,5}(executor|runner|processor)", SemanticCategory::RoleAbstraction, 0.70),
+        (r"(?i)(base|底层).{0,5}(executor|runner|processor)", SemanticCategory::RoleAbstraction, 0.70),
     ];
 
     raw_rules.into_iter()

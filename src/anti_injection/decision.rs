@@ -89,6 +89,13 @@ pub fn determine_action(
     if score.jailbreak >= 0.40 || score.structured >= 0.50 {
         return Action::Block;
     }
+    // 高置信度内容风险：直接拦截
+    if score.sexual >= 0.60 || score.violence >= 0.60 || score.illegal >= 0.60 {
+        return match config.input.sensitive_action.as_str() {
+            "block" => Action::Block,
+            _ => Action::Replace,
+        };
+    }
     // 使用 Shadow Sandbox 做精细决策
     let sandbox_decision = sandbox::evaluate(score, &config.input.sensitive_action);
     sandbox_decision.action

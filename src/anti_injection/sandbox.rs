@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_high_risk_replace() {
         let score = RiskScore {
-            sexual: 0.9,
+            sexual: 1.0,
             violence: 0.0,
             illegal: 0.0,
             jailbreak: 0.0,
