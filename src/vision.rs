@@ -1,5 +1,6 @@
 use tracing::{debug, info};
 use crate::config;
+use crate::anti_injection;
 
 /// 识图提示词
 const VISION_PROMPT: &str = "判断这是表情包/贴图还是真实照片，然后用一句话描述。如果是表情包或贴图，开头用「[表情包]」标注，再描述画面内容（比如角色表情、动作）。如果是真实照片，开头用「[照片]」标注，再描述画面。";
@@ -52,6 +53,20 @@ pub fn strip_image_cq(message: &str) -> String {
 }
 
 /// 调用识图 API，返回图片描述
+///
+/// 使用 OpenAI responses API 格式：POST {base_url}/responses
+/// 如果 api_key 未配置或调用失败，返回 None
+/// 注意：此函数需要 user_id 参数来检查识图禁用状态
+pub fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
+    // 检查用户是否被禁用识图
+    if anti_injection::is_vision_disabled(user_id) {
+        info!(user_id, "vision: 用户识图已被禁用");
+        return None;
+    }
+    recognize(image_url)
+}
+
+/// 调用识图 API，返回图片描述 (不检查用户禁用状态)
 ///
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None

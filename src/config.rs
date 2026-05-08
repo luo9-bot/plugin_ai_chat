@@ -43,6 +43,17 @@ pub struct Config {
     pub sync: SyncConfig,
     #[serde(default)]
     pub admin: AdminConfig,
+    #[serde(default)]
+    pub anti_injection: AntiInjectionConfig,
+    /// 白名单：只允许这些用户使用私聊（为空则不限制）
+    #[serde(default)]
+    pub whitelist: Vec<u64>,
+    /// 黑名单：禁止这些用户使用私聊（为空则不限制）
+    #[serde(default)]
+    pub blacklist: Vec<u64>,
+    /// 默认开启私聊的用户列表（无需手动发送"开启对话"）
+    #[serde(default)]
+    pub auto_start_users: Vec<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -409,6 +420,103 @@ impl Default for AdminConfig {
     }
 }
 
+// ── 防注入配置 ────────────────────────────────────────────────────
+// 注意：防注入系统始终开启，不可关闭
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AntiInjectionConfig {
+    /// 输入层配置
+    #[serde(default)]
+    pub input: InputFilterConfig,
+    /// 输出层配置
+    #[serde(default)]
+    pub output: OutputFilterConfig,
+    /// 行为层配置
+    #[serde(default)]
+    pub behavior: BehaviorConfig,
+}
+
+impl Default for AntiInjectionConfig {
+    fn default() -> Self {
+        Self {
+            input: InputFilterConfig::default(),
+            output: OutputFilterConfig::default(),
+            behavior: BehaviorConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct InputFilterConfig {
+    /// 最大消息长度 (超过则截断)
+    #[serde(default = "default_max_message_length")]
+    pub max_message_length: usize,
+    /// 敏感内容处理方式: "replace" | "block"
+    /// 最低等级为 "replace"，可配置为 "block"
+    #[serde(default = "default_sensitive_action")]
+    pub sensitive_action: String,
+}
+
+impl Default for InputFilterConfig {
+    fn default() -> Self {
+        Self {
+            max_message_length: 2000,
+            sensitive_action: "replace".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct OutputFilterConfig {
+    /// 检测到问题时的处理: "replace" | "block"
+    /// 最低等级为 "replace"，可配置为 "block"
+    #[serde(default = "default_output_action")]
+    pub action: String,
+}
+
+impl Default for OutputFilterConfig {
+    fn default() -> Self {
+        Self {
+            action: "replace".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct BehaviorConfig {
+    /// 是否启用频率限制
+    #[serde(default = "default_true")]
+    pub rate_limit: bool,
+    /// 每分钟最大消息数
+    #[serde(default = "default_max_messages_per_minute")]
+    pub max_messages_per_minute: u32,
+    /// 每小时最大消息数
+    #[serde(default = "default_max_messages_per_hour")]
+    pub max_messages_per_hour: u32,
+    /// 信誉分数阈值 (低于此值则限制)
+    #[serde(default = "default_reputation_threshold")]
+    pub reputation_threshold: f32,
+    /// 是否启用自动封禁
+    #[serde(default = "default_true")]
+    pub auto_ban: bool,
+    /// 自动封禁阈值 (触发次数)
+    #[serde(default = "default_auto_ban_threshold")]
+    pub auto_ban_threshold: u32,
+}
+
+impl Default for BehaviorConfig {
+    fn default() -> Self {
+        Self {
+            rate_limit: true,
+            max_messages_per_minute: 20,
+            max_messages_per_hour: 200,
+            reputation_threshold: 0.3,
+            auto_ban: true,
+            auto_ban_threshold: 10,
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 fn default_prompts() -> String { "default.txt".into() }
@@ -460,6 +568,13 @@ fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }
 fn default_forget_fail() -> String { "没有找到对话记录".into() }
+fn default_max_message_length() -> usize { 2000 }
+fn default_sensitive_action() -> String { "warn".into() }
+fn default_output_action() -> String { "replace".into() }
+fn default_max_messages_per_minute() -> u32 { 20 }
+fn default_max_messages_per_hour() -> u32 { 200 }
+fn default_reputation_threshold() -> f32 { 0.3 }
+fn default_auto_ban_threshold() -> u32 { 10 }
 
 // ── 全局实例 ────────────────────────────────────────────────────
 
@@ -590,6 +705,36 @@ admin:
   token: ""                    # 管理员登录令牌 (必填才启用)
   port: 17000                  # 监听端口 (被占用时自动递增)
 
+# ── 防注入配置 (始终开启，不可关闭) ──────────────────────────
+# 多层防护系统：输入层、输出层、行为层
+# 注意：关键词过滤、注入模式检测、编码绕过检测、色情/暴力/违法内容检测、
+# 输出检测 始终强制开启，无法通过配置关闭
+anti_injection:
+  input:
+    max_message_length: 2000   # 最大消息长度
+    sensitive_action: "replace"  # 敏感内容处理: replace(替换) | block(阻止)
+  output:
+    action: "replace"          # 检测到问题时: replace(替换) | block(阻止)
+  behavior:
+    rate_limit: true           # 频率限制
+    max_messages_per_minute: 20  # 每分钟最大消息数
+    max_messages_per_hour: 200   # 每小时最大消息数
+    reputation_threshold: 0.3  # 信誉分数阈值 (0.0~1.0)
+    auto_ban: true             # 自动封禁
+    auto_ban_threshold: 10     # 自动封禁触发次数
+
+# ── 用户访问控制 ─────────────────────────────────────────────────
+# 白名单：只允许这些用户使用私聊（为空则不限制，全体可用）
+# 黑名单：禁止这些用户使用私聊（为空则不限制）
+# 两个都配置时，白名单优先（只允许白名单用户，黑名单无效）
+# whitelist: []               # 示例: [123456789, 987654321]
+# blacklist: []               # 示例: [111111111, 222222222]
+
+# ── 默认启动对话用户 ─────────────────────────────────────────────
+# 这些用户无需手动发送"开启对话"，启动插件后自动开启私聊
+# 也会受到白名单/黑名单的限制
+# auto_start_users: []        # 示例: [123456789]
+
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
   start:
@@ -655,6 +800,10 @@ pub fn init() {
                 log: LogConfig::default(),
                 sync: SyncConfig::default(),
                 admin: AdminConfig::default(),
+                anti_injection: AntiInjectionConfig::default(),
+                whitelist: Vec::new(),
+                blacklist: Vec::new(),
+                auto_start_users: Vec::new(),
             }
         }
     };

@@ -37,6 +37,7 @@ import ProactiveView from './views/ProactiveView.vue'
 import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
+import AntiInjectionView from './views/AntiInjectionView.vue'
 
 const loggedIn = ref(false)
 const tokenInput = ref('')
@@ -55,6 +56,7 @@ const tabs = [
   { id: 'archive', name: '📦 归档', comp: ArchiveView },
   { id: 'backups', name: '💾 备份', comp: BackupsView },
   { id: 'sync', name: '🔄 同步', comp: SyncView },
+  { id: 'anti-injection', name: '🛡️ 防注入', comp: AntiInjectionView },
 ]
 
 const tabComponent = computed(() => tabs.find(t => t.id === currentTab.value)?.comp)

@@ -1242,7 +1242,105 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"backups") => handle_backups(&method, &api_segs[1..], &body),
         Some(&"sync") => handle_sync(&method, &api_segs[1..], &body),
+        Some(&"anti-injection") => handle_anti_injection(&method, api_segs, &body),
         _ => err(404, "not found"),
+    }
+}
+
+// ── 防注入状态管理 ────────────────────────────────────────────────
+
+fn handle_anti_injection(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    match method {
+        Method::Get => {
+            // GET /api/anti-injection - 获取所有危险用户状态
+            // GET /api/anti-injection/:user_id - 获取特定用户状态
+            if let Some(&user_id_str) = segs.first() {
+                if let Ok(user_id) = user_id_str.parse::<u64>() {
+                    let status = crate::anti_injection::get_user_status(user_id);
+                    let reputation = crate::anti_injection::get_reputation(user_id);
+                    let violation_count = crate::anti_injection::get_violation_count(user_id);
+                    let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
+                    let silent_banned = crate::anti_injection::is_silent_banned(user_id);
+                    let penalty = crate::anti_injection::get_penalty_multiplier(user_id);
+
+                    return ok(serde_json::json!({
+                        "user_id": user_id,
+                        "status": status,
+                        "reputation": reputation,
+                        "violation_count": violation_count,
+                        "vision_disabled": vision_disabled,
+                        "silent_banned": silent_banned,
+                        "penalty_multiplier": penalty,
+                    }));
+                }
+            }
+
+            // 返回配置信息
+            let cfg = &config::get().anti_injection;
+            ok(serde_json::json!({
+                "config": {
+                    "input": {
+                        "max_message_length": cfg.input.max_message_length,
+                        "sensitive_action": cfg.input.sensitive_action,
+                    },
+                    "output": {
+                        "action": cfg.output.action,
+                    },
+                    "behavior": {
+                        "rate_limit": cfg.behavior.rate_limit,
+                        "max_messages_per_minute": cfg.behavior.max_messages_per_minute,
+                        "max_messages_per_hour": cfg.behavior.max_messages_per_hour,
+                        "reputation_threshold": cfg.behavior.reputation_threshold,
+                        "auto_ban": cfg.behavior.auto_ban,
+                        "auto_ban_threshold": cfg.behavior.auto_ban_threshold,
+                    }
+                },
+                "note": "关键词过滤、注入模式检测、编码绕过检测、色情/暴力/违法内容检测、输出检测始终强制开启"
+            }))
+        }
+        Method::Post => {
+            // POST /api/anti-injection/unban - 解封用户
+            // POST /api/anti-injection/enable-vision - 启用识图
+            // POST /api/anti-injection/reset-reputation - 重置信誉
+            let action = segs.first().unwrap_or(&"");
+            let params: serde_json::Value = match serde_json::from_slice(body) {
+                Ok(v) => v,
+                Err(e) => return err(400, &format!("invalid json: {}", e)),
+            };
+            let user_id = match params.get("user_id").and_then(|v| v.as_u64()) {
+                Some(id) => id,
+                None => return err(400, "missing user_id"),
+            };
+
+            match *action {
+                "unban" => {
+                    crate::anti_injection::unban_user(user_id);
+                    ok(serde_json::json!({"success": true, "message": format!("用户{}已解封", user_id)}))
+                }
+                "enable-vision" => {
+                    crate::anti_injection::enable_vision(user_id);
+                    ok(serde_json::json!({"success": true, "message": format!("用户{}识图已启用", user_id)}))
+                }
+                "reset-reputation" => {
+                    crate::anti_injection::reset_reputation(user_id);
+                    ok(serde_json::json!({"success": true, "message": format!("用户{}信誉已重置", user_id)}))
+                }
+                "silent-ban" => {
+                    crate::anti_injection::silent_ban_user(user_id);
+                    ok(serde_json::json!({"success": true, "message": format!("用户{}已静默封禁", user_id)}))
+                }
+                "ban" => {
+                    crate::anti_injection::ban_user(user_id);
+                    ok(serde_json::json!({"success": true, "message": format!("用户{}已完全封禁", user_id)}))
+                }
+                _ => err(404, "unknown action"),
+            }
+        }
+        _ => err(405, "method not allowed"),
     }
 }
 

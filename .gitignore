@@ -13,3 +13,13 @@ node_modules/
 
 *.log
 *.log.*
+
+tests/
+
+# 测试相关文件
+*.test
+*.test.js
+*.test.ts
+test_*.rs
+*_test.rs
+
