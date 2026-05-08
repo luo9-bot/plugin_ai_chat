@@ -34,3 +34,9 @@ tiny_http = "0.12"
 dashmap = "6"
 regex = "1"
 unicode-normalization = "0.1"
+aho-corasick = "1"
+unicode-security = "0.1"
+smallvec = "1"
+
+[dev-dependencies]
+proptest = "1"
