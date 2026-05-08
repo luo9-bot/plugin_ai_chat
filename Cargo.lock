@@ -640,6 +640,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin_ai_chat"
+version = "4.0.0"
+dependencies = [
+ "aho-corasick",
+ "dashmap",
+ "ecdsa",
+ "hex",
+ "luo9_sdk",
+ "once_cell",
+ "p256",
+ "proptest",
+ "rand_core 0.6.4",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "smallvec",
+ "time",
+ "tiny_http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "unicode-normalization",
+ "unicode-security",
+ "ureq",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1167,34 +1195,6 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
-name = "top_drluo_luo9_ai_chat"
-version = "3.4.0"
-dependencies = [
- "aho-corasick",
- "dashmap",
- "ecdsa",
- "hex",
- "luo9_sdk",
- "once_cell",
- "p256",
- "proptest",
- "rand_core 0.6.4",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "smallvec",
- "time",
- "tiny_http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "unicode-normalization",
- "unicode-security",
- "ureq",
-]
 
 [[package]]
 name = "tracing"

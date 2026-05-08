@@ -259,6 +259,16 @@ pub extern "C" fn plugin_main() {
         // 每60秒检查一次主动消息和情绪衰减
         check_periodic();
 
+        // 每5秒同步活跃对话状态到共享内存（供管理线程读取）
+        {
+            static LAST_SYNC: AtomicU64 = AtomicU64::new(0);
+            let now = now_secs();
+            if now.saturating_sub(LAST_SYNC.load(Ordering::Relaxed)) >= 5 {
+                LAST_SYNC.store(now, Ordering::Relaxed);
+                sync_active_to_shared();
+            }
+        }
+
         // ── 版本查询 ──
         if let Some(json) = ver_topic.pop(ver_sub) {
             if luo9_sdk::version::is_version_query(&json) {
@@ -563,19 +573,19 @@ fn now_secs() -> u64 {
 
 // ── 对话管理 API（供 admin.rs 调用） ──────────────────────────
 
-/// 获取所有活跃群聊 ID
+/// 获取所有活跃群聊 ID（从共享内存读取，管理线程可用）
 pub fn get_active_groups() -> Vec<u64> {
-    with_state(|s| s.active_groups.iter().copied().collect())
+    read_shared_state(|s| s.active_groups.iter().copied().collect())
 }
 
-/// 获取所有活跃私聊用户 ID
+/// 获取所有活跃私聊用户 ID（从共享内存读取，管理线程可用）
 pub fn get_active_users() -> Vec<u64> {
-    with_state(|s| s.active.iter().copied().collect())
+    read_shared_state(|s| s.active_users.iter().copied().collect())
 }
 
 /// 开启/关闭群聊，返回是否改变了状态
 pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
-    if enable {
+    let changed = if enable {
         let already = with_state(|s| s.active_groups.contains(&group_id));
         if already { return false; }
         with_state(|s| { s.active_groups.insert(group_id); });
@@ -585,12 +595,14 @@ pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
         if !active { return false; }
         with_state(|s| { s.active_groups.remove(&group_id); });
         true
-    }
+    };
+    sync_active_to_shared();
+    changed
 }
 
 /// 开启/关闭私聊，返回是否改变了状态
 pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
-    if enable {
+    let changed = if enable {
         let already = with_state(|s| s.active.contains(&user_id));
         if already { return false; }
         with_state(|s| { s.active.insert(user_id); });
@@ -603,7 +615,17 @@ pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
             s.batches.remove(&(0, user_id));
         });
         true
-    }
+    };
+    sync_active_to_shared();
+    changed
+}
+
+/// 同步活跃对话状态到 SharedState（供管理线程读取）
+fn sync_active_to_shared() {
+    let (groups, users) = with_state(|s| {
+        (s.active_groups.clone(), s.active.clone())
+    });
+    with_shared_state(|s| s.sync_active(&groups, &users));
 }
 
 // ── 消息处理 ────────────────────────────────────────────────────
