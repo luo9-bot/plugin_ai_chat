@@ -137,10 +137,7 @@ pub struct RuntimeConfig {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::util::now_secs()
 }
 
 fn state_path() -> std::path::PathBuf {

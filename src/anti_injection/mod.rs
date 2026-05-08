@@ -30,7 +30,7 @@ pub use behavior::{
     get_penalty_multiplier, is_vision_disabled, is_silent_banned,
     get_reputation, get_violation_count, record_ai_review_failure,
     ban_user, silent_ban_user, unban_user, enable_vision,
-    reset_reputation, get_user_status,
+    reset_reputation, get_user_status, get_all_user_statuses,
 };
 
 // ── Public API ──
@@ -276,32 +276,29 @@ pub fn handle_admin_command(admin_id: u64, cmd: &str, config: &crate::config::Co
         return Some("无权限执行此命令".into());
     }
 
-    if let Some(rest) = cmd.strip_prefix("防注入状态:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            return Some(get_user_status(uid));
-        }
-        return Some("格式: 防注入状态:QQ号".into());
+    if let Some(res) = crate::util::parse_uid_arg(cmd, "防注入状态:") {
+        return Some(match res {
+            Ok(uid) => get_user_status(uid),
+            Err(e) => e,
+        });
     }
-    if let Some(rest) = cmd.strip_prefix("解封用户:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            unban_user(uid);
-            return Some(format!("已解封用户{}", uid));
-        }
-        return Some("格式: 解封用户:QQ号".into());
+    if let Some(res) = crate::util::parse_uid_arg(cmd, "解封用户:") {
+        return Some(match res {
+            Ok(uid) => { unban_user(uid); format!("已解封用户{}", uid) }
+            Err(e) => e,
+        });
     }
-    if let Some(rest) = cmd.strip_prefix("启用识图:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            enable_vision(uid);
-            return Some(format!("已为用户{}启用识图", uid));
-        }
-        return Some("格式: 启用识图:QQ号".into());
+    if let Some(res) = crate::util::parse_uid_arg(cmd, "启用识图:") {
+        return Some(match res {
+            Ok(uid) => { enable_vision(uid); format!("已为用户{}启用识图", uid) }
+            Err(e) => e,
+        });
     }
-    if let Some(rest) = cmd.strip_prefix("重置信誉:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            reset_reputation(uid);
-            return Some(format!("已重置用户{}信誉", uid));
-        }
-        return Some("格式: 重置信誉:QQ号".into());
+    if let Some(res) = crate::util::parse_uid_arg(cmd, "重置信誉:") {
+        return Some(match res {
+            Ok(uid) => { reset_reputation(uid); format!("已重置用户{}信誉", uid) }
+            Err(e) => e,
+        });
     }
     None
 }

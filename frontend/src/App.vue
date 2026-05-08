@@ -38,6 +38,7 @@ import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
 import AntiInjectionView from './views/AntiInjectionView.vue'
+import ConversationsView from './views/ConversationsView.vue'
 
 const loggedIn = ref(false)
 const tokenInput = ref('')
@@ -51,6 +52,7 @@ const tabs = [
   { id: 'personality', name: '🎭 人格', comp: PersonalityView },
   { id: 'emotion', name: '😊 情绪', comp: EmotionView },
   { id: 'mental-state', name: '🧬 心理状态', comp: MentalState },
+  { id: 'conversations', name: '💬 对话管理', comp: ConversationsView },
   { id: 'blocklist', name: '🚫 黑名单', comp: BlocklistView },
   { id: 'proactive', name: '📢 主动对话', comp: ProactiveView },
   { id: 'archive', name: '📦 归档', comp: ArchiveView },

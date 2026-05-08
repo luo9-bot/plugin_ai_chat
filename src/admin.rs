@@ -6,10 +6,7 @@ use crate::config;
 // ── 工具函数 ────────────────────────────────────────────────────
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::util::now_secs()
 }
 
 fn json_response(status: u16, body: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -1243,6 +1240,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"backups") => handle_backups(&method, &api_segs[1..], &body),
         Some(&"sync") => handle_sync(&method, &api_segs[1..], &body),
         Some(&"anti-injection") => handle_anti_injection(&method, api_segs, &body),
+        Some(&"conversations") => handle_conversations(&method, &api_segs[1..]),
         _ => err(404, "not found"),
     }
 }
@@ -1256,7 +1254,11 @@ fn handle_anti_injection(
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
-            // GET /api/anti-injection - 获取所有危险用户状态
+            // GET /api/anti-injection/users - 获取所有用户风险状态
+            if segs.first() == Some(&"users") {
+                let users = crate::anti_injection::get_all_user_statuses();
+                return ok(serde_json::json!({"users": users}));
+            }
             // GET /api/anti-injection/:user_id - 获取特定用户状态
             if let Some(&user_id_str) = segs.first() {
                 if let Ok(user_id) = user_id_str.parse::<u64>() {
@@ -1339,6 +1341,56 @@ fn handle_anti_injection(
                 }
                 _ => err(404, "unknown action"),
             }
+        }
+        _ => err(405, "method not allowed"),
+    }
+}
+
+// ── 对话管理 ──────────────────────────────────────────────────
+
+fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+    match method {
+        Method::Get => {
+            // GET /api/conversations — 列出所有活跃群聊和私聊
+            let groups = crate::get_active_groups();
+            let users = crate::get_active_users();
+            ok(serde_json::json!({
+                "groups": groups,
+                "private_users": users,
+            }))
+        }
+        Method::Post => {
+            // POST /api/conversations/group/{id}/enable
+            // POST /api/conversations/group/{id}/disable
+            // POST /api/conversations/private/{id}/enable
+            // POST /api/conversations/private/{id}/disable
+            if segs.len() < 3 {
+                return err(400, "path: /api/conversations/{group|private}/{id}/{enable|disable}");
+            }
+            let kind = segs[0];
+            let id: u64 = match segs[1].parse() {
+                Ok(v) => v,
+                Err(_) => return err(400, "invalid id"),
+            };
+            let enable = match segs[2] {
+                "enable" => true,
+                "disable" => false,
+                _ => return err(400, "action must be enable or disable"),
+            };
+
+            let changed = match kind {
+                "group" => crate::toggle_group_chat(id, enable),
+                "private" => crate::toggle_private_chat(id, enable),
+                _ => return err(400, "kind must be group or private"),
+            };
+
+            let action = if enable { "开启" } else { "关闭" };
+            let target = if kind == "group" { format!("群{}", id) } else { format!("用户{}", id) };
+            ok(serde_json::json!({
+                "ok": true,
+                "changed": changed,
+                "message": if changed { format!("已{}{}", action, target) } else { format!("{}已处于{}状态", target, action) }
+            }))
         }
         _ => err(405, "method not allowed"),
     }

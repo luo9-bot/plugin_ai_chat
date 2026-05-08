@@ -326,6 +326,29 @@ pub fn reset_reputation(user_id: u64) {
     });
 }
 
+/// 全用户风险状态摘要（供管理 API 使用）
+pub fn get_all_user_statuses() -> Vec<serde_json::Value> {
+    USER_BEHAVIORS.iter().map(|entry| {
+        let uid = *entry.key();
+        let b = entry.value();
+        serde_json::json!({
+            "user_id": uid,
+            "content_reputation": b.reputation.content,
+            "spam_reputation": b.reputation.spam,
+            "trust_reputation": b.reputation.trust,
+            "combined_reputation": b.reputation.combined(),
+            "violation_count": b.violation_count,
+            "high_severity_count": b.high_severity_count,
+            "severity_score": b.severity_score,
+            "banned": b.banned,
+            "silent_banned": b.silent_banned,
+            "vision_disabled": b.vision_disabled,
+            "penalty_multiplier": b.reputation.penalty_multiplier(),
+            "context_messages": b.recent_messages.len(),
+        })
+    }).collect()
+}
+
 /// 获取用户状态描述
 pub fn get_user_status(user_id: u64) -> String {
     with_behavior(user_id, |b| {

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::time::SystemTime;
 use tracing::{debug, info};
 
 use crate::config;
@@ -70,10 +69,7 @@ pub struct GroupProfile {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::util::now_secs()
 }
 
 fn store_path() -> std::path::PathBuf {

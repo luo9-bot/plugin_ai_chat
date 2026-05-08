@@ -53,7 +53,67 @@
       </div>
     </div>
 
-    <!-- 查询用户 -->
+    <!-- 用户风险总览 -->
+    <div class="section">
+      <h3>📊 用户风险总览
+        <button class="btn btn-outline btn-sm" style="margin-left:8px" @click="loadUsers">刷新</button>
+      </h3>
+      <div v-if="allUsers.length === 0" class="empty">暂无用户记录</div>
+      <table v-else class="risk-table">
+        <thead>
+          <tr>
+            <th>QQ 号</th>
+            <th>内容信誉</th>
+            <th>信任信誉</th>
+            <th>综合信誉</th>
+            <th>违规</th>
+            <th>高严重度</th>
+            <th>惩罚系数</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in allUsers" :key="u.user_id"
+              :class="getRiskClass(u.combined_reputation)"
+              @click="expandUser(u.user_id)">
+            <td class="uid">{{ u.user_id }}</td>
+            <td>
+              <div class="mini-bar">
+                <div class="mini-fill" :class="getBarClass(u.content_reputation)" :style="{ width: u.content_reputation * 100 + '%' }"></div>
+              </div>
+              <span class="bar-text">{{ u.content_reputation?.toFixed(2) }}</span>
+            </td>
+            <td>
+              <div class="mini-bar">
+                <div class="mini-fill" :class="getBarClass(u.trust_reputation)" :style="{ width: u.trust_reputation * 100 + '%' }"></div>
+              </div>
+              <span class="bar-text">{{ u.trust_reputation?.toFixed(2) }}</span>
+            </td>
+            <td>
+              <div class="mini-bar">
+                <div class="mini-fill" :class="getBarClass(u.combined_reputation)" :style="{ width: u.combined_reputation * 100 + '%' }"></div>
+              </div>
+              <span class="bar-text">{{ u.combined_reputation?.toFixed(2) }}</span>
+            </td>
+            <td class="center">{{ u.violation_count || 0 }}</td>
+            <td class="center" :class="{ 'text-danger': u.high_severity_count > 0 }">{{ u.high_severity_count || 0 }}</td>
+            <td class="center" :class="{ 'text-warning': u.penalty_multiplier > 1 }">{{ u.penalty_multiplier?.toFixed(1) || '1.0' }}x</td>
+            <td class="center">
+              <span v-if="u.banned" class="badge badge-danger">封禁</span>
+              <span v-else-if="u.silent_banned" class="badge badge-warning">静默封禁</span>
+              <span v-else-if="u.vision_disabled" class="badge badge-info">识图禁用</span>
+              <span v-else class="badge badge-ok">正常</span>
+            </td>
+            <td>
+              <button class="btn btn-outline btn-xs" @click.stop="queryUid = String(u.user_id); queryUser()">详情</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 查询用户详情 -->
     <div class="section">
       <h3>🔍 查询用户状态</h3>
       <div class="toolbar">
@@ -64,7 +124,7 @@
 
     <!-- 用户状态详情 -->
     <div v-if="userStatus" class="section user-detail">
-      <h3>👤 用户 {{ userStatus.user_id }} 状态</h3>
+      <h3>👤 用户 {{ userStatus.user_id }} 详情</h3>
       <div class="status-grid">
         <div class="status-item" :class="getReputationClass(userStatus.reputation)">
           <span class="label">信誉分数</span>
@@ -91,25 +151,15 @@
         </div>
       </div>
 
-      <!-- 状态文本 -->
       <div class="status-text" v-if="userStatus.status">
         <pre>{{ userStatus.status }}</pre>
       </div>
 
-      <!-- 操作按钮 -->
       <div class="actions">
-        <button class="btn btn-success" @click="resetReputation" :disabled="!userStatus.user_id">
-          🔄 重置信誉
-        </button>
-        <button class="btn btn-primary" @click="enableVision" :disabled="!userStatus.vision_disabled">
-          👁️ 启用识图
-        </button>
-        <button class="btn btn-warning" @click="unbanUser" :disabled="!userStatus.silent_banned">
-          🔓 解封用户
-        </button>
-        <button class="btn btn-danger" @click="banUser" :disabled="userStatus.silent_banned">
-          🚫 完全封禁
-        </button>
+        <button class="btn btn-success" @click="resetReputation" :disabled="!userStatus.user_id">🔄 重置信誉</button>
+        <button class="btn btn-primary" @click="enableVision" :disabled="!userStatus.vision_disabled">👁️ 启用识图</button>
+        <button class="btn btn-warning" @click="unbanUser" :disabled="!userStatus.silent_banned">🔓 解封用户</button>
+        <button class="btn btn-danger" @click="banUser" :disabled="userStatus.silent_banned">🚫 完全封禁</button>
       </div>
     </div>
 
@@ -118,7 +168,7 @@
       <h3>📖 说明</h3>
       <ul class="help-list">
         <li><strong>信誉分数</strong>：0.0-1.0，低于 0.3 会触发非察觉性封禁</li>
-        <li><strong>惩罚系数</strong>：信誉越低，AI 消耗的 token 越多（1.0x-4.0x）</li>
+        <li><strong>惩罚系数</strong>：信誉越低，AI 消耗的 token 越多（1.0x-6.0x）</li>
         <li><strong>静默封禁</strong>：用户会看到"使用人数过多"而非直接拒绝</li>
         <li><strong>识图禁用</strong>：违规用户的识图功能会被自动禁用</li>
         <li><strong>完全封禁</strong>：用户的所有消息将被完全忽略</li>
@@ -134,6 +184,7 @@ import { api } from '../api.js'
 const config = ref({})
 const queryUid = ref('')
 const userStatus = ref(null)
+const allUsers = ref([])
 
 async function loadConfig() {
   try {
@@ -144,15 +195,30 @@ async function loadConfig() {
   }
 }
 
+async function loadUsers() {
+  try {
+    const data = await api('/api/anti-injection/users')
+    const users = data.users || []
+    // 按综合信誉升序（高风险在上）
+    users.sort((a, b) => a.combined_reputation - b.combined_reputation)
+    allUsers.value = users
+  } catch (e) {
+    console.error('Failed to load users:', e)
+  }
+}
+
+function expandUser(uid) {
+  queryUid.value = String(uid)
+  queryUser()
+}
+
 async function queryUser() {
   const uid = parseInt(queryUid.value)
   if (!uid) return
-
   try {
     const data = await api('/api/anti-injection/' + uid)
     userStatus.value = data
   } catch (e) {
-    console.error('Failed to query user:', e)
     alert('查询失败: ' + e.message)
   }
 }
@@ -160,70 +226,62 @@ async function queryUser() {
 async function resetReputation() {
   if (!userStatus.value?.user_id) return
   if (!confirm(`确定重置用户 ${userStatus.value.user_id} 的信誉？`)) return
-
   try {
-    await api('/api/anti-injection/reset-reputation', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userStatus.value.user_id })
-    })
-    queryUser() // 刷新状态
-  } catch (e) {
-    alert('操作失败: ' + e.message)
-  }
+    await api('/api/anti-injection/reset-reputation', { method: 'POST', body: JSON.stringify({ user_id: userStatus.value.user_id }) })
+    queryUser()
+    loadUsers()
+  } catch (e) { alert('操作失败: ' + e.message) }
 }
 
 async function enableVision() {
   if (!userStatus.value?.user_id) return
   if (!confirm(`确定为用户 ${userStatus.value.user_id} 启用识图？`)) return
-
   try {
-    await api('/api/anti-injection/enable-vision', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userStatus.value.user_id })
-    })
-    queryUser() // 刷新状态
-  } catch (e) {
-    alert('操作失败: ' + e.message)
-  }
+    await api('/api/anti-injection/enable-vision', { method: 'POST', body: JSON.stringify({ user_id: userStatus.value.user_id }) })
+    queryUser()
+    loadUsers()
+  } catch (e) { alert('操作失败: ' + e.message) }
 }
 
 async function unbanUser() {
   if (!userStatus.value?.user_id) return
   if (!confirm(`确定解封用户 ${userStatus.value.user_id}？`)) return
-
   try {
-    await api('/api/anti-injection/unban', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userStatus.value.user_id })
-    })
-    queryUser() // 刷新状态
-  } catch (e) {
-    alert('操作失败: ' + e.message)
-  }
+    await api('/api/anti-injection/unban', { method: 'POST', body: JSON.stringify({ user_id: userStatus.value.user_id }) })
+    queryUser()
+    loadUsers()
+  } catch (e) { alert('操作失败: ' + e.message) }
 }
 
 async function banUser() {
   if (!userStatus.value?.user_id) return
   if (!confirm(`确定完全封禁用户 ${userStatus.value.user_id}？此操作不可逆！`)) return
-
   try {
-    await api('/api/anti-injection/ban', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userStatus.value.user_id })
-    })
-    queryUser() // 刷新状态
-  } catch (e) {
-    alert('操作失败: ' + e.message)
-  }
+    await api('/api/anti-injection/ban', { method: 'POST', body: JSON.stringify({ user_id: userStatus.value.user_id }) })
+    queryUser()
+    loadUsers()
+  } catch (e) { alert('操作失败: ' + e.message) }
 }
 
-function getReputationClass(reputation) {
-  if (reputation >= 0.8) return 'success'
-  if (reputation >= 0.5) return 'warning'
+function getReputationClass(r) {
+  if (r >= 0.8) return 'success'
+  if (r >= 0.5) return 'warning'
   return 'danger'
 }
 
-onMounted(loadConfig)
+function getRiskClass(r) {
+  if (r >= 0.8) return 'row-ok'
+  if (r >= 0.5) return 'row-warn'
+  return 'row-danger'
+}
+
+function getBarClass(r) {
+  if (r >= 0.8) return 'bar-ok'
+  if (r >= 0.5) return 'bar-warn'
+  return 'bar-danger'
+}
+
+onMounted(() => { loadConfig(); loadUsers() })
 </script>
 
 <style scoped>
@@ -253,24 +311,9 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   border-radius: var(--radius);
 }
 
-.config-item .label {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.config-item .value {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.always-on {
-  color: var(--success);
-  font-weight: 600;
-}
-
-.enabled {
-  color: var(--success);
-}
+.config-item .label { font-size: 12px; color: var(--text-dim); }
+.config-item .value { font-size: 13px; font-weight: 500; }
+.always-on { color: var(--success); font-weight: 600; }
 
 .toolbar {
   display: flex;
@@ -289,10 +332,81 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   outline: none;
 }
 
-.toolbar input:focus {
-  border-color: var(--accent);
+.toolbar input:focus { border-color: var(--accent); }
+
+.empty { color: var(--text-dim); font-size: 13px; padding: 12px 0; }
+
+/* 风险总览表格 */
+.risk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
 
+.risk-table th {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.risk-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--accent-light);
+  vertical-align: middle;
+}
+
+.risk-table tr { cursor: pointer; transition: background .1s; }
+.risk-table tr:hover { background: var(--accent-light); }
+.row-ok { border-left: 3px solid var(--success); }
+.row-warn { border-left: 3px solid var(--warning); }
+.row-danger { border-left: 3px solid var(--danger); }
+
+.uid { font-weight: 600; font-family: 'SFMono-Regular', Consolas, monospace; }
+.center { text-align: center; }
+.text-danger { color: var(--danger); font-weight: 600; }
+.text-warning { color: var(--warning); font-weight: 600; }
+
+.mini-bar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.mini-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s;
+}
+
+.bar-ok { background: var(--success); }
+.bar-warn { background: var(--warning); }
+.bar-danger { background: var(--danger); }
+
+.bar-text { font-size: 12px; font-family: 'SFMono-Regular', Consolas, monospace; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge-ok { background: var(--success-light, #d1fae5); color: var(--success); }
+.badge-info { background: var(--blue-light, #e0e7ff); color: var(--blue, #6366f1); }
+.badge-warning { background: #fef3c7; color: #d97706; }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+
+/* 用户详情 */
 .status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -307,26 +421,10 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   border-left: 3px solid var(--success);
 }
 
-.status-item.warning {
-  border-left-color: var(--warning);
-}
-
-.status-item.danger {
-  border-left-color: var(--danger);
-}
-
-.status-item .label {
-  display: block;
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 4px;
-}
-
-.status-item .value {
-  display: block;
-  font-size: 16px;
-  font-weight: 600;
-}
+.status-item.warning { border-left-color: var(--warning); }
+.status-item.danger { border-left-color: var(--danger); }
+.status-item .label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+.status-item .value { display: block; font-size: 16px; font-weight: 600; }
 
 .progress-bar {
   height: 4px;
@@ -336,19 +434,9 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   overflow: hidden;
 }
 
-.progress-fill {
-  height: 100%;
-  background: var(--success);
-  transition: width 0.3s ease;
-}
-
-.status-item.warning .progress-fill {
-  background: var(--warning);
-}
-
-.status-item.danger .progress-fill {
-  background: var(--danger);
-}
+.progress-fill { height: 100%; background: var(--success); transition: width .3s; }
+.status-item.warning .progress-fill { background: var(--warning); }
+.status-item.danger .progress-fill { background: var(--danger); }
 
 .status-text {
   background: var(--accent-light);
@@ -365,11 +453,7 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   white-space: pre-wrap;
 }
 
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .btn {
   border: none;
@@ -384,15 +468,14 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   gap: 4px;
 }
 
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-success { background: var(--success); color: #fff; }
 .btn-warning { background: var(--warning); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
+.btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+.btn-sm { padding: 5px 12px; font-size: 11px; }
+.btn-xs { padding: 3px 8px; font-size: 10px; }
 
 .help-list {
   font-size: 13px;
@@ -400,11 +483,6 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
   padding-left: 20px;
 }
 
-.help-list li {
-  margin-bottom: 4px;
-}
-
-.help-list strong {
-  color: var(--accent);
-}
+.help-list li { margin-bottom: 4px; }
+.help-list strong { color: var(--accent); }
 </style>

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::time::SystemTime;
 use tracing::{debug, info};
 
 /// AI 记忆审查提示词
@@ -76,10 +75,7 @@ pub struct MemoryStore {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::util::now_secs()
 }
 
 fn memory_path() -> std::path::PathBuf {

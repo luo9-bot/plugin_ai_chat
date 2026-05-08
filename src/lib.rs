@@ -6,6 +6,7 @@ pub mod archive;
 pub mod blocklist;
 pub mod config;
 pub mod crypto;
+pub mod util;
 #[cfg(feature = "plugin")]
 pub mod cron;
 pub mod emotion;
@@ -557,10 +558,52 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    util::now_secs()
+}
+
+// ── 对话管理 API（供 admin.rs 调用） ──────────────────────────
+
+/// 获取所有活跃群聊 ID
+pub fn get_active_groups() -> Vec<u64> {
+    with_state(|s| s.active_groups.iter().copied().collect())
+}
+
+/// 获取所有活跃私聊用户 ID
+pub fn get_active_users() -> Vec<u64> {
+    with_state(|s| s.active.iter().copied().collect())
+}
+
+/// 开启/关闭群聊，返回是否改变了状态
+pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
+    if enable {
+        let already = with_state(|s| s.active_groups.contains(&group_id));
+        if already { return false; }
+        with_state(|s| { s.active_groups.insert(group_id); });
+        true
+    } else {
+        let active = with_state(|s| s.active_groups.contains(&group_id));
+        if !active { return false; }
+        with_state(|s| { s.active_groups.remove(&group_id); });
+        true
+    }
+}
+
+/// 开启/关闭私聊，返回是否改变了状态
+pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
+    if enable {
+        let already = with_state(|s| s.active.contains(&user_id));
+        if already { return false; }
+        with_state(|s| { s.active.insert(user_id); });
+        true
+    } else {
+        let active = with_state(|s| s.active.contains(&user_id));
+        if !active { return false; }
+        with_state(|s| {
+            s.active.remove(&user_id);
+            s.batches.remove(&(0, user_id));
+        });
+        true
+    }
 }
 
 // ── 消息处理 ────────────────────────────────────────────────────
@@ -1036,84 +1079,96 @@ fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<Strin
         _ => {}
     }
 
-    if let Some(rest) = msg.strip_prefix("开启群聊:") {
-        if let Ok(group_id) = rest.trim().parse::<u64>() {
-            let already = with_state(|s| s.active_groups.contains(&group_id));
-            if already {
-                return Some(format!("群{}已经是开启状态", group_id));
+    if let Some(res) = util::parse_uid_arg(msg, "开启群聊:") {
+        return Some(match res {
+            Ok(group_id) => {
+                if with_state(|s| s.active_groups.contains(&group_id)) {
+                    format!("群{}已经是开启状态", group_id)
+                } else {
+                    with_state(|s| { s.active_groups.insert(group_id); });
+                    format!("已开启群{}", group_id)
+                }
             }
-            with_state(|s| { s.active_groups.insert(group_id); });
-            return Some(format!("已开启群{}", group_id));
-        }
-        return Some("格式: 开启群聊:群号".into());
+            Err(e) => e,
+        });
     }
 
-    if let Some(rest) = msg.strip_prefix("关闭群聊:") {
-        if let Ok(group_id) = rest.trim().parse::<u64>() {
-            let active = with_state(|s| s.active_groups.contains(&group_id));
-            if !active {
-                return Some(format!("群{}未开启", group_id));
+    if let Some(res) = util::parse_uid_arg(msg, "关闭群聊:") {
+        return Some(match res {
+            Ok(group_id) => {
+                if !with_state(|s| s.active_groups.contains(&group_id)) {
+                    format!("群{}未开启", group_id)
+                } else {
+                    with_state(|s| { s.active_groups.remove(&group_id); });
+                    format!("已关闭群{}", group_id)
+                }
             }
-            with_state(|s| { s.active_groups.remove(&group_id); });
-            return Some(format!("已关闭群{}", group_id));
-        }
-        return Some("格式: 关闭群聊:群号".into());
+            Err(e) => e,
+        });
     }
 
-    if let Some(rest) = msg.strip_prefix("开启用户:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            let already = with_state(|s| s.active.contains(&uid));
-            if already {
-                return Some(format!("用户{}已开启", uid));
+    if let Some(res) = util::parse_uid_arg(msg, "开启用户:") {
+        return Some(match res {
+            Ok(uid) => {
+                if with_state(|s| s.active.contains(&uid)) {
+                    format!("用户{}已开启", uid)
+                } else {
+                    with_state(|s| { s.active.insert(uid); });
+                    format!("已开启用户{}", uid)
+                }
             }
-            with_state(|s| { s.active.insert(uid); });
-            return Some(format!("已开启用户{}", uid));
-        }
-        return Some("格式: 开启用户:QQ号".into());
+            Err(e) => e,
+        });
     }
 
-    if let Some(rest) = msg.strip_prefix("关闭用户:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            let active = with_state(|s| s.active.contains(&uid));
-            if !active {
-                return Some(format!("用户{}未开启", uid));
+    if let Some(res) = util::parse_uid_arg(msg, "关闭用户:") {
+        return Some(match res {
+            Ok(uid) => {
+                if !with_state(|s| s.active.contains(&uid)) {
+                    format!("用户{}未开启", uid)
+                } else {
+                    with_state(|s| {
+                        s.active.remove(&uid);
+                        s.batches.remove(&(0, uid));
+                    });
+                    format!("已关闭用户{}", uid)
+                }
             }
-            with_state(|s| {
-                s.active.remove(&uid);
-                s.batches.remove(&(0, uid));
-            });
-            return Some(format!("已关闭用户{}", uid));
-        }
-        return Some("格式: 关闭用户:QQ号".into());
+            Err(e) => e,
+        });
     }
 
-    if let Some(rest) = msg.strip_prefix("拉黑:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            let already = with_state(|s| s.is_blacklisted(uid));
-            if already {
-                return Some(format!("用户{}已在黑名单中", uid));
+    if let Some(res) = util::parse_uid_arg(msg, "拉黑:") {
+        return Some(match res {
+            Ok(uid) => {
+                if with_state(|s| s.is_blacklisted(uid)) {
+                    format!("用户{}已在黑名单中", uid)
+                } else {
+                    with_state(|s| {
+                        s.add_blacklist(uid);
+                        s.active.remove(&uid);
+                        s.forget_user_local(uid);
+                    });
+                    with_shared_state(|s| s.forget_user_shared(uid));
+                    format!("已拉黑用户{}，该用户的所有消息将被忽略", uid)
+                }
             }
-            with_state(|s| {
-                s.add_blacklist(uid);
-                s.active.remove(&uid);
-                s.forget_user_local(uid);
-            });
-            with_shared_state(|s| s.forget_user_shared(uid));
-            return Some(format!("已拉黑用户{}，该用户的所有消息将被忽略", uid));
-        }
-        return Some("格式: 拉黑:QQ号".into());
+            Err(e) => e,
+        });
     }
 
-    if let Some(rest) = msg.strip_prefix("移除黑名单:") {
-        if let Ok(uid) = rest.trim().parse::<u64>() {
-            let blocked = with_state(|s| s.is_blacklisted(uid));
-            if !blocked {
-                return Some(format!("用户{}不在黑名单中", uid));
+    if let Some(res) = util::parse_uid_arg(msg, "移除黑名单:") {
+        return Some(match res {
+            Ok(uid) => {
+                if !with_state(|s| s.is_blacklisted(uid)) {
+                    format!("用户{}不在黑名单中", uid)
+                } else {
+                    with_state(|s| { s.remove_blacklist(uid); });
+                    format!("已将用户{}移出黑名单", uid)
+                }
             }
-            with_state(|s| { s.remove_blacklist(uid); });
-            return Some(format!("已将用户{}移出黑名单", uid));
-        }
-        return Some("格式: 移除黑名单:QQ号".into());
+            Err(e) => e,
+        });
     }
 
     // ── 防注入管理命令（需要权限校验） ──
