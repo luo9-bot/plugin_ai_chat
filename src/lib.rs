@@ -410,7 +410,7 @@ fn do_self_reflection() {
         let is_active = with_state(|s| s.active_groups.contains(&group_id));
         if is_active {
             debug!(group_id, content, "self_reflect: sharing thought");
-            sender::send_msg(group_id, 0, &content);
+            sender::safe_send_quiet(group_id, 0, &content);
         } else {
             debug!(group_id, "self_reflect: skipping share to inactive group");
         }
@@ -1562,31 +1562,9 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
     }
 }
 
-/// 群聊回复：模拟打字延迟，分段发送
+/// 群聊回复：带打字延迟，分段发送（复用 sender::send_with_typing）
 fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
-    let cfg = config::get();
-    let reply = sender::normalize_segment_sep(reply);
-
-    // 按 |^| 分割后，每段再按换行分割，展平为最终消息列表
-    let segments: Vec<&str> = if reply.contains("|^|") {
-        reply.split("|^|")
-            .flat_map(|s| s.split('\n'))
-            .filter(|s| !s.trim().is_empty())
-            .collect()
-    } else {
-        reply.split('\n').filter(|s| !s.trim().is_empty()).collect()
-    };
-
-    for (i, segment) in segments.iter().enumerate() {
-        sender::send_msg(group_id, user_id, segment.trim());
-        // 段间打字延迟
-        if i < segments.len() - 1 {
-            let delay_secs = segment.chars().count() as f64 / cfg.conversation.typing_speed;
-            let delay_ms = (delay_secs * 1000.0) as u64;
-            let delay_ms = delay_ms.min(cfg.conversation.max_typing_delay_ms);
-            thread::sleep(Duration::from_millis(delay_ms));
-        }
-    }
+    sender::send_with_typing(group_id, user_id, reply);
 }
 
 /// 构建注入到 system prompt 的额外上下文

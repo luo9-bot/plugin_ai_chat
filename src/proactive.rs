@@ -276,8 +276,9 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     // 日期提醒 — 最高优先级
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
         tracing::debug!(user_id, group_id, msg = %reminder_msg, "proactive: sending date reminder");
-        sender::send_msg(group_id, user_id, &reminder_msg);
-        record_sent(user_id);
+        if sender::safe_send_quiet(group_id, user_id, &reminder_msg) {
+            record_sent(user_id);
+        }
         return;
     }
 
@@ -303,8 +304,9 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         if impulse_prob > 0.0 && roll < impulse_prob {
             let msg = generate_mood_message(user_id, &emo, group_id);
             tracing::debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
-            sender::send_msg(group_id, user_id, &msg);
-            record_sent(user_id);
+            if sender::safe_send_quiet(group_id, user_id, &msg) {
+                record_sent(user_id);
+            }
             return;
         }
     }
@@ -324,8 +326,9 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     if time_since_last >= mood_adjusted && time_since_reply >= mood_adjusted {
         let msg = generate_greeting(user_id, group_id);
         tracing::debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending greeting");
-        sender::send_msg(group_id, user_id, &msg);
-        record_sent(user_id);
+        if sender::safe_send_quiet(group_id, user_id, &msg) {
+            record_sent(user_id);
+        }
     } else {
         tracing::debug!(
             user_id, group_id,
