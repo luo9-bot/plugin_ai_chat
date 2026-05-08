@@ -1,3 +1,5 @@
+pub mod admin;
+pub mod admin_ui;
 pub mod ai;
 pub mod archive;
 pub mod blocklist;
@@ -180,6 +182,11 @@ pub extern "C" fn plugin_main() {
 
     // 注册到远程注册表 (后台线程，不阻塞启动)
     thread::spawn(|| crate::self_memory::register_to_registry());
+
+    // 启动管理后台 (后台线程)
+    if !config::get().admin.token.is_empty() {
+        thread::spawn(|| admin::start_server());
+    }
 
     // 初始化定时器，避免启动时立即触发
     let now = now_secs();
@@ -848,7 +855,7 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
-fn handle_admin_command(msg: &str, group_id: u64, user_id: u64) -> Option<String> {
+fn handle_admin_command(msg: &str, _group_id: u64, _user_id: u64) -> Option<String> {
     debug!(msg, "handle_admin_command: 检查命令");
     match msg {
         "查看群聊" => {
@@ -956,132 +963,6 @@ fn handle_admin_command(msg: &str, group_id: u64, user_id: u64) -> Option<String
             return Some(format!("已将用户{}移出黑名单", uid));
         }
         return Some("格式: 移除黑名单:QQ号".into());
-    }
-
-    // ── 远程记忆管理命令 ──────────────────────────────────────────
-
-    if msg == "同步想法" {
-        let (gid, uid) = (group_id, user_id);
-        thread::spawn(move || {
-            let result = match crate::self_memory::sync_all_to_remote() {
-                Ok(count) => { info!(count, "sync_all_to_remote: ok"); format!("同步完成，共 {} 条", count) }
-                Err(e) => { debug!("sync_all_to_remote: error {}", e); format!("同步失败: {}", e) }
-            };
-            sender::send_msg(gid, uid, &result);
-        });
-        return Some("正在同步想法到远程...".into());
-    }
-
-    if let Some(keyword) = msg.strip_prefix("删除想法:") {
-        let keyword = keyword.trim().to_string();
-        if keyword.is_empty() {
-            return Some("格式: 删除想法:关键词".into());
-        }
-        let kw = keyword.clone();
-        let (gid, uid) = (group_id, user_id);
-        thread::spawn(move || {
-            let result = match crate::self_memory::remote_search_delete(&kw) {
-                Ok(count) => { info!(count, keyword = %kw, "remote_search_delete: ok"); format!("已删除 {} 条包含「{}」的想法", count, kw) }
-                Err(e) => { debug!("remote_search_delete: error {}", e); format!("删除失败: {}", e) }
-            };
-            sender::send_msg(gid, uid, &result);
-        });
-        return Some(format!("正在删除包含「{}」的想法...", keyword));
-    }
-
-    if msg == "查看已删除" {
-        // 这个命令返回数据给用户，仍需同步执行
-        return match crate::self_memory::remote_list_deleted() {
-            Ok(data) => {
-                let thoughts = data.get("thoughts").and_then(|v| v.as_array());
-                match thoughts {
-                    Some(arr) if !arr.is_empty() => {
-                        let mut lines = vec![format!("已删除的记忆 ({}):", arr.len())];
-                        for (i, t) in arr.iter().enumerate().take(20) {
-                            let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-                            let content = t.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                            let preview = if content.chars().count() > 30 {
-                                format!("{}...", content.chars().take(30).collect::<String>())
-                            } else {
-                                content.to_string()
-                            };
-                            lines.push(format!("{}. [{}] {}", i + 1, id, preview));
-                        }
-                        if arr.len() > 20 {
-                            lines.push(format!("... 还有 {} 条", arr.len() - 20));
-                        }
-                        lines.push("\n恢复命令: 恢复想法:ID".into());
-                        Some(lines.join("\n"))
-                    }
-                    _ => Some("没有已删除的记忆".into()),
-                }
-            }
-            Err(e) => Some(format!("查询失败: {}", e)),
-        };
-    }
-
-    if let Some(id) = msg.strip_prefix("恢复想法:") {
-        let id = id.trim().to_string();
-        if id.is_empty() {
-            return Some("格式: 恢复想法:ID".into());
-        }
-        let id_clone = id.clone();
-        let (gid, uid) = (group_id, user_id);
-        thread::spawn(move || {
-            let result = match crate::self_memory::remote_restore(&id_clone) {
-                Ok(()) => { info!(id = %id_clone, "remote_restore: ok"); format!("已恢复记忆 {}", id_clone) }
-                Err(e) => { debug!("remote_restore: error {}", e); format!("恢复失败: {}", e) }
-            };
-            sender::send_msg(gid, uid, &result);
-        });
-        return Some(format!("正在恢复记忆 {}...", id));
-    }
-
-    if msg == "清理过期想法" {
-        let (gid, uid) = (group_id, user_id);
-        thread::spawn(move || {
-            let result = match crate::self_memory::remote_purge() {
-                Ok(count) => { info!(count, "remote_purge: ok"); format!("已清理 {} 条过期记忆", count) }
-                Err(e) => { debug!("remote_purge: error {}", e); format!("清理失败: {}", e) }
-            };
-            sender::send_msg(gid, uid, &result);
-        });
-        return Some("正在清理过期记忆...".into());
-    }
-
-    if let Some(id) = msg.strip_prefix("删除想法ID:") {
-        let id = id.trim().to_string();
-        if id.is_empty() {
-            return Some("格式: 删除想法ID:ID".into());
-        }
-        let id_clone = id.clone();
-        let (gid, uid) = (group_id, user_id);
-        thread::spawn(move || {
-            let result = match crate::self_memory::remote_delete(&id_clone) {
-                Ok(()) => { info!(id = %id_clone, "remote_delete: ok"); format!("已删除记忆 {}", id_clone) }
-                Err(e) => { debug!("remote_delete: error {}", e); format!("删除失败: {}", e) }
-            };
-            sender::send_msg(gid, uid, &result);
-        });
-        return Some(format!("正在删除记忆 {}...", id));
-    }
-
-    if msg == "想法统计" {
-        return match crate::self_memory::remote_stats() {
-            Ok(data) => {
-                let total = data.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-                let deleted = data.get("deleted").and_then(|v| v.as_u64()).unwrap_or(0);
-                let reflection = data.get("reflection").and_then(|v| v.as_u64()).unwrap_or(0);
-                let experience = data.get("experience").and_then(|v| v.as_u64()).unwrap_or(0);
-                let plan = data.get("plan").and_then(|v| v.as_u64()).unwrap_or(0);
-                let feeling = data.get("feeling").and_then(|v| v.as_u64()).unwrap_or(0);
-                Some(format!(
-                    "记忆统计:\n总计: {} (已删除: {})\n脑海涟漪: {}\n日常片段: {}\n小小念头: {}\n心情碎片: {}",
-                    total, deleted, reflection, experience, plan, feeling
-                ))
-            }
-            Err(e) => Some(format!("查询失败: {}", e)),
-        };
     }
 
     None

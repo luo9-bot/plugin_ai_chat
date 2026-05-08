@@ -41,6 +41,8 @@ pub struct Config {
     pub log: LogConfig,
     #[serde(default)]
     pub sync: SyncConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -388,6 +390,25 @@ impl Default for SyncConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct AdminConfig {
+    #[serde(default)]
+    pub token: String,
+    #[serde(default = "default_admin_port")]
+    pub port: u16,
+}
+
+fn default_admin_port() -> u16 { 17000 }
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            token: String::new(),
+            port: 17000,
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 fn default_prompts() -> String { "default.txt".into() }
@@ -562,6 +583,13 @@ sync:
   icon: "💭"                  # 显示图标
   expose: false               # 是否向主网页暴露 (允许被其他用户浏览)
 
+# ── 管理后台 (可选) ─────────────────────────────────────────────
+# 本地 Web 管理面板，用于管理所有记忆数据
+# token 为空则不启动管理后台
+admin:
+  token: ""                    # 管理员登录令牌 (必填才启用)
+  port: 17000                  # 监听端口 (被占用时自动递增)
+
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
   start:
@@ -626,6 +654,7 @@ pub fn init() {
                 messages: Messages::default(),
                 log: LogConfig::default(),
                 sync: SyncConfig::default(),
+                admin: AdminConfig::default(),
             }
         }
     };

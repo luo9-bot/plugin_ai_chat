@@ -8,3 +8,8 @@ data/
 .claude/
 
 memory_viewer.html
+
+node_modules/
+
+*.log
+*.log.*

@@ -517,6 +517,25 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
     Ok(inserted as usize)
 }
 
+/// 获取远程全部记忆 (用于 pull 同步)
+pub fn remote_list_all() -> Result<serde_json::Value, String> {
+    debug!("remote_list_all: 查询中");
+
+    let url = format!("{}?db={}", api_url(""), db_name());
+
+    let mut resp = ureq::get(&url)
+        .call()
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    let resp_str = resp.body_mut().read_to_string()
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    debug!("remote_list_all: 查询完成");
+    Ok(resp_json)
+}
+
 /// 关键词搜索远程记忆
 pub fn remote_search(keyword: &str) -> Result<serde_json::Value, String> {
     debug!(keyword, "remote_search: 搜索中");
