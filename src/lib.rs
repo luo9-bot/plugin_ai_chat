@@ -627,6 +627,14 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                     "anti_injection: 可疑消息 (允许通过)"
                 );
             }
+            anti_injection::Action::CrisisExempt => {
+                // 危机消息放行，交由 emotion 系统处理
+                warn!(
+                    user_id, group_id,
+                    issues = ?check_result.issues,
+                    "anti_injection: 危机消息豁免"
+                );
+            }
             _ => {}
         }
     }
@@ -775,6 +783,14 @@ fn handle_private_msg(user_id: u64, msg: &str) {
                     user_id,
                     issues = ?check_result.issues,
                     "anti_injection: 可疑私聊消息 (允许通过)"
+                );
+            }
+            anti_injection::Action::CrisisExempt => {
+                // 危机消息放行，交由 emotion 系统处理
+                warn!(
+                    user_id,
+                    issues = ?check_result.issues,
+                    "anti_injection: 危机消息豁免"
                 );
             }
             _ => {}
@@ -993,7 +1009,7 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
-fn handle_admin_command(msg: &str, _group_id: u64, _user_id: u64) -> Option<String> {
+fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
     debug!(msg, "handle_admin_command: 检查命令");
     match msg {
         "查看群聊" => {
@@ -1103,8 +1119,8 @@ fn handle_admin_command(msg: &str, _group_id: u64, _user_id: u64) -> Option<Stri
         return Some("格式: 移除黑名单:QQ号".into());
     }
 
-    // ── 防注入管理命令 ──
-    if let Some(reply) = anti_injection::handle_admin_command(msg) {
+    // ── 防注入管理命令（需要权限校验） ──
+    if let Some(reply) = anti_injection::handle_admin_command(user_id, msg, config::get()) {
         return Some(reply);
     }
 

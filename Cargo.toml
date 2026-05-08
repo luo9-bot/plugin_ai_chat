@@ -31,3 +31,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "l
 tracing-appender = "0.2"
 time = { version = "0.3", features = ["local-offset", "macros"] }
 tiny_http = "0.12"
+dashmap = "6"
+regex = "1"
+unicode-normalization = "0.1"
