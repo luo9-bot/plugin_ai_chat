@@ -131,6 +131,10 @@ conversation:
   # 1.0 = 非常克制，只回复直接相关的
   intrusiveness_weight: 0.3
 
+  # 对同一用户的回复冷却时间 (秒)
+  # 防止对同一用户连续回复刷屏
+  reply_cooldown_secs: 15
+
   # 是否允许括号内的动作/表情描述
   # true = AI 可以用"（笑了笑）"、"（叹气）"等描述动作和表情
   # false = AI 只输出纯对话，不带括号描述
@@ -252,6 +256,22 @@ mental_state:
   # 疲惫/愤怒时缺陷概率更高，开心/平静时更低
   # 0.0 = 禁用缺陷系统
   defect_base_probability: 0.1
+
+
+# ── 群聊回复配额 (分时段限制回复次数) ───────────────────────
+# 以 5 分钟为最小配额段，按时段分配每段的最大回复次数
+# 配额用完后消息进入延迟审查，对话结束后由反思机制统一处理
+quota:
+  enabled: true                 # 是否启用配额系统
+  segment_minutes: 5            # 配额段长度 (分钟)
+  segments:                     # 各时段每段最大回复次数
+    - {start_hour: 0,  end_hour: 6,  max_replies: 0}   # 深夜不回复
+    - {start_hour: 6,  end_hour: 8,  max_replies: 1}   # 早上偏少
+    - {start_hour: 8,  end_hour: 10, max_replies: 2}   # 正常
+    - {start_hour: 10, end_hour: 14, max_replies: 3}   # 活跃
+    - {start_hour: 14, end_hour: 16, max_replies: 1}   # 下午偏少
+    - {start_hour: 16, end_hour: 20, max_replies: 2}   # 傍晚中等
+    - {start_hour: 20, end_hour: 24, max_replies: 1}   # 晚间话少
 
 
 # ── 回复风格 ─────────────────────────────────────────────────────

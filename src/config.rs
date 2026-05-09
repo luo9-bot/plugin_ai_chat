@@ -48,6 +48,8 @@ pub struct Config {
     pub admin: AdminConfig,
     #[serde(default)]
     pub anti_injection: AntiInjectionConfig,
+    #[serde(default)]
+    pub quota: QuotaConfig,
     /// 白名单：只允许这些用户使用私聊（为空则不限制）
     #[serde(default)]
     pub whitelist: Vec<u64>,
@@ -524,6 +526,35 @@ impl Default for BehaviorConfig {
     }
 }
 
+// ── 配额配置 ────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct QuotaConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_segment_minutes")]
+    pub segment_minutes: u32,
+    #[serde(default = "default_quota_segments")]
+    pub segments: Vec<QuotaSegment>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct QuotaSegment {
+    pub start_hour: u32,
+    pub end_hour: u32,
+    pub max_replies: u32,
+}
+
+impl Default for QuotaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            segment_minutes: default_segment_minutes(),
+            segments: default_quota_segments(),
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 fn default_prompts() -> String { "default.txt".into() }
@@ -543,6 +574,18 @@ fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
 fn default_action_descriptions() -> bool { true }
 fn default_reply_cooldown_secs() -> u64 { 15 }
+fn default_segment_minutes() -> u32 { 5 }
+fn default_quota_segments() -> Vec<QuotaSegment> {
+    vec![
+        QuotaSegment { start_hour: 0,  end_hour: 6,  max_replies: 0 },
+        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 1 },
+        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 2 },
+        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 3 },
+        QuotaSegment { start_hour: 14, end_hour: 16, max_replies: 1 },
+        QuotaSegment { start_hour: 16, end_hour: 20, max_replies: 2 },
+        QuotaSegment { start_hour: 20, end_hour: 24, max_replies: 1 },
+    ]
+}
 fn default_log_level() -> String { "info".into() }
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
@@ -683,6 +726,19 @@ mental_state:
   deliberation_decay_rate: 0.05 # 考量衰减速率 (每小时)
   defect_base_probability: 0.1 # 缺陷基础触发概率
 
+# ── 群聊回复配额 (分时段限制回复次数) ───────────────────────
+quota:
+  enabled: true                 # 是否启用配额系统
+  segment_minutes: 5            # 配额段长度 (分钟)
+  segments:                     # 各时段每段最大回复次数
+    - {start_hour: 0,  end_hour: 6,  max_replies: 0}   # 深夜不回复
+    - {start_hour: 6,  end_hour: 8,  max_replies: 1}   # 早上偏少
+    - {start_hour: 8,  end_hour: 10, max_replies: 2}   # 正常
+    - {start_hour: 10, end_hour: 14, max_replies: 3}   # 活跃
+    - {start_hour: 14, end_hour: 16, max_replies: 1}   # 下午偏少
+    - {start_hour: 16, end_hour: 20, max_replies: 2}   # 傍晚中等
+    - {start_hour: 20, end_hour: 24, max_replies: 1}   # 晚间话少
+
 # ── 回复风格 ─────────────────────────────────────────────────────
 style:
   max_reply_chars: 30         # 单条回复最大字数
@@ -811,6 +867,7 @@ pub fn init() {
                 sync: SyncConfig::default(),
                 admin: AdminConfig::default(),
                 anti_injection: AntiInjectionConfig::default(),
+                quota: QuotaConfig::default(),
                 whitelist: Vec::new(),
                 blacklist: Vec::new(),
                 auto_start_users: Vec::new(),

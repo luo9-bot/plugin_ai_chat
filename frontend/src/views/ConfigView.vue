@@ -96,6 +96,47 @@
       </div>
     </div>
 
+    <!-- 群聊回复配额 -->
+    <div class="section">
+      <h3 class="collapsible" @click="toggle('quota')">
+        <span>{{ expanded.quota ? '▾' : '▸' }} 📊 群聊回复配额</span>
+      </h3>
+      <div v-show="expanded.quota" class="section-body">
+        <p class="desc">按时段限制群聊回复次数。配额用完后消息进入延迟审查，对话结束后由反思机制统一处理。</p>
+        <div class="field-grid">
+          <div class="field">
+            <label>启用配额</label>
+            <select v-model="cfg.quota.enabled">
+              <option :value="true">开启</option>
+              <option :value="false">关闭</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>配额段长度 (分钟)</label>
+            <input v-model.number="cfg.quota.segment_minutes" type="number" min="1" max="60" />
+            <span class="hint">建议 5 分钟</span>
+          </div>
+        </div>
+        <div style="margin-top: 12px;">
+          <label class="field-label">时段配额分配</label>
+          <div class="quota-table">
+            <div class="quota-row quota-header">
+              <span>开始</span><span>结束</span><span>每段最大回复</span>
+            </div>
+            <div class="quota-row" v-for="(seg, i) in cfg.quota.segments" :key="i">
+              <input v-model.number="seg.start_hour" type="number" min="0" max="23" />
+              <input v-model.number="seg.end_hour" type="number" min="1" max="24" />
+              <input v-model.number="seg.max_replies" type="number" min="0" max="20" />
+              <button class="btn-icon" @click="cfg.quota.segments.splice(i, 1)" title="删除">✕</button>
+            </div>
+            <button class="btn btn-outline btn-sm" @click="cfg.quota.segments.push({start_hour:0,end_hour:0,max_replies:0})">
+              + 添加时段
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -106,13 +147,19 @@ import { api } from '../api.js'
 const DEFAULTS = {
   api_key: '', base_url: '', model: '', self_qq: 0, admin_qq: 0, darling_qq: 0, prompts: 'default.txt',
   ai: { frequency_penalty: 2.0, presence_penalty: 1.0, temperature: 1.3, top_p: 0.1, max_tokens: 4096, request_timeout: 60, analysis_max_tokens: 10000, analysis_temperature: 0.3 },
-  conversation: { max_history: 10, batch_timeout_ms: 6000, typing_speed: 5.0, max_typing_delay_ms: 4000, reply_follow_up_secs: 300, action_descriptions: false },
+  conversation: { max_history: 10, batch_timeout_ms: 6000, typing_speed: 5.0, max_typing_delay_ms: 4000, reply_follow_up_secs: 300, reply_cooldown_secs: 15, action_descriptions: false },
   memory: { normal_expire_days: 30, important_fade_days: 7, auto_summarize_threshold: 10, working_memory_expire_hours: 6 },
   emotion: { decay_rate: 0.15, decay_delay_secs: 60, neutral_threshold: 0.15, affinity_threshold: 3.0 },
   proactive: { enabled: true, quiet_start: 23, quiet_end: 7, interval: 7200, max_ignore: 3, low_mood_multiplier: 2.0 },
   self_reflection: { interval: 1800, max_thoughts: 8, post_conversation_delay_secs: 120 },
   mental_state: { concerns_max: 5, concern_decay_rate: 0.1, deliberations_max: 8, deliberation_decay_rate: 0.05, defect_base_probability: 0.1 },
   style: { max_reply_chars: 30, omit_subject: true, punctuation_style: 'casual' },
+  quota: { enabled: true, segment_minutes: 5, segments: [
+    {start_hour:0,end_hour:6,max_replies:0},{start_hour:6,end_hour:8,max_replies:1},
+    {start_hour:8,end_hour:10,max_replies:2},{start_hour:10,end_hour:14,max_replies:3},
+    {start_hour:14,end_hour:16,max_replies:1},{start_hour:16,end_hour:20,max_replies:2},
+    {start_hour:20,end_hour:24,max_replies:1}
+  ]},
   log: { enabled: true, level: 'info' },
   vision: { api_key: '', base_url: '', model: '', max_tokens: 256 },
   whitelist: [], blacklist: [], auto_start_users: [],
@@ -148,6 +195,8 @@ const sections = [
       tip: '单条消息的最大等待时间，防止长消息等待过久' },
     { key: 'conversation.reply_follow_up_secs', label: '跟进超时 (秒)', type: 'number',
       tip: '用户 @机器人 发起对话后，在此时间内后续消息即使没 @也会回复。超过后必须 @才会回复。建议 120~600', hint: '建议 120~600' },
+    { key: 'conversation.reply_cooldown_secs', label: '回复冷却 (秒)', type: 'number',
+      tip: '对同一用户的回复冷却时间，防止连续回复刷屏。建议 10~30', hint: '建议 10~30' },
     { key: 'conversation.action_descriptions', label: '动作描述', type: 'select', options: [{value:true,label:'允许'},{value:false,label:'禁止'}],
       tip: '是否允许 AI 用括号描述动作和表情，如"（笑了笑）"、"（叹气）"' },
   ]},
@@ -393,4 +442,22 @@ h3.collapsible:hover { color: var(--accent); }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid.cols-3 { grid-template-columns: 1fr; }
 }
+
+/* Quota table */
+.quota-table { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.quota-row { display: grid; grid-template-columns: 80px 80px 100px 32px; gap: 8px; align-items: center; }
+.quota-row.quota-header { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+.quota-row input {
+  background: #fff; border: 1.5px solid var(--border); color: var(--text);
+  padding: 6px 8px; border-radius: var(--radius); font-size: 13px;
+  outline: none; transition: border .15s; width: 100%;
+}
+.quota-row input:focus { border-color: var(--accent); }
+.btn-icon {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 14px; padding: 4px; border-radius: 4px; transition: all .15s;
+}
+.btn-icon:hover { color: var(--danger); background: var(--danger-light); }
+.btn-sm { padding: 6px 14px; font-size: 12px; margin-top: 4px; }
+.field-label { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; display: block; }
 </style>
