@@ -1371,43 +1371,6 @@ fn handle_anti_injection(
 
 // ── 配置管理 ──────────────────────────────────────────────────
 
-/// 按 config.example.yaml 的逻辑顺序重排 JSON key
-fn reorder_config_keys(val: &serde_json::Value) -> serde_json::Value {
-    use serde_json::json;
-    let obj = match val.as_object() {
-        Some(o) => o,
-        None => return val.clone(),
-    };
-    let get = |k: &str| obj.get(k).cloned().unwrap_or(json!(null));
-    // 顶层顺序
-    let ordered = json!({
-        "api_key": get("api_key"),
-        "base_url": get("base_url"),
-        "model": get("model"),
-        "self_qq": get("self_qq"),
-        "admin_qq": get("admin_qq"),
-        "prompts": get("prompts"),
-        "vision": get("vision"),
-        "sync": get("sync"),
-        "admin": get("admin"),
-        "ai": get("ai"),
-        "conversation": get("conversation"),
-        "memory": get("memory"),
-        "emotion": get("emotion"),
-        "proactive": get("proactive"),
-        "self_reflection": get("self_reflection"),
-        "mental_state": get("mental_state"),
-        "style": get("style"),
-        "log": get("log"),
-        "anti_injection": get("anti_injection"),
-        "whitelist": get("whitelist"),
-        "blacklist": get("blacklist"),
-        "auto_start_users": get("auto_start_users"),
-        "messages": get("messages"),
-    });
-    ordered
-}
-
 fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     let config_path = config::data_dir().join("config.yaml");
     match method {
@@ -1476,9 +1439,8 @@ fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u
                 }
             }
 
-            // 按 config.example.yaml 顺序重排 key 后转为 YAML
-            let ordered = reorder_config_keys(&merged);
-            let yaml = match serde_yaml::to_string(&ordered) {
+            // 使用模板保存：保留注释和格式，只替换值
+            let yaml = match config::save_config_with_comments(&merged) {
                 Ok(y) => y,
                 Err(e) => return err(500, &format!("serialize: {}", e)),
             };

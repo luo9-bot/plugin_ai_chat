@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -578,9 +579,9 @@ fn default_segment_minutes() -> u32 { 5 }
 fn default_quota_segments() -> Vec<QuotaSegment> {
     vec![
         QuotaSegment { start_hour: 0,  end_hour: 6,  max_replies: 0 },
-        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 1 },
-        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 2 },
-        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 3 },
+        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 2 },
+        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 3 },
+        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 5 },
         QuotaSegment { start_hour: 14, end_hour: 16, max_replies: 1 },
         QuotaSegment { start_hour: 16, end_hour: 20, max_replies: 2 },
         QuotaSegment { start_hour: 20, end_hour: 24, max_replies: 1 },
@@ -732,9 +733,9 @@ quota:
   segment_minutes: 5            # 配额段长度 (分钟)
   segments:                     # 各时段每段最大回复次数
     - {start_hour: 0,  end_hour: 6,  max_replies: 0}   # 深夜不回复
-    - {start_hour: 6,  end_hour: 8,  max_replies: 1}   # 早上偏少
-    - {start_hour: 8,  end_hour: 10, max_replies: 2}   # 正常
-    - {start_hour: 10, end_hour: 14, max_replies: 3}   # 活跃
+    - {start_hour: 6,  end_hour: 8,  max_replies: 2}   # 早上偏少
+    - {start_hour: 8,  end_hour: 10, max_replies: 3}   # 正常
+    - {start_hour: 10, end_hour: 14, max_replies: 5}   # 活跃
     - {start_hour: 14, end_hour: 16, max_replies: 1}   # 下午偏少
     - {start_hour: 16, end_hour: 20, max_replies: 2}   # 傍晚中等
     - {start_hour: 20, end_hour: 24, max_replies: 1}   # 晚间话少
@@ -815,6 +816,178 @@ messages:
     success: "对话已重启。"
     redo: "没有找到对话记录。"
 "#;
+
+/// 返回配置模板（带注释的 YAML）
+pub fn config_template() -> &'static str {
+    DEFAULT_CONFIG_YAML
+}
+
+/// 使用模板保存配置：保留注释和格式，只替换值
+pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, String> {
+    let template = DEFAULT_CONFIG_YAML;
+    let new_obj = config.as_object().ok_or("config is not an object")?;
+
+    let mut output = String::with_capacity(template.len() + 512);
+    let mut indent_stack: Vec<&str> = Vec::new();
+    let mut skip_list_items = false;
+    let mut handled_keys: HashSet<&str> = HashSet::new();
+
+    for line in template.lines() {
+        let trimmed = line.trim();
+
+        // 注释或空行：原样保留
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            output.push_str(line);
+            output.push('\n');
+            continue;
+        }
+
+        // 计算当前缩进深度
+        let indent = line.len() - line.trim_start().len();
+        let depth = indent / 2;
+        let indent_str = &line[..indent];
+
+        // 更新缩进栈
+        while indent_stack.len() > depth {
+            indent_stack.pop();
+        }
+
+        // 列表项（- 开头）：如果父 key 的数组已被替换，跳过
+        if trimmed.starts_with('-') && skip_list_items {
+            continue;
+        }
+
+        // 遇到新的 key，重置跳过标记
+        if trimmed.find(':').is_some() {
+            skip_list_items = false;
+        }
+
+        // 解析 key: value
+        if let Some(colon_pos) = trimmed.find(':') {
+            let key = trimmed[..colon_pos].trim();
+            let old_rest = &trimmed[colon_pos + 1..];
+            let old_rest_trimmed = old_rest.trim();
+
+            // 嵌套块（key: 后面没值）
+            if old_rest_trimmed.is_empty() {
+                // 检查新值是否是数组（需要替换后续列表项）
+                let new_val = find_nested_value(new_obj, &indent_stack, key);
+                if let Some(serde_json::Value::Array(arr)) = new_val {
+                    output.push_str(line);
+                    output.push('\n');
+                    // 输出新数组的列表项
+                    let item_indent = format!("{}  ", indent_str);
+                    for item in arr {
+                        let item_yaml = value_to_yaml_inline(item);
+                        output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                    }
+                    // 标记跳过后续的模板列表项
+                    skip_list_items = true;
+                    indent_stack.push(key);
+                    continue;
+                }
+                if indent_stack.is_empty() {
+                    handled_keys.insert(key);
+                }
+                indent_stack.push(key);
+                output.push_str(line);
+                output.push('\n');
+                continue;
+            }
+
+            // 在 new_obj 中查找对应值
+            let new_value = find_nested_value(new_obj, &indent_stack, key);
+
+            if let Some(val) = new_value {
+                let new_yaml = value_to_yaml_inline(val);
+                let comment = extract_inline_comment(old_rest);
+                if comment.is_empty() {
+                    output.push_str(&format!("{}{}: {}\n", indent_str, key, new_yaml));
+                } else {
+                    output.push_str(&format!("{}{}: {} {}\n", indent_str, key, new_yaml, comment));
+                }
+                if indent_stack.is_empty() {
+                    handled_keys.insert(key);
+                }
+            } else {
+                output.push_str(line);
+                output.push('\n');
+            }
+        } else {
+            // 列表项或其他非 key: value 行
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+
+    // 追加模板中没有的顶级 key（如 whitelist、blacklist 等）
+    for (key, val) in new_obj {
+        if !handled_keys.contains(key.as_str()) {
+            let yaml_val = value_to_yaml_inline(val);
+            output.push_str(&format!("{}: {}\n", key, yaml_val));
+        }
+    }
+
+    Ok(output)
+}
+
+/// 在嵌套对象中查找值
+fn find_nested_value<'a>(
+    root: &'a serde_json::Map<String, serde_json::Value>,
+    stack: &[&str],
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    let mut current = root;
+    for parent in stack {
+        current = current.get(*parent)?.as_object()?;
+    }
+    current.get(key)
+}
+
+/// 将 JSON Value 转为 YAML 内联格式
+fn value_to_yaml_inline(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(s) => {
+            if s.contains(':') || s.contains('#') || s.contains('"') || s.starts_with(' ') {
+                format!("\"{}\"", s.replace('"', "\\\""))
+            } else {
+                s.clone()
+            }
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(|v| value_to_yaml_inline(v)).collect();
+            format!("[{}]", items.join(", "))
+        }
+        serde_json::Value::Object(map) => {
+            let pairs: Vec<String> = map.iter()
+                .map(|(k, v)| format!("{}: {}", k, value_to_yaml_inline(v)))
+                .collect();
+            format!("{{{}}}", pairs.join(", "))
+        }
+    }
+}
+
+/// 提取行尾注释（如 "value  # 注释" -> "# 注释"）
+fn extract_inline_comment(rest: &str) -> &str {
+    // 在 "value" 之后找 "#"，但要排除引号内的 #
+    let chars: Vec<char> = rest.trim().chars().collect();
+    let mut in_quote = false;
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            '"' => in_quote = !in_quote,
+            '#' if !in_quote => {
+                // 找到注释起始位置
+                let trimmed = rest.trim();
+                return &trimmed[i..];
+            }
+            _ => {}
+        }
+    }
+    ""
+}
 
 const DEFAULT_PROMPT_TXT: &str = r#"# 人设
 你是一个友好的 AI 助手，正在通过即时通讯软件与用户对话。
