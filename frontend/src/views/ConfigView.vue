@@ -314,12 +314,12 @@ onMounted(load)
 .top-bar {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 16px; position: sticky; top: 0; z-index: 10;
-  background: var(--bg); padding: 8px 0;
+  background: var(--bg); padding: 8px 0; flex-wrap: wrap; gap: 8px;
 }
 
 .top-bar h2 { font-size: 18px; font-weight: 600; margin: 0; }
 
-.top-actions { display: flex; align-items: center; gap: 10px; }
+.top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .save-ok { color: var(--success); font-size: 13px; font-weight: 500; }
 .save-err { color: var(--danger); font-size: 13px; font-weight: 500; }
@@ -350,12 +350,11 @@ h3.collapsible:hover { color: var(--accent); }
 
 .field {
   display: flex; flex-direction: column; gap: 4px;
-  /* tooltip via title on .field */
 }
 
 .field label {
   font-size: 12px; font-weight: 500; color: var(--text-dim);
-  cursor: help; /* 手形提示可悬停 */
+  cursor: help;
 }
 
 .range-val {
@@ -368,9 +367,9 @@ h3.collapsible:hover { color: var(--accent); }
 .field input[type="number"],
 .field select,
 .field textarea {
-  background: var(--accent-light); border: 1.5px solid var(--border); color: var(--text);
+  background: #fff; border: 1.5px solid var(--border); color: var(--text);
   padding: 8px 10px; border-radius: var(--radius); font-size: 13px;
-  outline: none; transition: border .15s;
+  outline: none; transition: border .15s; width: 100%;
 }
 
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
@@ -386,4 +385,12 @@ h3.collapsible:hover { color: var(--accent); }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+
+/* Mobile */
+@media (max-width: 768px) {
+  .top-bar { flex-direction: column; align-items: flex-start; }
+  .top-actions { width: 100%; justify-content: space-between; }
+  .field-grid { grid-template-columns: 1fr; }
+  .field-grid.cols-3 { grid-template-columns: 1fr; }
+}
 </style>
