@@ -41,6 +41,10 @@ pub struct SharedState {
     pub active_groups: HashSet<u64>,
     /// 活跃私聊用户集合 (由主线程同步，供管理线程读取)
     pub active_users: HashSet<u64>,
+    /// 各群组最近审查到的工作记忆时间戳 (unix秒)
+    pub last_reviewed_timestamps: HashMap<u64, u64>,
+    /// 各群组上次反思时的对话内容 (标准化后)
+    pub last_reflected_content: HashMap<u64, String>,
 }
 
 impl SharedState {
@@ -53,6 +57,8 @@ impl SharedState {
             reflected_groups: HashSet::new(),
             active_groups: HashSet::new(),
             active_users: HashSet::new(),
+            last_reviewed_timestamps: HashMap::new(),
+            last_reflected_content: HashMap::new(),
         }
     }
 
@@ -202,10 +208,6 @@ pub struct State {
     pub batches: HashMap<CtxKey, MessageBatch>,
     /// 各群组最近一次审查时间 (unix秒)
     pub last_review_times: HashMap<u64, u64>,
-    /// 各群组最近审查到的工作记忆时间戳 (unix秒)
-    pub last_reviewed_timestamps: HashMap<u64, u64>,
-    /// 各群组上次反思时的对话内容 (标准化后)
-    pub last_reflected_content: HashMap<u64, String>,
 }
 
 impl State {
@@ -216,8 +218,6 @@ impl State {
             blacklist: crate::blocklist::load(),
             batches: HashMap::new(),
             last_review_times: HashMap::new(),
-            last_reviewed_timestamps: HashMap::new(),
-            last_reflected_content: HashMap::new(),
         }
     }
 

@@ -290,10 +290,10 @@ anti_injection:
     # 最大消息长度 (超过则截断)
     max_message_length: 2000
     # 敏感内容处理方式: replace(替换为安全内容) | block(直接阻止)
-    sensitive_action: "replace"
+    sensitive_action: "block"
   output:
     # 检测到问题时: replace(替换) | block(阻止)
-    action: "replace"
+    action: "block"
   behavior:
     # 频率限制
     rate_limit: true

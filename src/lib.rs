@@ -39,11 +39,31 @@ use luo9_sdk::bus::Bus;
 #[cfg(feature = "plugin")]
 use luo9_sdk::payload::*;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+
+/// 正在处理中的用户集合 (group_id, user_id)，防止同一用户的消息被并发处理
+static PROCESSING_USERS: OnceLock<Mutex<HashSet<(u64, u64)>>> = OnceLock::new();
+
+fn processing_users() -> &'static Mutex<HashSet<(u64, u64)>> {
+    PROCESSING_USERS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// RAII guard: 确保在作用域结束时移除用户的处理中标记
+struct ProcessingGuard {
+    group_id: u64,
+    user_id: u64,
+}
+
+impl Drop for ProcessingGuard {
+    fn drop(&mut self) {
+        processing_users().lock().unwrap().remove(&(self.group_id, self.user_id));
+    }
+}
 
 /// 日志文件 non-blocking writer 的 guard，必须保持存活
 static FILE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
@@ -433,7 +453,7 @@ fn do_self_reflection() {
 /// 对话后反思：回顾刚结束的群对话 + 审查新消息（已读+未读）
 fn do_post_conversation_reflection(group_id: u64) {
     // 获取上次审查到的时间戳，只处理之后的新消息
-    let last_reviewed = with_state(|s| {
+    let last_reviewed = with_shared_state(|s| {
         *s.last_reviewed_timestamps.get(&group_id).unwrap_or(&0)
     });
 
@@ -451,11 +471,11 @@ fn do_post_conversation_reflection(group_id: u64) {
 
     // 记录最新消息的时间戳，下次只处理更新的
     let max_timestamp = entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
-    with_state(|s| { s.last_reviewed_timestamps.insert(group_id, max_timestamp); });
+    with_shared_state(|s| { s.last_reviewed_timestamps.insert(group_id, max_timestamp); });
 
     // 检查内容是否与上次反思时足够相似，避免对同一话题反复思考
     let normalized = normalize_for_compare(&context_text);
-    let should_reflect = with_state(|s| {
+    let should_reflect = with_shared_state(|s| {
         if let Some(prev) = s.last_reflected_content.get(&group_id) {
             content_overlap(prev, &normalized) < 0.5
         } else {
@@ -472,7 +492,7 @@ fn do_post_conversation_reflection(group_id: u64) {
         let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
         debug!(group_id, count, "post_conversation_reflect completed");
 
-        with_state(|s| { s.last_reflected_content.insert(group_id, normalized); });
+        with_shared_state(|s| { s.last_reflected_content.insert(group_id, normalized); });
     } else {
         debug!(group_id, "post_conversation_reflect skipped (similar content)");
     }
@@ -1207,12 +1227,14 @@ fn process_expired_batches() {
     let cfg = config::get();
     let timeout = cfg.conversation.batch_timeout_ms;
 
-    // 收集所有过期批次: (group_id, user_id, messages, record_timestamps)
+    // 收集所有过期批次，跳过正在处理中的用户: (group_id, user_id, messages, record_timestamps)
     let expired: Vec<(u64, u64, String, Vec<u64>)> = {
         let mut result = Vec::new();
+        let processing = processing_users().lock().unwrap();
         with_state(|s| {
             let expired_keys: Vec<(u64, u64)> = s.batches.iter()
                 .filter(|(_, batch)| batch.last_update.elapsed().as_millis() >= timeout as u128)
+                .filter(|(key, _)| !processing.contains(key))
                 .map(|(&key, _)| key)
                 .collect();
             for (gid, uid) in expired_keys {
@@ -1488,6 +1510,18 @@ fn is_cjk(ch: char) -> bool {
 }
 
 fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps: &[u64]) {
+    // 标记用户为处理中，防止并发处理同一用户的消息
+    {
+        let mut processing = processing_users().lock().unwrap();
+        if processing.contains(&(group_id, user_id)) {
+            info!(user_id, group_id, "process_message: 用户消息正在处理中，跳过");
+            return;
+        }
+        processing.insert((group_id, user_id));
+    }
+    // RAII guard: 确保在函数返回时移除标记
+    let _guard = ProcessingGuard { group_id, user_id };
+
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
 
