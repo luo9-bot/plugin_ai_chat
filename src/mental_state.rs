@@ -454,7 +454,7 @@ pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
         &full_context,
         &[crate::ai::mental_state_generate_tool()],
         None,
-        None,
+        Some("mental_state_generate"),
     ) {
         Ok(parsed) => {
             let mut count = 0;

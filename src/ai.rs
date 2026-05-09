@@ -494,6 +494,35 @@ pub fn decide_reply_tool() -> Tool {
     }
 }
 
+/// 批量决策：从多条消息中选择值得回复的用户
+pub fn batch_decide_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "batch_decide".to_string(),
+            description: "从群聊的多条消息中，选择最值得回复的用户".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "reply_to": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "user_id": { "type": "integer", "description": "要回复的用户ID" },
+                                "reason": { "type": "string", "description": "回复原因" }
+                            },
+                            "required": ["user_id"]
+                        },
+                        "description": "要回复的用户列表，按优先级排序。大部分情况应该为空或只包含1个用户"
+                    }
+                },
+                "required": ["reply_to"]
+            }),
+        },
+    }
+}
+
 /// post_analyze: 记忆提取 + 情绪分析 + 记忆纠错
 pub fn post_analyze_tool() -> Tool {
     Tool {
