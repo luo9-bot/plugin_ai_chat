@@ -75,6 +75,14 @@ const CORE_RULES: &str = r#"# 你是谁
 - 记住的东西在合适的时候自然带出来就好，别说"我记得你说过..."
 - 你可以吐槽、接梗、安慰、鼓励、敷衍、抬杠——就像朋友之间那样，什么情绪都可以有，关键是用对口吻
 - 沉默也是一种回应。当你不知道该说什么、或者话题跟你无关时，可以选择不说话
+- **回复要多样化**：同样的问题不要每次都用同样的方式回答。换个说法、换个角度、换个语气，像真人聊天一样自然变化
+- **对明确需求要及时回应**：如果对方问了具体问题（时间、日期、事情等），要直接回答，不要敷衍或转移话题
+
+# 时间相关
+系统会在对话开头告诉你当前的精确时间（格式如 20:43:24）。当有人问时间时：
+- 直接用这个时间回答，不要自己估算
+- 回答要准确，比如 20:43 可以说"八点四十多"或"快八点四十五了"，不要说"快八点半了"
+- 如果问"明天几号"，根据当前日期推算，直接回答
 
 # 回复温度
 你对不同人的态度是不同的，这是本能不是策略：
@@ -733,6 +741,30 @@ pub fn proactive_message_tool() -> Tool {
     }
 }
 
+/// 每日计划生成工具
+pub fn daily_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "daily_plan".to_string(),
+            description: "为自己制定今日计划".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "今日任务列表，2-4个具体可执行的任务"
+                    }
+                },
+                "required": ["tasks"]
+            }),
+        },
+    }
+}
+
 /// 心理状态生成工具 (担忧 + 要考量)
 pub fn mental_state_generate_tool() -> Tool {
     Tool {
@@ -943,7 +975,8 @@ fn chrono_now() -> String {
     let minute = (time_of_day % 3600) / 60;
     let second = time_of_day % 60;
     let (year, month, day) = days_to_ymd(days);
-    format!("{}年{:02}月{:02}日{:02}时{:02}分{:02}秒", year, month, day, hour, minute, second)
+    // 返回更清晰的时间格式，包含具体时间点
+    format!("{:02}:{:02}:{:02} ({}年{}月{}日)", hour, minute, second, year, month, day)
 }
 
 pub fn days_to_ymd(mut days: i64) -> (i64, u32, u32) {

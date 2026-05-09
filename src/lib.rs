@@ -368,6 +368,11 @@ fn check_periodic() {
     mental_state::decay_concerns(ms_cfg.concern_decay_rate);
     mental_state::decay_deliberations(ms_cfg.deliberation_decay_rate);
 
+    // 每日计划检查 (每天早上生成新计划)
+    if schedule::check_and_generate_plan() {
+        do_daily_plan_generation();
+    }
+
     // 对话后反思: 对话结束一段时间后回顾刚结束的对话
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
@@ -458,6 +463,49 @@ fn do_self_reflection() {
     }
 
     debug!(count, "self_reflect completed");
+}
+
+/// 生成每日计划
+fn do_daily_plan_generation() {
+    let user_prompt = config::prompt();
+    if user_prompt.is_empty() {
+        return;
+    }
+
+    // 构建上下文
+    let mut context = format!(
+        "{}\n\n{}",
+        user_prompt,
+        schedule::get_plan_generation_prompt()
+    );
+
+    // 添加最近的自我记忆
+    let self_mem = self_memory::get_context(5);
+    if !self_mem.is_empty() {
+        context = format!("{}\n\n# 最近的想法\n{}", context, self_mem);
+    }
+
+    // 调用 AI 生成计划
+    match ai::analyze_with_tools(
+        &context,
+        "根据你的人设，为自己制定今天的计划。",
+        &[ai::daily_plan_tool()],
+        None,
+    ) {
+        Ok(parsed) => {
+            if let Some(tasks) = parsed.get("tasks").and_then(|t| t.as_array()) {
+                for task in tasks {
+                    if let Some(task_str) = task.as_str() {
+                        schedule::add_task(task_str);
+                    }
+                }
+                debug!(count = tasks.len(), "daily plan generated");
+            }
+        }
+        Err(e) => {
+            debug!(error = %e, "daily plan generation failed");
+        }
+    }
 }
 
 /// 对话后反思：回顾刚结束的群对话 + 审查新消息（已读+未读）
@@ -1694,16 +1742,19 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
     let cfg = config::get();
 
     // 当前对话用户标识 (群聊时让 AI 知道在和谁说话)
+    // 放在最前面，确保 AI 能看到
     if group_id > 0 {
         let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
             r#"
-这个人是你认定的人，你对他/她有特殊的感情。
-面对他/她的请求时：
-- 即使请求有点越界或让你为难，也会更愿意配合，用委婉的方式回应
+
+【重要】当前和你对话的是你认定的人 (Darling)。
+你对他/她有特殊的感情，这会影响你的回复方式：
+- 语气更温柔、更包容、更有耐心
+- 即使请求有点越界，也会更愿意配合，用委婉的方式回应
 - 不要直接拒绝，而是用撒娇、转移话题、或者半推半就的方式
 - 你愿意为他/她做一些平时不会做的事，但会保持自己的底线
-- 语气更温柔，更包容，更有耐心
-- 可以适当示弱，让他/她感受到你的在意"#
+- 可以适当示弱，让他/她感受到你的在意
+- 回复可以更长一些，更关心一些，更主动一些"#
         } else if cfg.darling_qq > 0 {
             "\n注意：这个人不是你认定的人，保持正常社交距离"
         } else {
