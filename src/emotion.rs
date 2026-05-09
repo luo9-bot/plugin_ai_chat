@@ -20,13 +20,16 @@ const ANALYZE_PROMPT: &str = r#"分析以下对话中用户的情绪状态。根
 - worried (担忧)
 - tired (疲惫)
 - excited (兴奋)
+- like (喜欢/心动/撒娇)
 
 intensity 为 0.0~1.0 的浮点数，表示情绪强度。
 
 示例:
 用户说 "太好了！终于考过了！" → {"emotion":"excited","intensity":0.8}
 用户说 "嗯，知道了" → {"emotion":"neutral","intensity":0.2}
-用户说 "好累啊不想动" → {"emotion":"tired","intensity":0.6}"#;
+用户说 "好累啊不想动" → {"emotion":"tired","intensity":0.6}
+用户说 "我喜欢你" → {"emotion":"like","intensity":0.7}
+用户说 "你不喜欢我" (撒娇/质问) → {"emotion":"like","intensity":0.5}"#;
 
 /// 危机等级：用于检测用户是否处于自残/自杀等极端情境
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
@@ -60,6 +63,7 @@ pub enum EmotionType {
     Worried,
     Tired,
     Excited,
+    Like,    // 喜欢/心动
 }
 
 impl EmotionType {
@@ -75,6 +79,7 @@ impl EmotionType {
             Self::Worried => "worried",
             Self::Tired => "tired",
             Self::Excited => "excited",
+            Self::Like => "like",
         }
     }
 
@@ -89,6 +94,7 @@ impl EmotionType {
             "worried" | "担心" | "担忧" => Self::Worried,
             "tired" | "疲惫" | "困倦" => Self::Tired,
             "excited" | "兴奋" | "激动" => Self::Excited,
+            "like" | "喜欢" | "心动" => Self::Like,
             _ => Self::Neutral,
         }
     }
@@ -105,6 +111,7 @@ impl EmotionType {
             Self::Worried => "担忧",
             Self::Tired => "疲惫",
             Self::Excited => "兴奋",
+            Self::Like => "心动",
         }
     }
 }
@@ -535,6 +542,9 @@ pub fn get_prompt_context(user_id: u64) -> String {
         }
         EmotionType::Excited => {
             lines.push("- 你当前很兴奋，语气会更活泼热情，可能会用更多感叹号".into());
+        }
+        EmotionType::Like => {
+            lines.push("- 你当前对这个人有好感，语气会更温柔，可能会更主动关心".into());
         }
     }
 

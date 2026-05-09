@@ -14,6 +14,7 @@ pub mod memory;
 pub mod mental_state;
 pub mod personality;
 pub mod proactive;
+pub mod schedule;
 pub mod self_memory;
 #[cfg(feature = "plugin")]
 pub mod sender;
@@ -437,14 +438,23 @@ fn do_self_reflection() {
     let (count, share) = self_memory::reflect(&recent_context, &group_profiles);
 
     // 如果反思产生了想分享的想法，主动发送 (只发到激活的群)
+    // 但要检查对话是否仍然活跃，避免发送过时的内容
     if let Some((content, group_id)) = share {
         let is_active = with_state(|s| s.active_groups.contains(&group_id));
-        if is_active {
-            debug!(group_id, content, "self_reflect: sharing thought");
-            sender::safe_send_quiet(group_id, 0, &content);
-        } else {
+        if !is_active {
             debug!(group_id, "self_reflect: skipping share to inactive group");
+            return;
         }
+
+        // 检查该群最近是否有活跃对话（5分钟内有消息）
+        let recent_entries = working_memory::get_recent(group_id, 300, 5);
+        if recent_entries.is_empty() {
+            debug!(group_id, "self_reflect: skipping share, no recent conversation");
+            return;
+        }
+
+        debug!(group_id, content, "self_reflect: sharing thought");
+        sender::safe_send_quiet(group_id, 0, &content);
     }
 
     debug!(count, "self_reflect completed");
@@ -1681,10 +1691,25 @@ fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
 /// 构建注入到 system prompt 的额外上下文
 fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
+    let cfg = config::get();
 
     // 当前对话用户标识 (群聊时让 AI 知道在和谁说话)
     if group_id > 0 {
-        parts.push(format!("# 当前对话用户\nuser_id: {}", user_id));
+        let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
+            r#"
+这个人是你认定的人，你对他/她有特殊的感情。
+面对他/她的请求时：
+- 即使请求有点越界或让你为难，也会更愿意配合，用委婉的方式回应
+- 不要直接拒绝，而是用撒娇、转移话题、或者半推半就的方式
+- 你愿意为他/她做一些平时不会做的事，但会保持自己的底线
+- 语气更温柔，更包容，更有耐心
+- 可以适当示弱，让他/她感受到你的在意"#
+        } else if cfg.darling_qq > 0 {
+            "\n注意：这个人不是你认定的人，保持正常社交距离"
+        } else {
+            ""
+        };
+        parts.push(format!("# 当前对话用户\nuser_id: {}{}", user_id, darling_info));
     }
 
     // 自我记忆 (bot 的内心想法)
@@ -1711,6 +1736,12 @@ fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> S
     let pers = personality::get_prompt_context();
     if !pers.is_empty() {
         parts.push(pers);
+    }
+
+    // 日程/时间上下文
+    let schedule_ctx = schedule::get_current_context();
+    if !schedule_ctx.is_empty() {
+        parts.push(schedule_ctx);
     }
 
     // 情绪上下文

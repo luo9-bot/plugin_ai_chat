@@ -104,8 +104,8 @@ pub fn determine_action(
 /// 生成替换消息
 pub fn get_sanitized_message(action: &Action) -> Option<String> {
     match action {
-        Action::Replace => Some("抱歉，我无法回应这个话题。".to_string()),
-        Action::SilentBan => Some("当前使用人数较多，请稍后再试。".to_string()),
+        Action::Replace => Some("".to_string()),
+        Action::SilentBan => Some("".to_string()),
         _ => None,
     }
 }

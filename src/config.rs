@@ -17,6 +17,9 @@ pub struct Config {
     pub self_qq: u64,
     #[serde(default)]
     pub admin_qq: u64,
+    /// 认定的人的 QQ 号（对这个人会有特殊的情感反应）
+    #[serde(default)]
+    pub darling_qq: u64,
     #[serde(default)]
     pub ai: AiConfig,
     #[serde(default)]
@@ -787,6 +790,7 @@ pub fn init() {
                 prompts: default_prompts(),
                 self_qq: 0,
                 admin_qq: 0,
+                darling_qq: 0,
                 ai: AiConfig::default(),
                 conversation: ConversationConfig::default(),
                 memory: MemoryConfig::default(),
