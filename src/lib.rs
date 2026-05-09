@@ -42,6 +42,7 @@ use luo9_sdk::payload::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -52,6 +53,31 @@ static PROCESSING_USERS: OnceLock<Mutex<HashSet<(u64, u64)>>> = OnceLock::new();
 
 fn processing_users() -> &'static Mutex<HashSet<(u64, u64)>> {
     PROCESSING_USERS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 消息处理队列：替代 thread::spawn，串行化处理避免并发混乱
+struct MessageQueue {
+    tx: mpsc::SyncSender<ProcessingTask>,
+}
+
+struct ProcessingTask {
+    group_id: u64,
+    at_pattern: String,
+    self_qq: u64,
+    user_msgs: Vec<(u64, String, Vec<u64>)>,
+}
+
+static MESSAGE_QUEUE: OnceLock<MessageQueue> = OnceLock::new();
+
+fn init_message_queue() {
+    let (tx, rx) = mpsc::sync_channel::<ProcessingTask>(100);
+    MESSAGE_QUEUE.set(MessageQueue { tx }).ok();
+
+    thread::spawn(move || {
+        while let Ok(task) = rx.recv() {
+            process_group_batch(task.group_id, &task.at_pattern, task.self_qq, &task.user_msgs);
+        }
+    });
 }
 
 /// RAII guard: 确保在作用域结束时移除用户的处理中标记
@@ -207,6 +233,9 @@ pub extern "C" fn plugin_main() {
 
     // 初始化防注入模块
     anti_injection::init();
+
+    // 初始化消息处理队列（串行化处理，避免并发混乱）
+    init_message_queue();
 
     // ── 默认启动对话用户 ──
     // 根据配置自动开启指定用户的私聊
@@ -491,6 +520,7 @@ fn do_daily_plan_generation() {
         "根据你的人设，为自己制定今天的计划。",
         &[ai::daily_plan_tool()],
         None,
+        None,
     ) {
         Ok(parsed) => {
             if let Some(tasks) = parsed.get("tasks").and_then(|t| t.as_array()) {
@@ -615,7 +645,7 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
 
     let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
 
-    match ai::analyze_with_tools(REVIEW_CONVERSATION_PROMPT, &full_context, &[ai::review_conversation_tool()], None) {
+    match ai::analyze_with_tools(REVIEW_CONVERSATION_PROMPT, &full_context, &[ai::review_conversation_tool()], None, None) {
         Ok(parsed) => {
             if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
                 for item in relevant {
@@ -1345,48 +1375,59 @@ fn process_expired_batches() {
         });
     }
 
-    // 处理群聊批次: 独立线程，不阻塞主循环
+    // 处理群聊批次: 通过消息队列串行化处理，避免并发混乱
     for (group_id, user_msgs) in group_msgs {
-        let at_pattern = at_pattern.clone();
-        thread::spawn(move || {
-            let group_context: Vec<String> = user_msgs.iter()
-                .map(|(uid, msg, _)| {
-                    let lines: Vec<&str> = msg.lines().collect();
-                    if lines.len() <= 1 {
-                        format!("[user_id:{}] {}", uid, msg)
-                    } else {
-                        format!("[user_id:{}] {}", uid, lines.join("\n"))
-                    }
-                })
-                .collect();
-            let context_str = group_context.join("\n");
-
-            for (user_id, messages, timestamps) in &user_msgs {
-                // @机器人 → 直接回复 (唯一快速通道)
-                if self_qq > 0 && messages.contains(&at_pattern) {
-                    process_message(*user_id, group_id, messages, timestamps);
-                    continue;
-                }
-
-                // 危机信号 → 强制回复，不经过 decide_reply
-                let crisis = emotion::get_state(*user_id).crisis_level;
-                if crisis.is_crisis() {
-                    tracing::warn!(user_id = *user_id, group_id, level = ?crisis, "crisis: 群聊危机信号，强制回复");
-                    process_message(*user_id, group_id, messages, timestamps);
-                    continue;
-                }
-
-                // 所有非@消息: AI 决策 (传入群组上下文)
-                if decide_reply(group_id, *user_id, messages, &context_str) {
-                    process_message(*user_id, group_id, messages, timestamps);
-                }
-                // 不回复的消息已记录在工作记忆中，对话后统一审查
+        if let Some(queue) = MESSAGE_QUEUE.get() {
+            if queue.tx.try_send(ProcessingTask {
+                group_id,
+                at_pattern: at_pattern.clone(),
+                self_qq,
+                user_msgs,
+            }).is_err() {
+                warn!(group_id, "queue: 消息队列已满，丢弃批次");
             }
-
-            // 记录对话活跃时间 (用于对话后反思)
-            with_shared_state(|s| s.record_conversation(group_id, now_secs()));
-        });
+        }
     }
+}
+
+/// 串行处理单个群组的消息批次（由消息队列 worker 调用）
+fn process_group_batch(group_id: u64, at_pattern: &str, self_qq: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
+    let group_context: Vec<String> = user_msgs.iter()
+        .map(|(uid, msg, _)| {
+            let lines: Vec<&str> = msg.lines().collect();
+            if lines.len() <= 1 {
+                format!("[user_id:{}] {}", uid, msg)
+            } else {
+                format!("[user_id:{}] {}", uid, lines.join("\n"))
+            }
+        })
+        .collect();
+    let context_str = group_context.join("\n");
+
+    for (user_id, messages, timestamps) in user_msgs {
+        // @机器人 → 直接回复 (唯一快速通道)
+        if self_qq > 0 && messages.contains(at_pattern) {
+            process_message(*user_id, group_id, messages, timestamps);
+            continue;
+        }
+
+        // 危机信号 → 强制回复，不经过 decide_reply
+        let crisis = emotion::get_state(*user_id).crisis_level;
+        if crisis.is_crisis() {
+            tracing::warn!(user_id = *user_id, group_id, level = ?crisis, "crisis: 群聊危机信号，强制回复");
+            process_message(*user_id, group_id, messages, timestamps);
+            continue;
+        }
+
+        // 所有非@消息: AI 决策 (传入群组上下文)
+        if decide_reply(group_id, *user_id, messages, &context_str) {
+            process_message(*user_id, group_id, messages, timestamps);
+        }
+        // 不回复的消息已记录在工作记忆中，对话后统一审查
+    }
+
+    // 记录对话活跃时间 (用于对话后反思)
+    with_shared_state(|s| s.record_conversation(group_id, now_secs()));
 }
 
 
@@ -1407,6 +1448,20 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
     let in_follow_up = read_shared_state(|s| {
         s.is_in_follow_up(group_id, 0, cfg.conversation.reply_follow_up_secs)
     });
+
+    // 冷却检查：防止对同一用户连续回复刷屏
+    let cooldown = cfg.conversation.reply_cooldown_secs;
+    if cooldown > 0 {
+        let recently_replied = read_shared_state(|s| {
+            s.last_reply_to_user(group_id, user_id)
+                .map(|t| t.elapsed().as_secs() < cooldown)
+                .unwrap_or(false)
+        });
+        if recently_replied {
+            debug!(user_id, group_id, "decide_reply: 用户冷却中，跳过");
+            return false;
+        }
+    }
 
     // 构建决策上下文
     let mut context_parts = Vec::new();
@@ -1508,7 +1563,7 @@ fn decide_reply(group_id: u64, user_id: u64, message: &str, group_context: &str)
 
     debug!("{:?}", content);
 
-    match ai::analyze_with_tools(&full_prompt, &content, &[ai::decide_reply_tool()], None) {
+    match ai::analyze_with_tools(&full_prompt, &content, &[ai::decide_reply_tool()], None, Some("decide_reply")) {
         Ok(parsed) => {
             let reply = parsed.get("reply").and_then(ai::parse_bool).unwrap_or(false);
             let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");

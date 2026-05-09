@@ -72,10 +72,23 @@ pub enum DefectType {
 
 // ── 持久化存储 ────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MentalStateStore {
     pub concerns: Vec<Concern>,
     pub deliberations: Vec<Deliberation>,
+    /// 上次缺陷触发时间 (unix秒)，用于全局冷却
+    #[serde(default)]
+    pub last_defect_ts: u64,
+}
+
+impl Default for MentalStateStore {
+    fn default() -> Self {
+        Self {
+            concerns: Vec::new(),
+            deliberations: Vec::new(),
+            last_defect_ts: 0,
+        }
+    }
 }
 
 fn now_secs() -> u64 {
@@ -319,8 +332,17 @@ pub fn get_prompt_context(max_concerns: usize, max_deliberations: usize) -> Stri
 
 // ── 缺陷系统 ─────────────────────────────────────────────
 
-/// 基于情绪状态和随机概率检查是否触发缺陷
+/// 基于情绪状态和随机概率检查是否触发缺陷（带全局冷却）
 pub fn check_defect(emotion: EmotionType, intensity: f32, base_probability: f32) -> Option<DefectType> {
+    // 全局冷却：120秒内不重复触发缺陷
+    let now = now_secs();
+    {
+        let store = MentalStateStore::load();
+        if now.saturating_sub(store.last_defect_ts) < 120 {
+            return None;
+        }
+    }
+
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -354,6 +376,10 @@ pub fn check_defect(emotion: EmotionType, intensity: f32, base_probability: f32)
         cumulative += prob;
         if roll < cumulative {
             debug!(?dtype, roll, cumulative, "mental_state: defect triggered");
+            // 记录触发时间，启动冷却
+            let mut store = MentalStateStore::load();
+            store.last_defect_ts = now;
+            store.save();
             return Some(*dtype);
         }
     }
@@ -427,6 +453,7 @@ pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
         MENTAL_STATE_PROMPT,
         &full_context,
         &[crate::ai::mental_state_generate_tool()],
+        None,
         None,
     ) {
         Ok(parsed) => {

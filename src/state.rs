@@ -168,6 +168,11 @@ impl SharedState {
         self.last_reply_times.remove(&(group_id, user_id));
     }
 
+    /// 获取上次回复某用户的时间 (用于冷却检查)
+    pub fn last_reply_to_user(&self, group_id: u64, user_id: u64) -> Option<Instant> {
+        self.last_reply_times.get(&(group_id, user_id)).copied()
+    }
+
     /// 遗忘用户的所有对话 (共享部分)
     pub fn forget_user_shared(&mut self, user_id: u64) {
         self.contexts.retain(|&(_, uid), _| uid != user_id);

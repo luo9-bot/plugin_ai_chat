@@ -111,6 +111,9 @@ pub struct ConversationConfig {
     /// 是否允许括号内的动作/表情描述，如"（笑了笑）"，默认 true
     #[serde(default = "default_action_descriptions")]
     pub action_descriptions: bool,
+    /// 对同一用户的回复冷却时间 (秒)，防止连续回复刷屏，默认 15
+    #[serde(default = "default_reply_cooldown_secs")]
+    pub reply_cooldown_secs: u64,
 }
 
 impl Default for ConversationConfig {
@@ -123,6 +126,7 @@ impl Default for ConversationConfig {
             reply_follow_up_secs: default_reply_follow_up_secs(),
             intrusiveness_weight: default_intrusiveness_weight(),
             action_descriptions: default_action_descriptions(),
+            reply_cooldown_secs: default_reply_cooldown_secs(),
         }
     }
 }
@@ -538,6 +542,7 @@ fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
 fn default_action_descriptions() -> bool { true }
+fn default_reply_cooldown_secs() -> u64 { 15 }
 fn default_log_level() -> String { "info".into() }
 fn default_normal_expire_days() -> u64 { 30 }
 fn default_important_fade_days() -> u64 { 7 }
@@ -636,6 +641,7 @@ conversation:
   typing_speed: 5.0         # 打字模拟速度 (字符/秒)
   max_typing_delay_ms: 4000 # 打字延迟上限 (毫秒)
   reply_follow_up_secs: 300 # 对话跟进超时 (秒)，超时后不再自动回复非@消息
+  reply_cooldown_secs: 15  # 对同一用户的回复冷却 (秒)，防止连续回复刷屏
   intrusiveness_weight: 0.3 # 主动插话权重 (0.0~1.0)，越低越容易回复无关消息
   action_descriptions: true # 是否允许括号动作描述，如"（笑了笑）"
 

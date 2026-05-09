@@ -564,7 +564,7 @@ pub fn ai_review_all() {
         }
         let context = context_parts.join("\n\n");
 
-        let result = crate::ai::analyze_with_tools(REVIEW_PROMPT, &context, &[crate::ai::memory_review_tool()], None);
+        let result = crate::ai::analyze_with_tools(REVIEW_PROMPT, &context, &[crate::ai::memory_review_tool()], None, None);
         match result {
             Ok(parsed) => {
                 let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");

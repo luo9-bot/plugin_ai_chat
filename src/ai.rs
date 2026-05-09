@@ -371,6 +371,7 @@ pub fn analyze_with_tools(
     user_content: &str,
     tools: &[Tool],
     tool_choice: Option<serde_json::Value>,
+    enforce_tool: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     let cfg = config::get();
 
@@ -387,6 +388,16 @@ pub fn analyze_with_tools(
         },
     ];
 
+    // enforce_tool: 强制调用指定工具，解决 "No tool_calls" fallback 问题
+    let effective_tool_choice = if let Some(name) = enforce_tool {
+        Some(serde_json::json!({
+            "type": "function",
+            "function": {"name": name}
+        }))
+    } else {
+        tool_choice
+    };
+
     let req = ChatRequest {
         model: cfg.model.clone(),
         messages,
@@ -396,7 +407,7 @@ pub fn analyze_with_tools(
         top_p: 0.3,
         max_tokens: cfg.ai.analysis_max_tokens,
         tools: Some(tools.to_vec()),
-        tool_choice: Some(tool_choice.unwrap_or(serde_json::json!("auto"))),
+        tool_choice: Some(effective_tool_choice.unwrap_or(serde_json::json!("auto"))),
     };
 
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
@@ -900,7 +911,7 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
         deliberations: Vec::new(),
     };
 
-    match analyze_with_tools(&system_prompt, &content, &[post_analyze_tool()], None) {
+    match analyze_with_tools(&system_prompt, &content, &[post_analyze_tool()], None, None) {
         Ok(parsed) => {
             // 解析记忆
             if let Some(memories) = parsed.get("memories").and_then(|v| v.as_array()) {
