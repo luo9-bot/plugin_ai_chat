@@ -39,6 +39,11 @@
           <span class="hint">0 = 所有人都是管理员</span>
         </div>
         <div class="field">
+          <label title="认定的人的 QQ 号。对这个人会有特殊的情感反应：更温柔、更愿意配合、语气更亲密。设为 0 则不启用">认定的人 QQ</label>
+          <input v-model.number="cfg.darling_qq" type="number" />
+          <span class="hint">0 = 不启用</span>
+        </div>
+        <div class="field">
           <label title="放在 prompts/ 目录下的文件名，定义 AI 的身份和人设">提示词文件</label>
           <input v-model="cfg.prompts" placeholder="default.txt" />
         </div>
@@ -99,7 +104,7 @@ import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
 
 const DEFAULTS = {
-  api_key: '', base_url: '', model: '', self_qq: 0, admin_qq: 0, prompts: 'default.txt',
+  api_key: '', base_url: '', model: '', self_qq: 0, admin_qq: 0, darling_qq: 0, prompts: 'default.txt',
   ai: { frequency_penalty: 2.0, presence_penalty: 1.0, temperature: 1.3, top_p: 0.1, max_tokens: 4096, request_timeout: 60, analysis_max_tokens: 10000, analysis_temperature: 0.3 },
   conversation: { max_history: 10, batch_timeout_ms: 6000, typing_speed: 5.0, max_typing_delay_ms: 4000, reply_follow_up_secs: 300, action_descriptions: false },
   memory: { normal_expire_days: 30, important_fade_days: 7, auto_summarize_threshold: 10, working_memory_expire_hours: 6 },
