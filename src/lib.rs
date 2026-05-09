@@ -177,7 +177,7 @@ pub extern "C" fn plugin_main() {
     // 禁用日志时用 error 级别，实际上不输出任何内容
     let effective_level = if log_enabled { log_level } else { "error" };
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("top_drluo_luo9_ai_chat={},warn", effective_level)));
+        .unwrap_or_else(|_| EnvFilter::new(format!("plugin_ai_chat={},warn", effective_level)));
 
     // 使用东八区（北京时间）格式: 2026-05-03 14:30:45
     let timer = fmt::time::LocalTime::new(
