@@ -1,3 +1,5 @@
+mod ui;
+
 use tiny_http::{Header, Method, Request, Response, Server};
 use tracing::{debug, info, warn};
 
@@ -1193,7 +1195,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
 
     // 静态页面
     if method == Method::Get && (url == "/" || url == "/index.html") {
-        return Response::from_string(crate::admin_ui::HTML)
+        return Response::from_string(ui::HTML)
             .with_header(Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap());
     }
 

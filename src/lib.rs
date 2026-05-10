@@ -1,5 +1,4 @@
 pub mod admin;
-pub mod admin_ui;
 pub mod ai;
 pub mod anti_injection;
 pub mod archive;
