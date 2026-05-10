@@ -27,7 +27,7 @@ fn execute_tool(name: &str, args: &serde_json::Value, _ctx: &PlannerContext) -> 
 }
 
 pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
-    let max_rounds = 5;
+    let max_rounds = 10;
     let prompt = crate::prompt::PromptManager::get().raw("planner");
     let tools = vec![tool_reply(), tool_query_memory(), tool_query_person_info(), tool_finish()];
     let system_prompt = format!("{}\n\n{}", prompt, ctx.extra_context);

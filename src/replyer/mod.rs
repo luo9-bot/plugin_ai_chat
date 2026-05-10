@@ -2,7 +2,6 @@
 //!
 //! 从 Planner 分离出来的回复生成逻辑。
 //! 接收 Planner 的参考信息，结合人格/记忆/情绪生成最终回复文本。
-//! 参考 MaiBot 的 replyer 架构。
 
 use tracing::debug;
 
@@ -18,19 +17,16 @@ pub struct ReplyContext {
 }
 
 /// 生成回复文本
-///
-/// 使用 replyer prompt 模板，注入人格/记忆/情绪/表达习惯等上下文。
 pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
     let cfg = crate::config::get();
     let prompt = crate::prompt::PromptManager::get().raw("replyer");
 
-    // 选择回复风格
-    let reply_style = select_reply_style(cfg);
+    // 选择回复风格（支持随机化）
+    let reply_style = select_reply_style(&cfg.style);
 
     // 构建系统 prompt
     let mut system_parts = vec![prompt.to_string()];
 
-    // 替换占位符
     let identity_block = if ctx.identity.is_empty() {
         String::new()
     } else {
@@ -51,7 +47,7 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
         .replace("{expression_block}", &expression_block)
         .replace("{group_chat_attention_block}", "");
 
-    // 构建用户消息（历史 + 当前消息）
+    // 构建用户消息
     let mut user_content = String::new();
     if !ctx.history.is_empty() {
         user_content.push_str("# 对话历史\n");
@@ -60,12 +56,9 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
         }
         user_content.push('\n');
     }
-
-    // 添加参考信息
     if let Some(ref_info) = &ctx.reference_info {
         user_content.push_str(&format!("# 回复参考信息\n{}\n\n", ref_info));
     }
-
     user_content.push_str(&format!("# 当前消息\n{}", ctx.user_message));
 
     debug!(
@@ -75,15 +68,35 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
         "replyer: generating"
     );
 
-    // 调用 AI 生成回复
     let (reply, _) = crate::ai::chat(&system_prompt, "", &[], &user_content)?;
     Ok(reply)
 }
 
 /// 选择回复风格（支持随机化）
-fn select_reply_style(_cfg: &crate::config::Config) -> String {
-    // TODO: 实现 multiple_reply_styles 随机选择
-    // 目前使用默认风格
-    let base_style = "日常口语化，简短自然";
-    base_style.to_string()
+///
+/// 按 `style_random_probability` 概率从 `multiple_reply_styles` 中随机选择，
+/// 否则使用默认 `reply_style`。
+fn select_reply_style(style_cfg: &crate::config::StyleConfig) -> String {
+    // 如果没有配置备选风格，使用默认
+    if style_cfg.multiple_reply_styles.is_empty() {
+        return if style_cfg.reply_style.is_empty() {
+            "日常口语化，简短自然".to_string()
+        } else {
+            style_cfg.reply_style.clone()
+        };
+    }
+
+    // 按概率决定是否使用备选风格
+    let rand_val: f64 = (crate::util::now_millis() % 1000) as f64 / 1000.0;
+    if rand_val < style_cfg.style_random_probability {
+        // 从备选风格中随机选择
+        let idx = (crate::util::now_millis() as usize) % style_cfg.multiple_reply_styles.len();
+        style_cfg.multiple_reply_styles[idx].clone()
+    } else {
+        if style_cfg.reply_style.is_empty() {
+            "日常口语化，简短自然".to_string()
+        } else {
+            style_cfg.reply_style.clone()
+        }
+    }
 }

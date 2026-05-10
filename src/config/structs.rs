@@ -304,6 +304,15 @@ pub struct StyleConfig {
     /// 标点风格: "casual"(不加句号，用换行分隔) | "formal"(正常标点)，默认 "casual"
     #[serde(default = "default_punctuation_style")]
     pub punctuation_style: String,
+    /// 默认回复风格描述
+    #[serde(default)]
+    pub reply_style: String,
+    /// 备选回复风格列表（按概率随机选择）
+    #[serde(default)]
+    pub multiple_reply_styles: Vec<String>,
+    /// 使用备选风格的概率 (0.0-1.0)，默认 0.3
+    #[serde(default = "default_style_random_probability")]
+    pub style_random_probability: f64,
 }
 
 impl Default for StyleConfig {
@@ -312,6 +321,9 @@ impl Default for StyleConfig {
             max_reply_chars: default_max_reply_chars(),
             omit_subject: true,
             punctuation_style: default_punctuation_style(),
+            reply_style: String::new(),
+            multiple_reply_styles: Vec::new(),
+            style_random_probability: default_style_random_probability(),
         }
     }
 }
@@ -566,7 +578,7 @@ fn default_request_timeout() -> u64 { 60 }
 fn default_analysis_max_tokens() -> u32 { 10000 }
 fn default_analysis_temperature() -> f64 { 0.3 }
 fn default_max_history() -> usize { 10 }
-fn default_batch_timeout() -> u64 { 6000 }
+fn default_batch_timeout() -> u64 { 2000 }
 fn default_typing_speed() -> f64 { 5.0 }
 fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
@@ -611,6 +623,7 @@ fn default_deliberation_decay_rate() -> f32 { 0.05 }
 fn default_defect_base_probability() -> f32 { 0.1 }
 fn default_max_reply_chars() -> usize { 30 }
 fn default_punctuation_style() -> String { "casual".into() }
+fn default_style_random_probability() -> f64 { 0.3 }
 fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
 fn default_vision_model() -> String { "deepseek-chat".into() }
 fn default_vision_max_tokens() -> u32 { 256 }

@@ -1431,11 +1431,19 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
     }
 
     // ── 第六步：Timing Gate 决策 ──
+    // 冷却期内跳过（刚决定沉默就不再评估）
+    if timing_gate::is_in_cooldown(group_id) {
+        debug!(group_id, "timing_gate: in cooldown, skipping");
+        with_shared_state(|s| s.record_conversation(group_id, util::now_secs()));
+        return;
+    }
+
     let gate_context = timing_gate::GateContext {
         identity: config::prompt().to_string(),
         recent_bot_messages: read_shared_state(|s| s.get_recent_bot_messages(group_id, 600, 5)),
         working_memory: working_memory::get_context(group_id, 3600),
         self_qq,
+        is_group: true,
     };
 
     let decision = timing_gate::run_timing_gate(group_id, &remaining, &gate_context);
