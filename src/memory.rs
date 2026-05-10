@@ -3,50 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use tracing::{debug, info};
 
-/// AI 记忆审查提示词
-const REVIEW_PROMPT: &str = r#"你是一个记忆管理助手。审查以下记忆列表和最近的对话，决定是否需要整理。
 
-判断标准:
-- 重复或相似的记忆应该合并
-- 已经不正确的记忆应该更新或删除
-- 最近对话中的新信息应该添加为记忆
-- 过时的记忆应该删除
-- 如果记忆都正确且不需要改动，返回 action: "keep""#;
 
-/// AI 记忆提取提示词
-const EXTRACT_PROMPT: &str = r#"分析以下对话，提取值得长期记忆的信息。
-
-返回 JSON 数组格式（不要输出其他内容）:
-[{"content":"记忆内容","importance":"permanent|important|normal"}]
-
-重要性判断标准:
-- permanent (永久): 用户明确要求记住的信息，如"记住xxx"、"别忘了xxx"
-- important (重要): 用户的个人信息（姓名、生日、喜好、住址、职业等）、重要经历、情感表达
-- normal (普通): 一般性对话中值得记录的有趣内容、观点、经历
-
-规则:
-- 只提取有长期价值的信息，不要记录琐碎内容
-- 记忆内容应该简洁明了，一句话概括
-- 如果没有值得记忆的内容，返回空数组 []
-- 不要重复已有的记忆
-
-示例:
-用户: "我叫小明，生日是3月15日"
-→ [{"content":"用户叫小明","importance":"important"},{"content":"用户生日是3月15日","importance":"permanent"}]
-
-用户: "今天天气真好"
-→ []"#;
-
-/// AI 摘要提示词
-const SUMMARIZE_PROMPT: &str = r#"将以下对话历史总结为一段简洁的摘要，提取关键话题和重要信息。
-
-返回纯文本摘要（一句话到三句话），不要输出其他内容。
-
-示例:
-用户: 我最近在学吉他
-AI: 那很棒啊！学了多久了？
-用户: 才一周，手指好痛
-→ 用户最近开始学吉他，刚一周，还在适应期。"#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Importance {
@@ -72,10 +30,6 @@ pub struct UserMemory {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct MemoryStore {
     pub users: HashMap<String, UserMemory>,
-}
-
-fn now_secs() -> u64 {
-    crate::util::now_secs()
 }
 
 fn memory_path() -> std::path::PathBuf {
@@ -113,7 +67,7 @@ pub fn load_user_count() -> usize {
 
 pub fn add(user_id: u64, content: &str, importance: Importance) {
     let mut store = MemoryStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let user = store.get_user_mut(user_id);
 
     if let Some(entry) = user.entries.iter_mut().find(|e| e.content == content) {
@@ -168,7 +122,7 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
 pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
     let mut store = MemoryStore::load();
     let user = store.get_user_mut(user_id);
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let mut count = 0;
 
     if new.is_empty() {
@@ -226,7 +180,7 @@ pub fn get_context(user_id: u64) -> String {
     }
 
     let cfg = &crate::config::get().memory;
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let normal_expire = cfg.normal_expire_days * 86400;
     let important_fade = cfg.important_fade_days * 86400;
     let mut lines = Vec::new();
@@ -268,7 +222,7 @@ pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
 
     let store = MemoryStore::load();
     let cfg = &crate::config::get().memory;
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let normal_expire = cfg.normal_expire_days * 86400;
     let important_fade = cfg.important_fade_days * 86400;
     let mut user_blocks = Vec::new();
@@ -324,7 +278,7 @@ pub fn ai_extract(user_id: u64, user_message: &str, ai_reply: &str, history: &[(
     context_parts.push(format!("[assistant] {}", ai_reply));
     let content = context_parts.join("\n");
 
-    let result = crate::ai::analyze(EXTRACT_PROMPT, &content);
+    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("memory_extract"), &content);
     match result {
         Ok(raw) => {
             // 尝试从回复中提取 JSON 数组
@@ -496,7 +450,7 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
     let conversation_text = conversation.join("\n");
 
     // 尝试 AI 摘要
-    let result = crate::ai::analyze(SUMMARIZE_PROMPT, &conversation_text);
+    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("memory_summarize"), &conversation_text);
     match result {
         Ok(summary) => {
             let summary = summary.trim();
@@ -565,7 +519,7 @@ pub fn ai_review_all() {
         let context = context_parts.join("\n\n");
 
         let result = crate::ai::analyze_with_tools(
-            REVIEW_PROMPT,
+            crate::prompt::PromptManager::get().raw("memory_review"),
             &context,
             &[crate::ai::memory_review_tool()],
             Some(serde_json::json!("auto"))
@@ -620,7 +574,7 @@ pub fn ai_review_all() {
                             _ => Importance::Normal,
                         };
                         if !user.entries.iter().any(|e| e.content == content) {
-                            let now = now_secs();
+                            let now = crate::util::now_secs();
                             user.entries.push(MemoryEntry {
                                 content: content.to_string(),
                                 importance,

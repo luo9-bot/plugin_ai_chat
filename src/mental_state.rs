@@ -91,10 +91,6 @@ impl Default for MentalStateStore {
     }
 }
 
-fn now_secs() -> u64 {
-    crate::util::now_secs()
-}
-
 fn store_path() -> std::path::PathBuf {
     config::data_dir().join("mental_state.json")
 }
@@ -154,7 +150,7 @@ fn is_similar(a: &str, b: &str) -> bool {
 pub fn add_concern(content: &str, category: &str, trigger_user: u64, trigger_group: u64) {
     let mut store = MentalStateStore::load();
     let cat = ConcernCategory::from_str(category);
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let normalized = normalize_text(content);
 
     // 去重：检查已有担忧是否相似
@@ -205,7 +201,7 @@ pub fn add_concern(content: &str, category: &str, trigger_user: u64, trigger_gro
 /// 添加考量，自动去重。重复考量会增强强度。
 pub fn add_deliberation(content: &str, source: &str) {
     let mut store = MentalStateStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let normalized = normalize_text(content);
 
     for delib in &mut store.deliberations {
@@ -254,7 +250,7 @@ pub fn decay_concerns(rate_per_hour: f32) {
     if store.concerns.is_empty() {
         return;
     }
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let before = store.concerns.len();
 
     for concern in &mut store.concerns {
@@ -280,7 +276,7 @@ pub fn decay_deliberations(rate_per_hour: f32) {
     if store.deliberations.is_empty() {
         return;
     }
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let before = store.deliberations.len();
 
     for delib in &mut store.deliberations {
@@ -335,7 +331,7 @@ pub fn get_prompt_context(max_concerns: usize, max_deliberations: usize) -> Stri
 /// 基于情绪状态和随机概率检查是否触发缺陷（带全局冷却）
 pub fn check_defect(emotion: EmotionType, intensity: f32, base_probability: f32) -> Option<DefectType> {
     // 全局冷却：120秒内不重复触发缺陷
-    let now = now_secs();
+    let now = crate::util::now_secs();
     {
         let store = MentalStateStore::load();
         if now.saturating_sub(store.last_defect_ts) < 120 {
@@ -404,24 +400,6 @@ pub fn defect_to_instruction(d: DefectType) -> &'static str {
 
 // ── 对话后生成 ────────────────────────────────────────────
 
-const MENTAL_STATE_PROMPT: &str = r#"你是有身份和人设的（见上方"你的身份"）。审视以下对话记录，产生你作为这个角色的内心反应。
-
-任务1 - 担忧: 如果对话中出现了让你担心的事情，生成担忧条目。
-- 社交担忧: 担心用户心情不好、担心关系变差
-- 任务担忧: 记挂着没回答好的问题、担心遗漏了什么
-- 情感担忧: 在意自己说错话了、担心伤害了对方
-- 自我担忧: 觉得自己状态不好、能力不足
-- 如果没有值得担忧的，返回空数组
-
-任务2 - 要考量: 如果对话中出现了值得记住的行事准则或人际洞察，生成考量条目。
-- 例如: "这个人说话直接，别往心里去"、"这个话题敏感，注意分寸"
-- 如果没有新的考量，返回空数组
-
-规则:
-- 基于你的人设来判断什么是你真正在意的
-- 不要过度担忧，只提取确实值得注意的
-- 内容简短，一两句话
-- 不要暴露你是 AI"#;
 
 /// 从对话上下文中生成担忧和考量
 pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
@@ -450,7 +428,7 @@ pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
     let full_context = context_parts.join("\n\n");
 
     match crate::ai::analyze_with_tools(
-        MENTAL_STATE_PROMPT,
+        crate::prompt::PromptManager::get().raw("mental_state_generate"),
         &full_context,
         &[crate::ai::mental_state_generate_tool()],
         Some(serde_json::json!("auto")),

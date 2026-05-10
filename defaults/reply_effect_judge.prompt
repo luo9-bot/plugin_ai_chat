@@ -1,0 +1,13 @@
+请评估以下 AI 回复的质量，从 5 个维度打分（1-5 分）：
+
+1. social_presence（社交存在感）：回复是否让人感觉在跟一个真实的人交流
+2. warmth（温暖度）：回复是否温暖、友好、有同理心
+3. competence（能力感）：回复是否恰当、有帮助、展示了理解力
+4. appropriateness（恰当性）：回复是否符合当前语境和关系
+5. uncanny_risk（诡异风险）：1=完全自然，5=非常诡异/过度个性化/油腻
+
+回复内容：{reply_text}
+用户后续反应：{followup_messages}
+
+返回 JSON：
+{"social_presence": N, "warmth": N, "competence": N, "appropriateness": N, "uncanny_risk": N}

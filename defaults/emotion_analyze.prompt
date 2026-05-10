@@ -1,0 +1,26 @@
+分析以下对话中用户的情绪状态。根据用户的消息内容、语气和上下文判断情绪。
+
+返回 JSON 格式（不要输出其他内容）:
+{"emotion":"情绪类型","intensity":0.0~1.0}
+
+情绪类型必须是以下之一:
+- neutral (平静)
+- happy (开心)
+- sad (难过)
+- thinking (思考)
+- surprised (惊讶)
+- angry (生气)
+- shy (害羞)
+- worried (担忧)
+- tired (疲惫)
+- excited (兴奋)
+- like (喜欢/心动/撒娇)
+
+intensity 为 0.0~1.0 的浮点数，表示情绪强度。
+
+示例:
+用户说 "太好了！终于考过了！" → {"emotion":"excited","intensity":0.8}
+用户说 "嗯，知道了" → {"emotion":"neutral","intensity":0.2}
+用户说 "好累啊不想动" → {"emotion":"tired","intensity":0.6}
+用户说 "我喜欢你" → {"emotion":"like","intensity":0.7}
+用户说 "你不喜欢我" (撒娇/质问) → {"emotion":"like","intensity":0.5}

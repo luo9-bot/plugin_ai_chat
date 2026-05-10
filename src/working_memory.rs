@@ -20,10 +20,6 @@ pub struct WorkingMemoryStore {
     pub groups: HashMap<String, GroupMemory>,
 }
 
-fn now_secs() -> u64 {
-    crate::util::now_secs()
-}
-
 fn memory_path() -> std::path::PathBuf {
     crate::config::data_dir().join("working_memory.json")
 }
@@ -49,7 +45,7 @@ impl WorkingMemoryStore {
 pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> u64 {
     if group_id == 0 { return 0; }
     let mut store = WorkingMemoryStore::load();
-    let ts = now_secs();
+    let ts = crate::util::now_secs();
     let group = store.groups.entry(group_id.to_string()).or_default();
     group.entries.push(Entry {
         user_id,
@@ -82,7 +78,7 @@ pub fn mark_replied(group_id: u64, user_id: u64) {
 /// 获取某群最近的消息
 pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Entry> {
     let store = WorkingMemoryStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     store.groups
         .get(&group_id.to_string())
         .map(|group| {
@@ -143,7 +139,7 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
 /// 清理过期的工作记忆 (归档后删除)
 pub fn cleanup(max_age_secs: u64) {
     let mut store = WorkingMemoryStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let mut to_archive = Vec::new();
 
     for (group_id_str, group) in store.groups.iter_mut() {
@@ -201,7 +197,7 @@ pub fn group_count() -> usize {
 /// 获取某群最近参与过的用户列表 (用于群组记忆互通)
 pub fn get_participants(group_id: u64) -> Vec<u64> {
     let store = WorkingMemoryStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     store.groups
         .get(&group_id.to_string())
         .map(|group| {

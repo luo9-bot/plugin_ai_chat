@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-fn now_secs() -> u64 {
-    crate::util::now_secs()
-}
-
 fn archive_path() -> std::path::PathBuf {
     crate::config::data_dir().join("archive.json")
 }
@@ -61,7 +57,7 @@ pub fn archive_working_memory(entries: Vec<(u64, crate::working_memory::Entry)>)
         return;
     }
     let mut store = ArchiveStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     for (group_id, entry) in entries {
         store.working_memory.push(ArchivedWorkingMemory {
             group_id,
@@ -81,7 +77,7 @@ pub fn archive_long_term_memory(user_id: u64, entries: Vec<crate::memory::Memory
         return;
     }
     let mut store = ArchiveStore::load();
-    let now = now_secs();
+    let now = crate::util::now_secs();
     for entry in entries {
         let importance = match entry.importance {
             crate::memory::Importance::Permanent => "permanent",

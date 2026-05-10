@@ -2,9 +2,6 @@ use tracing::{debug, info};
 use crate::config;
 use crate::anti_injection;
 
-/// 识图提示词
-const VISION_PROMPT: &str = "判断这是表情包/贴图还是真实照片，然后用一句话描述。如果是表情包或贴图，开头用「[表情包]」标注，再描述画面内容（比如角色表情、动作）。如果是真实照片，开头用「[照片]」标注，再描述画面。";
-
 /// 从消息中提取 [CQ:image,...] 的图片 URL
 pub fn extract_image_urls(message: &str) -> Vec<String> {
     let mut urls = Vec::new();
@@ -91,7 +88,7 @@ pub fn recognize(image_url: &str) -> Option<String> {
                 },
                 {
                     "type": "input_text",
-                    "text": VISION_PROMPT
+                    "text": crate::prompt::PromptManager::get().raw("vision_describe")
                 }
             ]
         }],

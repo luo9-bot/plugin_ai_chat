@@ -5,10 +5,6 @@ use crate::config;
 
 // ── 工具函数 ────────────────────────────────────────────────────
 
-fn now_secs() -> u64 {
-    crate::util::now_secs()
-}
-
 fn json_response(status: u16, body: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
     let body_str = body.to_string();
     Response::from_string(body_str)
@@ -110,7 +106,7 @@ mod backup {
         }
         let backup_dir = config::data_dir().join("backups").join(data_type);
         std::fs::create_dir_all(&backup_dir).ok();
-        let ts = format_timestamp(now_secs());
+        let ts = format_timestamp(crate::util::now_secs());
         let name = format!("{}_{}.json", data_type, ts);
         let dst = backup_dir.join(&name);
         if std::fs::copy(&src, &dst).is_ok() {
@@ -277,7 +273,7 @@ fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Response
             thoughts.push(serde_json::json!({
                 "content": content,
                 "category": category,
-                "created": now_secs()
+                "created": crate::util::now_secs()
             }));
             std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
             ok(serde_json::json!({"ok": true}))
@@ -434,8 +430,8 @@ fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::i
             entries.push(serde_json::json!({
                 "content": content,
                 "importance": serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance)).unwrap_or(serde_json::json!("Normal")),
-                "created": now_secs(),
-                "last_accessed": now_secs(),
+                "created": crate::util::now_secs(),
+                "last_accessed": crate::util::now_secs(),
                 "access_count": 1
             }));
             std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
@@ -476,7 +472,7 @@ fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::i
                 if let Some(importance) = body_val.get("importance").and_then(|v| v.as_str()) {
                     entries[idx]["importance"] = serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance)).unwrap_or(serde_json::json!("Normal"));
                 }
-                entries[idx]["last_accessed"] = serde_json::json!(now_secs());
+                entries[idx]["last_accessed"] = serde_json::json!(crate::util::now_secs());
                 std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
                 ok(serde_json::json!({"ok": true}))
             } else {
@@ -795,8 +791,8 @@ fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Response<
                         "content": content,
                         "category": category,
                         "strength": strength,
-                        "created": now_secs(),
-                        "last_reinforced": now_secs(),
+                        "created": crate::util::now_secs(),
+                        "last_reinforced": crate::util::now_secs(),
                         "trigger_user": 0,
                         "trigger_group": 0
                     }));
@@ -822,8 +818,8 @@ fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Response<
                         "content": content,
                         "source": source,
                         "strength": strength,
-                        "created": now_secs(),
-                        "last_reinforced": now_secs()
+                        "created": crate::util::now_secs(),
+                        "last_reinforced": crate::util::now_secs()
                     }));
                 }
                 _ => return err(400, "use concerns or deliberations"),

@@ -96,7 +96,7 @@ pub fn get_current_context() -> String {
         return String::new();
     }
 
-    let hour = current_hour();
+    let hour = crate::util::current_hour_cst();
     let daily = &config.daily;
 
     // 检查是否在睡觉时间
@@ -124,7 +124,7 @@ pub fn get_current_context() -> String {
     };
 
     // 检查今天的特殊事件
-    let today = today_date();
+    let today = crate::util::today_str();
     let mut event_str = String::new();
     for event in &config.events {
         if event.date == today {
@@ -164,7 +164,7 @@ pub fn is_quiet_time() -> bool {
     if !config.enabled {
         return false;
     }
-    let hour = current_hour();
+    let hour = crate::util::current_hour_cst();
     hour >= config.daily.sleep || hour < config.daily.wake_up
 }
 
@@ -202,13 +202,13 @@ pub fn update_mood(mood: &str) {
 
 /// 生成新的每日计划 (基于人设)
 pub fn generate_plan() -> DailyPlan {
-    let today = today_date();
+    let today = crate::util::today_str();
     let plan = DailyPlan {
         date: today.clone(),
         goals: Vec::new(), // 将由 AI 填充
         completed: Vec::new(),
         mood: String::new(),
-        created_at: now_secs(),
+        created_at: crate::util::now_secs(),
     };
     save_plan(&plan);
     plan
@@ -217,7 +217,7 @@ pub fn generate_plan() -> DailyPlan {
 /// 检查是否需要生成新计划
 pub fn check_and_generate_plan() -> bool {
     let plan = load_today_plan();
-    let today = today_date();
+    let today = crate::util::today_str();
 
     // 如果日期不同或没有计划，生成新计划
     if plan.date != today || plan.goals.is_empty() {
@@ -229,75 +229,7 @@ pub fn check_and_generate_plan() -> bool {
 
 /// 获取计划生成的 prompt
 pub fn get_plan_generation_prompt() -> String {
-    "你正在为自己制定今日计划。根据你的人设、当前时间和最近的状态，生成 2-4 个今天的任务/目标。
-
-规则：
-- 任务要符合你的人设和日常生活
-- 任务要具体、可执行
-- 可以包含工作、生活、兴趣等方面
-- 用简短的中文描述，每条不超过15个字
-- 返回 JSON 格式：{\"tasks\": [\"任务1\", \"任务2\", ...]}
-
-示例：
-- 如果你是茶书房老板：[\"整理书架\", \"泡一壶新茶\", \"给墨墨加粮\"]
-- 如果你是学生：[\"复习数学\", \"去图书馆借书\", \"和朋友吃饭\"]".to_string()
-}
-
-fn current_hour() -> u32 {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    ((now / 3600 + 8) % 24) as u32
-}
-
-fn today_date() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now / 86400;
-    let (_year, month, day) = days_to_date(days);
-    format!("{:04}-{:02}-{:02}", _year, month, day)
-}
-
-fn days_to_date(days: u64) -> (u64, u64, u64) {
-    let mut y = 1970u64;
-    let mut remaining = days;
-
-    loop {
-        let days_in_year = if is_leap_year(y) { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
-        remaining -= days_in_year;
-        y += 1;
-    }
-
-    let leap = is_leap_year(y);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-    for (i, &days_in_month) in month_days.iter().enumerate() {
-        if remaining < days_in_month {
-            return (y, i as u64 + 1, remaining + 1);
-        }
-        remaining -= days_in_month;
-    }
-
-    (y, 12, 31)
-}
-
-fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::prompt::PromptManager::get().raw("daily_plan").to_string()
 }
 
 fn plan_path() -> std::path::PathBuf {

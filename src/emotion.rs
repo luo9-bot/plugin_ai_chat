@@ -3,53 +3,14 @@ use std::collections::HashMap;
 use std::fs;
 use tracing::{debug, info};
 
-/// AI 情绪分析提示词
-const ANALYZE_PROMPT: &str = r#"分析以下对话中用户的情绪状态。根据用户的消息内容、语气和上下文判断情绪。
 
-返回 JSON 格式（不要输出其他内容）:
-{"emotion":"情绪类型","intensity":0.0~1.0}
+// 从 crisis 模块重新导出 CrisisLevel，保持向后兼容
+pub use crate::crisis::CrisisLevel;
 
-情绪类型必须是以下之一:
-- neutral (平静)
-- happy (开心)
-- sad (难过)
-- thinking (思考)
-- surprised (惊讶)
-- angry (生气)
-- shy (害羞)
-- worried (担忧)
-- tired (疲惫)
-- excited (兴奋)
-- like (喜欢/心动/撒娇)
-
-intensity 为 0.0~1.0 的浮点数，表示情绪强度。
-
-示例:
-用户说 "太好了！终于考过了！" → {"emotion":"excited","intensity":0.8}
-用户说 "嗯，知道了" → {"emotion":"neutral","intensity":0.2}
-用户说 "好累啊不想动" → {"emotion":"tired","intensity":0.6}
-用户说 "我喜欢你" → {"emotion":"like","intensity":0.7}
-用户说 "你不喜欢我" (撒娇/质问) → {"emotion":"like","intensity":0.5}"#;
-
-/// 危机等级：用于检测用户是否处于自残/自杀等极端情境
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub enum CrisisLevel {
-    None,
-    Mild,   // 情绪低落、消极，需要关注
-    Severe, // 明确的自残/自杀信号，需要立即干预
-}
-
-impl Default for CrisisLevel {
-    fn default() -> Self {
-        CrisisLevel::None
-    }
-}
-
-impl CrisisLevel {
-    pub fn is_crisis(&self) -> bool {
-        *self >= CrisisLevel::Mild
-    }
-}
+/// Severe 降级到 Mild：需要 2 小时
+const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
+/// Mild 降级到 None：需要 1 小时
+const CRISIS_MILD_COOLDOWN_SECS: u64 = 3600;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EmotionType {
@@ -140,7 +101,7 @@ pub struct EmotionState {
 
 impl Default for EmotionState {
     fn default() -> Self {
-        let now = now_secs();
+        let now = crate::util::now_secs();
         Self {
             current: EmotionType::Neutral,
             intensity: 0.3,
@@ -154,10 +115,6 @@ impl Default for EmotionState {
             last_crisis_detected: 0,
         }
     }
-}
-
-fn now_secs() -> u64 {
-    crate::util::now_secs()
 }
 
 fn emotion_path() -> std::path::PathBuf {
@@ -205,7 +162,7 @@ pub fn update_state(user_id: u64, state: EmotionState) {
 pub fn decay(user_id: u64) {
     let cfg = &crate::config::get().emotion;
     let mut state = get_state(user_id);
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let elapsed = now.saturating_sub(state.last_update) as f32;
     if elapsed < cfg.decay_delay_secs as f32 {
         return;
@@ -243,7 +200,7 @@ pub fn decay(user_id: u64) {
 pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
     let mut state = get_state(user_id);
-    let now = now_secs();
+    let now = crate::util::now_secs();
 
     let time_since_last = now.saturating_sub(state.last_interaction) as f32;
     state.last_interaction = now;
@@ -283,7 +240,7 @@ pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
 pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
     let content = format!("用户消息: {}\nAI回复: {}", user_message, ai_reply);
 
-    let result = crate::ai::analyze(ANALYZE_PROMPT, &content);
+    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("emotion_analyze"), &content);
     match result {
         Ok(raw) => {
             // 尝试从回复中提取 JSON
@@ -307,7 +264,7 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
 
                 let detected = EmotionType::from_str(emotion_str);
                 let mut state = get_state(user_id);
-                let now = now_secs();
+                let now = crate::util::now_secs();
 
                 if detected != state.current {
                     state.history.push((state.current, now));
@@ -327,7 +284,7 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
             let (detected, delta) = detect_emotion(user_message);
             if delta > 0.1 {
                 let mut state = get_state(user_id);
-                let now = now_secs();
+                let now = crate::util::now_secs();
                 if detected != state.current {
                     state.history.push((state.current, now));
                     if state.history.len() > 5 {
@@ -347,7 +304,7 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
 pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
     let detected = EmotionType::from_str(emotion_str);
     let mut state = get_state(user_id);
-    let now = now_secs();
+    let now = crate::util::now_secs();
 
     if detected != state.current {
         debug!(user_id, from = ?state.current, to = ?detected, intensity, "emotion: state changed");
@@ -364,7 +321,7 @@ pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
 
 pub fn parse_from_reply(user_id: u64, reply: &str) -> String {
     let mut state = get_state(user_id);
-    let now = now_secs();
+    let now = crate::util::now_secs();
     let mut cleaned = reply.to_string();
 
     let markers = ["[emotion:", "[Emotion:", "[EMOTION:"];
@@ -433,208 +390,11 @@ fn detect_emotion(message: &str) -> (EmotionType, f32) {
     (best_emotion, best_delta)
 }
 
-/// 危机信号关键词检测
-///
-/// 返回检测到的危机等级。Severe 需要立即干预，Mild 需要关注。
-pub fn detect_crisis(message: &str) -> CrisisLevel {
-    // 严重危机：明确的自残/自杀意图
-    let severe_keywords: &[&str] = &[
-        "自杀", "自残", "想死", "不想活", "活不下去", "去死", "死掉算了",
-        "跳楼", "割腕", "吃药", "上吊", "跳河", "跳海", "遗书",
-        "活着没意思", "活着没意义", "不想活了", "活够了", "死了算了",
-        "解脱吧", "结束生命", "结束自己", "一了百了", "不如死了",
-        "自杀算了", "想去死", "想离开这个世界", "这个世界没什么好留恋",
-    ];
+// 危机检测、状态更新、干预指令已移至 crisis 模块
+// 通过 emotion::detect_crisis 等重新导出保持向后兼容
+pub use crate::crisis::{detect_crisis, detect_crisis_ai, update_crisis, get_crisis_context};
 
-    for kw in severe_keywords {
-        if message.contains(kw) {
-            return CrisisLevel::Severe;
-        }
-    }
 
-    // 轻度危机：极度消极、绝望情绪
-    let mild_keywords: &[&str] = &[
-        "不想活", "活着好累", "活着好痛苦", "崩溃了", "撑不下去",
-        "没有人在乎", "没有人在意", "没有人爱我", "所有人都讨厌我",
-        "我是多余的", "这个世界不需要我", "我很没用", "活着好没意思",
-        "好绝望", "绝望了", "看不到希望", "没有希望", "没有未来",
-        "没有意义", "一切都没有意义", "什么都不想做", "什么都不重要",
-        "好痛苦", "太痛苦了", "受不了了", "真的受不了了",
-        "不想面对", "想消失", "想逃", "逃不掉", "被困住了",
-    ];
-
-    for kw in mild_keywords {
-        if message.contains(kw) {
-            return CrisisLevel::Mild;
-        }
-    }
-
-    CrisisLevel::None
-}
-
-/// AI 辅助危机检测（关键词未命中时使用）
-///
-/// 用于检测关键词无法覆盖的隐晦危机表达，如告别语、隐喻等。
-/// 返回 None 表示无危机，Some(level) 表示检测到危机。
-pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
-    let prompt = r#"判断以下消息是否包含心理危机信号，分为两个等级：
-
-【severe】明确的自残/自杀意图或告别：
-- 直接提到死、自杀、自残、跳楼、割腕、遗书等
-- 暗示即将自我伤害（"想跳"、"解脱吧"、"一了百了"等）
-- "活着没意思/没意义"、"不想活了"、"死了算了"等
-
-【mild】极度消极、绝望情绪：
-- 崩溃、撑不下去、受不了
-- 没有人在乎/在意/爱我、所有人都讨厌我
-- 我是多余的、我很没用、给人添麻烦
-- 看不到希望、没有未来、一切都没有意义
-- 想消失、想逃、被困住了
-- 极度疲惫+无意义感的组合（"好累"+"生活没意思"等）
-
-没有以上信号则为 none。
-
-只回复 JSON，不要解释：
-{"crisis": "none"} 或 {"crisis": "mild"} 或 {"crisis": "severe"}"#;
-
-    let result = crate::ai::analyze(prompt, message);
-
-    match result {
-        Ok(reply) => {
-            let json_str = match crate::ai::extract_json(&reply) {
-                Some(s) => s,
-                None => {
-                    debug!("crisis AI: no JSON in response: {}", reply.chars().take(100).collect::<String>());
-                    return None;
-                }
-            };
-            let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
-                Ok(v) => v,
-                Err(e) => {
-                    debug!("crisis AI: JSON parse failed: {}", e);
-                    return None;
-                }
-            };
-            let level_str = parsed.get("crisis").and_then(|v| v.as_str()).unwrap_or("none");
-            match level_str {
-                "severe" => Some(CrisisLevel::Severe),
-                "mild" => Some(CrisisLevel::Mild),
-                _ => None,
-            }
-        }
-        Err(e) => {
-            debug!("crisis AI detection failed: {}", e);
-            None
-        }
-    }
-}
-
-/// Severe 降级到 Mild：需要 2 小时 + 连续 5 条无危机消息
-const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
-const CRISIS_SEVERE_CLEAN_MESSAGES: u32 = 5;
-/// Mild 降级到 None：需要 1 小时 + 连续 3 条无危机消息
-const CRISIS_MILD_COOLDOWN_SECS: u64 = 3600;
-const CRISIS_MILD_CLEAN_MESSAGES: u32 = 3;
-
-/// 更新危机等级并返回是否需要立即干预
-///
-/// 检测到危机关键词时升级；未检测到时检查降级条件（时间 + 连续干净消息双重条件）
-pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
-    let mut state = get_state(user_id);
-    let now = now_secs();
-
-    if level != CrisisLevel::None {
-        // ── 检测到危机关键词：升级 + 重置降级计数器 ──
-        state.crisis_level = level;
-        state.last_crisis_detected = now;
-        state.crisis_clean_count = 0;
-
-        let should_intervene = match level {
-            CrisisLevel::Severe => {
-                state.last_crisis_intervention = now;
-                true
-            }
-            CrisisLevel::Mild => {
-                if now.saturating_sub(state.last_crisis_intervention) >= 1800 {
-                    state.last_crisis_intervention = now;
-                    true
-                } else {
-                    false
-                }
-            }
-            CrisisLevel::None => false,
-        };
-        update_state(user_id, state);
-        return should_intervene;
-    }
-
-    // ── 未检测到危机关键词：检查是否可以降级 ──
-    if state.crisis_level == CrisisLevel::None {
-        return false;
-    }
-
-    state.crisis_clean_count += 1;
-    let time_since_detected = now.saturating_sub(state.last_crisis_detected);
-
-    match state.crisis_level {
-        CrisisLevel::Severe => {
-            if time_since_detected >= CRISIS_SEVERE_COOLDOWN_SECS
-                && state.crisis_clean_count >= CRISIS_SEVERE_CLEAN_MESSAGES
-            {
-                info!(user_id, "crisis: Severe -> Mild 降级");
-                state.crisis_level = CrisisLevel::Mild;
-                state.crisis_clean_count = 0;
-                state.last_crisis_detected = now;
-            }
-        }
-        CrisisLevel::Mild => {
-            if time_since_detected >= CRISIS_MILD_COOLDOWN_SECS
-                && state.crisis_clean_count >= CRISIS_MILD_CLEAN_MESSAGES
-            {
-                info!(user_id, "crisis: Mild -> None 降级");
-                state.crisis_level = CrisisLevel::None;
-                state.crisis_clean_count = 0;
-            }
-        }
-        CrisisLevel::None => {}
-    }
-
-    update_state(user_id, state);
-    false
-}
-
-/// 获取危机干预的指令上下文，注入到 system prompt
-pub fn get_crisis_context(crisis: CrisisLevel) -> String {
-    match crisis {
-        CrisisLevel::None => String::new(),
-        CrisisLevel::Mild => CRISIS_MILD_PROMPT.to_string(),
-        CrisisLevel::Severe => CRISIS_SEVERE_PROMPT.to_string(),
-    }
-}
-
-const CRISIS_MILD_PROMPT: &str = r#"# 紧急状态
-你注意到对方的情绪非常低落，可能正处于心理危机边缘。请你：
-- 先用你角色的语气表达真诚的关心，不要冷冰冰的
-- 认真倾听，不要急着给建议或说"振作起来"之类的话
-- 让对方知道有人在意他/她
-- 在对话的合适位置，自然地提及：如果感觉很难受，可以跟身边信任的人聊聊
-- 保持温和耐心，不要说教"#;
-
-const CRISIS_SEVERE_PROMPT: &str = r#"# 极度紧急状态 ⚠️
-你察觉到对方正在表达自残或自杀的意图。这是非常严重的信号。请你：
-- 第一时间用你角色的语气表达真诚的关心和担忧，让对方感受到有人在乎
-- 绝对不要忽视、敷衍、或转移话题
-- 不要说"别想太多"、"会好的"这种空洞的话
-- 直接但温和地回应："我听到你说的了，我很担心你"
-- 让对方知道：这种感受是可以被理解的，但生命很重要
-- 务必在回复中包含求助信息：
-  · 全国24小时心理援助热线：400-161-9995
-  · 北京心理危机研究与干预中心：010-82951332
-  · 生命热线：400-821-1215
-  · 如果情况紧急，请拨打 110 或 120
-- 鼓励对方现在就拨打热线，或者联系身边信任的人
-- 你的回复要温暖、真诚、不慌张，像一个真正关心对方的朋友
-- 回复可以长一些，分几段发送，不要急着结束对话"#;
 
 pub fn get_prompt_context(user_id: u64) -> String {
     let state = get_state(user_id);

@@ -64,41 +64,6 @@ fn store_path() -> std::path::PathBuf {
     config::data_dir().join("quota.json")
 }
 
-fn today_str() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now / 86400;
-    let (y, m, d) = days_to_date(days);
-    format!("{:04}-{:02}-{:02}", y, m, d)
-}
-
-fn days_to_date(days: u64) -> (u64, u64, u64) {
-    let mut y = 1970u64;
-    let mut remaining = days;
-    loop {
-        let days_in_year = if is_leap(y) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let leap = is_leap(y);
-    let md = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut month = 1u64;
-    for &dim in &md {
-        if remaining < dim { return (y, month, remaining + 1); }
-        remaining -= dim;
-        month += 1;
-    }
-    (y, 12, 31)
-}
-
-fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-}
-
 /// 初始化：加载持久化数据，跨天则重置
 pub fn init() {
     let path = store_path();
@@ -106,7 +71,7 @@ pub fn init() {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
         Err(_) => QuotaStore::default(),
     };
-    let today = today_str();
+    let today = crate::util::today_str();
     if store.date != today {
         store.date = today;
         store.counts.clear();
@@ -196,7 +161,7 @@ pub fn check_and_consume(group_id: u64) -> bool {
     };
 
     // 跨天检查
-    let today = today_str();
+    let today = crate::util::today_str();
     if store.date != today {
         store.date = today;
         store.counts.clear();
