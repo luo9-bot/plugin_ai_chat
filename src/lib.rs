@@ -1352,13 +1352,15 @@ fn process_expired_batches() {
 
 /// 串行处理单个群组的消息批次（由消息队列 worker 调用）
 fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
-    // ── 第一步：危机消息强制回复（关键词检测，快速） ──
+    // ── 第一步：危机消息强制回复 ──
+    // analyze_user_message() 已在 handle_group_msg 中调用，更新了危机状态
+    // 这里读取已更新的状态，无需重复关键词检测
     let mut handled_users: HashSet<u64> = HashSet::new();
 
     for (user_id, messages, timestamps) in user_msgs {
-        let crisis = emotion::detect_crisis(messages);
-        if crisis.is_crisis() {
-            tracing::warn!(user_id = *user_id, group_id, level = ?crisis, "crisis: 群聊危机信号(关键词)，强制回复");
+        let crisis_level = emotion::get_state(*user_id).crisis_level;
+        if crisis_level.is_crisis() {
+            tracing::warn!(user_id = *user_id, group_id, level = ?crisis_level, "crisis: 群聊危机信号(已检测)，强制回复");
             process_message(*user_id, group_id, messages, timestamps);
             handled_users.insert(*user_id);
         }
@@ -1459,7 +1461,7 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
         timing_gate::GateDecision::NoReply => {
             // TODO
         }
-        timing_gate::GateDecision::Wait(seconds) => {
+        timing_gate::GateDecision::Wait(_seconds) => {
             // TODO: 实现延迟重新评估
         }
     }
