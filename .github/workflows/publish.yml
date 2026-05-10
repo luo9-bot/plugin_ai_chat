@@ -1,17 +1,14 @@
-# Luo9 插件发布 workflow
-# 当 Release 创建时，通过 repository_dispatch 通知注册表仓库
-# 前置条件：在组织 Settings > Secrets 中添加 APP_ID 和 APP_PRIVATE_KEY
-name: Publish to Registry
+# Luo9 插件手动发布 workflow
+# 自动发布由 build.yml 的 notify-registry job 处理
+# 此文件仅用于手动触发（workflow_dispatch）
+name: Publish to Registry (Manual)
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    if: "!github.event.release.prerelease"
     steps:
       - name: Checkout 插件仓库
         uses: actions/checkout@v4
@@ -31,7 +28,6 @@ jobs:
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           DESCRIPTION=$(grep '^description' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           SDK_VERSION=$(grep 'luo9_sdk' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          # 从 [package.metadata] 读取 tags
           TAGS=$(sed -n '/\[package\.metadata\]/,/^\[/p' Cargo.toml | grep '^tags' | sed 's/^tags *= *//')
           [ -z "$TAGS" ] && TAGS="[]"
           [ -z "$DESCRIPTION" ] && DESCRIPTION="$CRATE_NAME"
@@ -51,8 +47,7 @@ jobs:
 
       - name: 通知注册表
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          [ -z "$TAG" ] && TAG="v${{ steps.meta.outputs.version }}"
+          TAG="v${{ steps.meta.outputs.version }}"
 
           curl -X POST \
             -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
