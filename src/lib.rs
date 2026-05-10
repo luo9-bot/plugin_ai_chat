@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod admin;
 pub mod ai;
 pub mod anti_injection;
@@ -1592,6 +1593,13 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
     // 组装额外上下文: 记忆 + 人格 + 情绪
     let extra_context = build_context(user_id, group_id, &history);
 
+    // 活动状态注入：bot 正在做某事时，注入活动上下文
+    let extra_context = if let Some(act_ctx) = activity::get_activity_context(user_id) {
+        format!("{}\n\n{}", extra_context, act_ctx)
+    } else {
+        extra_context
+    };
+
     // 缺陷检查: 基于情绪状态和随机概率决定是否触发缺陷
     let defect_instruction = {
         let emo_state = emotion::get_state(user_id);
@@ -1728,6 +1736,9 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
 
                     // 回复效果追踪：记录发送的回复
                     reply_effect::record_reply(group_id, user_id, &final_reply);
+
+                    // 活动状态检测：bot 的回复是否声明了某个活动
+                    activity::check_bot_message(user_id, &final_reply);
                 }
                 Err(e) => {
                     info!(user_id, group_id, error = %e, "replyer: 生成回复失败");
