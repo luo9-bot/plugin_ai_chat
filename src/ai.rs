@@ -423,7 +423,6 @@ pub fn analyze_with_tools(
                 reasoning_content: None,
             },
         ];
-        debug!(tc_value = %tc_value, "analyze_with_tools: request");
         let req = ChatRequest {
             model: cfg.model.clone(),
             messages,
