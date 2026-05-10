@@ -1405,7 +1405,8 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
     let mut handled_users: HashSet<u64> = HashSet::new();
 
     for (user_id, messages, timestamps) in user_msgs {
-        let crisis = emotion::get_state(*user_id).crisis_level;
+        // 只有当前消息实际包含危机关键词时才强制回复，不依赖持久化状态
+        let crisis = emotion::detect_crisis(messages);
         if crisis.is_crisis() {
             tracing::warn!(user_id = *user_id, group_id, level = ?crisis, "crisis: 群聊危机信号，强制回复");
             process_message(*user_id, group_id, messages, timestamps);

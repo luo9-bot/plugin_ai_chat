@@ -130,6 +130,12 @@ pub struct EmotionState {
     /// 上次危机干预时间（用于避免短时间内重复干预）
     #[serde(default)]
     pub last_crisis_intervention: u64,
+    /// 连续未检测到危机关键词的消息计数
+    #[serde(default)]
+    pub crisis_clean_count: u32,
+    /// 最近一次实际检测到危机关键词的时间
+    #[serde(default)]
+    pub last_crisis_detected: u64,
 }
 
 impl Default for EmotionState {
@@ -144,6 +150,8 @@ impl Default for EmotionState {
             history: Vec::new(),
             crisis_level: CrisisLevel::None,
             last_crisis_intervention: 0,
+            crisis_clean_count: 0,
+            last_crisis_detected: 0,
         }
     }
 }
@@ -179,7 +187,13 @@ pub fn user_count() -> usize {
 
 pub fn get_state(user_id: u64) -> EmotionState {
     let states = load_states();
-    states.get(&user_id.to_string()).cloned().unwrap_or_default()
+    let mut state = states.get(&user_id.to_string()).cloned().unwrap_or_default();
+    // 迁移修复：last_crisis_detected == 0 说明是旧数据，crisis_level 不可信
+    if state.crisis_level != CrisisLevel::None && state.last_crisis_detected == 0 {
+        info!(user_id, from = ?state.crisis_level, "crisis migration: resetting stale crisis_level to None");
+        state.crisis_level = CrisisLevel::None;
+    }
+    state
 }
 
 pub fn update_state(user_id: u64, state: EmotionState) {
@@ -203,6 +217,26 @@ pub fn decay(user_id: u64) {
         state.intensity = 0.3;
     }
     state.last_update = now;
+
+    // ── 危机等级时间衰减（长时间无交互时的保底清理） ──
+    if state.crisis_level != CrisisLevel::None {
+        let time_since_detected = now.saturating_sub(state.last_crisis_detected);
+        match state.crisis_level {
+            CrisisLevel::Severe if time_since_detected >= CRISIS_SEVERE_COOLDOWN_SECS * 2 => {
+                info!(user_id, "crisis decay: Severe -> Mild (timeout)");
+                state.crisis_level = CrisisLevel::Mild;
+                state.last_crisis_detected = now;
+                state.crisis_clean_count = 0;
+            }
+            CrisisLevel::Mild if time_since_detected >= CRISIS_MILD_COOLDOWN_SECS * 3 => {
+                info!(user_id, "crisis decay: Mild -> None (timeout)");
+                state.crisis_level = CrisisLevel::None;
+                state.crisis_clean_count = 0;
+            }
+            _ => {}
+        }
+    }
+
     update_state(user_id, state);
 }
 
@@ -438,39 +472,78 @@ pub fn detect_crisis(message: &str) -> CrisisLevel {
     CrisisLevel::None
 }
 
+/// Severe 降级到 Mild：需要 2 小时 + 连续 5 条无危机消息
+const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
+const CRISIS_SEVERE_CLEAN_MESSAGES: u32 = 5;
+/// Mild 降级到 None：需要 1 小时 + 连续 3 条无危机消息
+const CRISIS_MILD_COOLDOWN_SECS: u64 = 3600;
+const CRISIS_MILD_CLEAN_MESSAGES: u32 = 3;
+
 /// 更新危机等级并返回是否需要立即干预
 ///
-/// 干预冷却期：同一次危机干预后 30 分钟内不重复触发（但危机等级始终更新）
+/// 检测到危机关键词时升级；未检测到时检查降级条件（时间 + 连续干净消息双重条件）
 pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
-    if level == CrisisLevel::None {
+    let mut state = get_state(user_id);
+    let now = now_secs();
+
+    if level != CrisisLevel::None {
+        // ── 检测到危机关键词：升级 + 重置降级计数器 ──
+        state.crisis_level = level;
+        state.last_crisis_detected = now;
+        state.crisis_clean_count = 0;
+
+        let should_intervene = match level {
+            CrisisLevel::Severe => {
+                state.last_crisis_intervention = now;
+                true
+            }
+            CrisisLevel::Mild => {
+                if now.saturating_sub(state.last_crisis_intervention) >= 1800 {
+                    state.last_crisis_intervention = now;
+                    true
+                } else {
+                    false
+                }
+            }
+            CrisisLevel::None => false,
+        };
+        update_state(user_id, state);
+        return should_intervene;
+    }
+
+    // ── 未检测到危机关键词：检查是否可以降级 ──
+    if state.crisis_level == CrisisLevel::None {
         return false;
     }
 
-    let mut state = get_state(user_id);
-    let now = now_secs();
-    state.crisis_level = level;
+    state.crisis_clean_count += 1;
+    let time_since_detected = now.saturating_sub(state.last_crisis_detected);
 
-    // 严重危机立即干预，轻度危机在冷却期外干预
-    let should_intervene = match level {
+    match state.crisis_level {
         CrisisLevel::Severe => {
-            // 严重危机：每次都需要干预
-            state.last_crisis_intervention = now;
-            true
-        }
-        CrisisLevel::Mild => {
-            // 轻度危机：30分钟冷却
-            if now.saturating_sub(state.last_crisis_intervention) >= 1800 {
-                state.last_crisis_intervention = now;
-                true
-            } else {
-                false
+            if time_since_detected >= CRISIS_SEVERE_COOLDOWN_SECS
+                && state.crisis_clean_count >= CRISIS_SEVERE_CLEAN_MESSAGES
+            {
+                info!(user_id, "crisis: Severe -> Mild 降级");
+                state.crisis_level = CrisisLevel::Mild;
+                state.crisis_clean_count = 0;
+                state.last_crisis_detected = now;
             }
         }
-        CrisisLevel::None => false,
-    };
+        CrisisLevel::Mild => {
+            if time_since_detected >= CRISIS_MILD_COOLDOWN_SECS
+                && state.crisis_clean_count >= CRISIS_MILD_CLEAN_MESSAGES
+            {
+                info!(user_id, "crisis: Mild -> None 降级");
+                state.crisis_level = CrisisLevel::None;
+                state.crisis_clean_count = 0;
+            }
+        }
+        CrisisLevel::None => {}
+    }
 
     update_state(user_id, state);
-    should_intervene
+    false
 }
 
 /// 获取危机干预的指令上下文，注入到 system prompt
