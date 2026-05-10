@@ -416,7 +416,8 @@ pub fn analyze_with_tools(
     // 精简日志：只显示 tools、tool_choice 和 user content，跳过 system prompt
     let tools_summary: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
     let user_content_preview = if user_content.len() > 500 {
-        format!("{}...[truncated]", &user_content[..500])
+        let end = user_content.floor_char_boundary(500);
+        format!("{}...[truncated]", &user_content[..end])
     } else {
         user_content.to_string()
     };

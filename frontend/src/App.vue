@@ -46,6 +46,7 @@ import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
 import AntiInjectionView from './views/AntiInjectionView.vue'
 import ConversationsView from './views/ConversationsView.vue'
+import QuotaView from './views/QuotaView.vue'
 import ConfigView from './views/ConfigView.vue'
 
 const loggedIn = ref(false)
@@ -57,6 +58,7 @@ const sidebarOpen = ref(false)
 const tabs = [
   { id: 'config', name: '配置', comp: ConfigView },
   { id: 'conversations', name: '对话管理', comp: ConversationsView },
+  { id: 'quota', name: '配额追踪', comp: QuotaView },
   { id: 'self-thoughts', name: '自我记忆', comp: SelfThoughts },
   { id: 'memory', name: '用户记忆', comp: UserMemory },
   { id: 'working-memory', name: '工作记忆', comp: WorkingMemory },

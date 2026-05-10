@@ -369,6 +369,14 @@ fn check_periodic() {
         memory::ai_review_all();
     }
 
+    // 兴趣分衰减 (每天一次)
+    static LAST_INTEREST_DECAY: AtomicU64 = AtomicU64::new(0);
+    if now.saturating_sub(LAST_INTEREST_DECAY.load(Ordering::Relaxed)) >= 86400 {
+        LAST_INTEREST_DECAY.store(now, Ordering::Relaxed);
+        quota::decay_all_interest();
+        debug!("interest: decayed all scores");
+    }
+
     // 工作记忆清理 (每次周期检查都执行，轻量级)
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
@@ -1415,6 +1423,12 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
         return;
     }
 
+    // ── 段兴趣追踪：检测段变化 + 记录所有消息 ──
+    quota::check_and_review_segment(group_id);
+    for (uid, msg, _) in &remaining {
+        quota::log_segment_message(group_id, *uid, msg);
+    }
+
     // 检查配额
     if !quota::has_quota(group_id) {
         debug!(group_id, "quota: 配额耗尽，跳过批量决策");
@@ -1462,27 +1476,35 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
     let full_prompt = format!("{}\n\n{}", BATCH_DECIDE_PROMPT, context_parts.join("\n\n"));
     let content = format!("群聊消息流（选择要回复的 user_id）:\n{}", batch_lines.join("\n"));
 
+    // 配额优先级上下文
+    let at_pattern = if self_qq > 0 { format!("[CQ:at,qq={}]", self_qq) } else { String::new() };
+    let darling_qq = config::get().darling_qq;
+
     // AI 批量决策
     match ai::analyze_with_tools(&full_prompt, &content, &[ai::batch_decide_tool()], None) {
         Ok(parsed) => {
             if let Some(reply_to) = parsed.get("reply_to").and_then(|v| v.as_array()) {
-                // 按配额限制回复数量
                 let mut replied = 0u32;
+                let mut quota_exhausted = false;
                 for item in reply_to {
                     let uid = item.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
                     let reason = item.get("reason").and_then(|v| v.as_str()).unwrap_or("");
                     if uid == 0 { continue; }
 
-                    // 找到该用户的消息和时间戳
-                    if let Some((_, msgs, ts)) = remaining.iter().find(|(u, _, _)| *u == uid) {
-                        if !quota::check_and_consume(group_id) {
-                            debug!(uid, group_id, "batch_decide: 配额耗尽，停止回复");
-                            break;
+                    if let Some((_, msg, ts)) = remaining.iter().find(|(u, _, _)| *u == uid) {
+                        if quota_exhausted || !quota::try_reply(group_id, uid, msg, &at_pattern, darling_qq) {
+                            if !reason.is_empty() {
+                                quota::mark_segment_reason(group_id, uid, reason);
+                            }
+                            quota_exhausted = true;
+                            debug!(uid, group_id, "batch_decide: 配额耗尽，跳过回复");
+                            continue;
                         }
                         if !reason.is_empty() {
                             info!(uid, group_id, reason, "batch_decide: 回复用户");
                         }
-                        process_message(uid, group_id, msgs, ts);
+                        quota::mark_segment_replied(group_id, uid, reason);
+                        process_message(uid, group_id, msg, ts);
                         replied += 1;
                     }
                 }

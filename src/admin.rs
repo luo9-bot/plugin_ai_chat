@@ -1264,6 +1264,43 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"anti-injection") => handle_anti_injection(&method, &api_segs[1..], &body),
         Some(&"conversations") => handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handle_config(&method, &body),
+        Some(&"quota") => handle_quota(&method, &api_segs[1..]),
+        _ => err(404, "not found"),
+    }
+}
+
+// ── 配额追踪 ────────────────────────────────────────────────────
+
+fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+    if *method != Method::Get {
+        return err(405, "method not allowed");
+    }
+    match segs.first() {
+        Some(&"interest") => {
+            let interest = crate::quota::get_all_interest();
+            let map: serde_json::Map<String, serde_json::Value> = interest.iter()
+                .map(|(uid, i)| (uid.to_string(), serde_json::json!({
+                    "score": i.score,
+                    "marked_count": i.marked_count,
+                    "last_reviewed": i.last_reviewed,
+                    "last_message": i.last_message,
+                })))
+                .collect();
+            ok(serde_json::json!({"users": map}))
+        }
+        Some(&"segments") => {
+            if let Some(gid_str) = segs.get(1) {
+                let group_id: u64 = match gid_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => return err(400, "invalid group_id"),
+                };
+                let logs = crate::quota::get_segment_logs(group_id, 20);
+                ok(serde_json::json!({"group_id": group_id, "segments": logs}))
+            } else {
+                let groups = crate::quota::get_groups_with_logs();
+                ok(serde_json::json!({"groups": groups}))
+            }
+        }
         _ => err(404, "not found"),
     }
 }

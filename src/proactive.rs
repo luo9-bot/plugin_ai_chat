@@ -414,10 +414,10 @@ fn fallback_mood_message(user_id: u64, emo: &emotion::EmotionState) -> String {
     }
 }
 
-/// 从自我记忆文本中随机挑一条想法
+/// 从自我记忆文本中随机挑一条想法（排除 [反思] 类，那是 bot 内心活动不应暴露）
 fn pick_random_thought(context: &str, rand: f64) -> String {
     let lines: Vec<&str> = context.lines()
-        .filter(|l| l.starts_with("- ") && l.len() > 4)
+        .filter(|l| l.starts_with("- ") && l.len() > 4 && !l.contains("[反思]"))
         .collect();
     if lines.is_empty() {
         return String::new();

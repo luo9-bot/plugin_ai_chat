@@ -6,6 +6,32 @@ use tracing::debug;
 use crate::config;
 use crate::util::{now_secs, current_hour_cst};
 
+// ── 段日志 & 用户兴趣 ────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SegmentMessage {
+    pub user_id: u64,
+    pub message: String,
+    pub replied: bool,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct UserInterest {
+    pub score: f32,
+    pub marked_count: u32,
+    pub last_reviewed: u64,
+    pub last_message: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SegmentLogEntry {
+    pub segment_start: u64,
+    pub messages: Vec<SegmentMessage>,
+    pub reviewed: bool,
+}
+
 // ── 持久化结构 ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -22,6 +48,12 @@ struct QuotaStore {
     date: String,
     /// group_id -> 各段计数
     counts: HashMap<u64, Vec<SegmentCount>>,
+    #[serde(default)]
+    segment_log: HashMap<u64, Vec<SegmentLogEntry>>,
+    #[serde(default)]
+    user_interest: HashMap<u64, UserInterest>,
+    #[serde(default)]
+    last_reviewed_segment: HashMap<u64, u64>,
 }
 
 // ── 运行时状态 ──────────────────────────────────────────────
@@ -78,7 +110,15 @@ pub fn init() {
     if store.date != today {
         store.date = today;
         store.counts.clear();
+        store.segment_log.clear();
+        store.last_reviewed_segment.clear();
+        // user_interest 跨天保留
         save_store(&store);
+    }
+    // 裁剪 48 小时前的段日志
+    let cutoff = now_secs().saturating_sub(48 * 3600);
+    for logs in store.segment_log.values_mut() {
+        logs.retain(|e| e.segment_start >= cutoff);
     }
     let count: usize = store.counts.values().map(|v| v.len()).sum();
     debug!(groups = store.counts.len(), segments = count, "quota: loaded");
@@ -184,7 +224,10 @@ pub fn check_and_consume(group_id: u64) -> bool {
 
 /// 计算消息优先级分 (0.0~1.0)
 ///
-/// 极端保守：只有 darling 在 bot 刚发过消息的群里 @bot 才能突破 0.55
+/// 设计：
+/// - darling + bot 刚回复(2min内) → 0.45，无需 @即可延续对话
+/// - 2 分钟后窗口关闭 → 0.25，需要 @bot 才能突破
+/// - 普通用户 @bot + bot 活跃 → 0.35，仍无法突破（阈值 0.45）
 pub fn calculate_priority(
     user_id: u64,
     group_id: u64,
@@ -192,40 +235,47 @@ pub fn calculate_priority(
     at_pattern: &str,
     darling_qq: u64,
 ) -> f32 {
-    let mut score = 0.0f32;
+    let is_darling = darling_qq > 0 && user_id == darling_qq;
+    let is_at_bot = !at_pattern.is_empty() && message.contains(at_pattern);
 
-    // 基础分
-    if !at_pattern.is_empty() && message.contains(at_pattern) {
-        score += 0.4;   // @bot
-    } else {
-        // 检查是否在回复 bot 的消息 (简化：消息中包含 bot 相关内容)
-        // 由 decide_reply 的 AI 来判断更准确，这里只做粗筛
-        score += 0.0;   // 其他消息基础分 0
-    }
-
-    // 修正：bot 最近在群里发过消息（对话进行中）
+    // bot 最近在群里发过消息（2 分钟内）= 对话窗口
     let bot_recently_active = crate::read_shared_state(|s| {
-        s.get_recent_bot_messages(group_id, 180, 1) // 3 分钟内
+        s.get_recent_bot_messages(group_id, 120, 1)
             .first()
             .is_some()
     });
+
+    let mut score = 0.0f32;
+
     if bot_recently_active {
-        score += 0.1;
+        if is_darling {
+            // darling 在活跃对话中：无需 @ 也能延续
+            score += 0.45;
+            if is_at_bot { score += 0.10; }
+        } else if is_at_bot {
+            // 普通用户 @bot：有基础分但不足以突破
+            score += 0.20;
+        }
+    } else {
+        // 对话窗口已关闭：只有 @bot 才有分
+        if is_at_bot {
+            score += 0.40;
+            if is_darling { score += 0.05; }
+        }
     }
 
-    // 修正：用户是 darling
-    if darling_qq > 0 && user_id == darling_qq {
-        score += 0.05;
-    }
+    // 兴趣加成 (最多 +0.30)
+    let interest = get_interest_score(user_id);
+    score += interest * 0.30;
 
-    score.min(0.65) // 硬上限
+    score.min(1.00)
 }
 
-/// 综合判断：优先级 + 配额。返回 true 表示应该尝试回复。
+/// 综合判断：优先级 + 配额，成功时自动消费配额。返回 true 表示允许回复。
 ///
-/// - 配额充足 → true
-/// - 配额耗尽 + 优先级 >= 0.55 → true（突破配额）
-/// - 配额耗尽 + 优先级 < 0.55 → false
+/// - 配额充足 → 消费配额，返回 true
+/// - 配额耗尽 + 优先级 >= 0.45 → 突破配额（不消费），返回 true
+/// - 配额耗尽 + 优先级 < 0.45 → 返回 false
 pub fn try_reply(group_id: u64, user_id: u64, message: &str, at_pattern: &str, darling_qq: u64) -> bool {
     let cfg = &config::get().quota;
     if !cfg.enabled {
@@ -234,12 +284,12 @@ pub fn try_reply(group_id: u64, user_id: u64, message: &str, at_pattern: &str, d
 
     // 先检查配额
     if has_quota(group_id) {
-        return true;
+        return check_and_consume(group_id);
     }
 
     // 配额耗尽，检查优先级
     let priority = calculate_priority(user_id, group_id, message, at_pattern, darling_qq);
-    let threshold = 0.55f32;
+    let threshold = 0.45f32;
     if priority >= threshold {
         debug!(user_id, group_id, priority, "quota: 配额耗尽但优先级突破");
         return true;
@@ -262,4 +312,183 @@ fn get_segment_count(store: &QuotaStore, group_id: u64, seg_start: u64) -> u32 {
         .and_then(|counts| counts.iter().find(|s| s.segment_start == seg_start))
         .map(|s| s.count)
         .unwrap_or(0)
+}
+
+// ── 段日志记录 ────────────────────────────────────────────────
+
+pub fn log_segment_message(group_id: u64, user_id: u64, message: &str) {
+    let seg_start = current_segment_start();
+    let mut store_guard = STORE.lock().unwrap();
+    let store = match store_guard.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    let logs = store.segment_log.entry(group_id).or_default();
+    match logs.iter_mut().find(|e| e.segment_start == seg_start) {
+        Some(entry) => {
+            entry.messages.push(SegmentMessage {
+                user_id,
+                message: message.to_string(),
+                replied: false,
+                reason: String::new(),
+                timestamp: now_secs(),
+            });
+        }
+        None => {
+            logs.push(SegmentLogEntry {
+                segment_start: seg_start,
+                messages: vec![SegmentMessage {
+                    user_id,
+                    message: message.to_string(),
+                    replied: false,
+                    reason: String::new(),
+                    timestamp: now_secs(),
+                }],
+                reviewed: false,
+            });
+        }
+    }
+    save_store(store);
+}
+
+pub fn mark_segment_replied(group_id: u64, user_id: u64, reason: &str) {
+    let seg_start = current_segment_start();
+    let mut store_guard = STORE.lock().unwrap();
+    if let Some(store) = store_guard.as_mut() {
+        if let Some(logs) = store.segment_log.get_mut(&group_id) {
+            if let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start) {
+                if let Some(msg) = entry.messages.iter_mut().rev()
+                    .find(|m| m.user_id == user_id && !m.replied)
+                {
+                    msg.replied = true;
+                    msg.reason = reason.to_string();
+                }
+            }
+        }
+        save_store(store);
+    }
+}
+
+pub fn mark_segment_reason(group_id: u64, user_id: u64, reason: &str) {
+    let seg_start = current_segment_start();
+    let mut store_guard = STORE.lock().unwrap();
+    if let Some(store) = store_guard.as_mut() {
+        if let Some(logs) = store.segment_log.get_mut(&group_id) {
+            if let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start) {
+                if let Some(msg) = entry.messages.iter_mut().rev()
+                    .find(|m| m.user_id == user_id && m.reason.is_empty())
+                {
+                    msg.reason = reason.to_string();
+                }
+            }
+        }
+        save_store(store);
+    }
+}
+
+// ── 段回顾 & 兴趣系统 ─────────────────────────────────────────
+
+pub fn check_and_review_segment(group_id: u64) {
+    let current_seg = current_segment_start();
+    let last_reviewed = {
+        let store_guard = STORE.lock().unwrap();
+        store_guard.as_ref()
+            .and_then(|s| s.last_reviewed_segment.get(&group_id).copied())
+            .unwrap_or(0)
+    };
+
+    if current_seg != last_reviewed && last_reviewed > 0 {
+        review_previous_segment(group_id);
+    }
+
+    let mut store_guard = STORE.lock().unwrap();
+    if let Some(store) = store_guard.as_mut() {
+        store.last_reviewed_segment.insert(group_id, current_seg);
+        save_store(store);
+    }
+}
+
+fn review_previous_segment(group_id: u64) {
+    let mut store_guard = STORE.lock().unwrap();
+    let store = match store_guard.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let current_seg = current_segment_start();
+    let logs = store.segment_log.entry(group_id).or_default();
+
+    let prev_entry = logs.iter_mut()
+        .filter(|e| e.segment_start < current_seg && !e.reviewed)
+        .max_by_key(|e| e.segment_start);
+
+    let entry = match prev_entry {
+        Some(e) => e,
+        None => return,
+    };
+
+    entry.reviewed = true;
+
+    let interesting_user = entry.messages.iter()
+        .find(|m| !m.replied && !m.reason.is_empty())
+        .map(|m| (m.user_id, m.timestamp));
+
+    if let Some((uid, msg_ts)) = interesting_user {
+        let interest = store.user_interest.entry(uid).or_default();
+        interest.score = (interest.score + 0.15_f32).min(1.0_f32);
+        interest.marked_count += 1;
+        interest.last_reviewed = now_secs();
+        interest.last_message = msg_ts;
+        debug!(user_id = uid, score = interest.score, "interest: 用户被标记为感兴趣");
+    }
+    save_store(store);
+}
+
+pub fn decay_all_interest() {
+    let mut store_guard = STORE.lock().unwrap();
+    if let Some(store) = store_guard.as_mut() {
+        for interest in store.user_interest.values_mut() {
+            interest.score *= 0.5;
+            if interest.score < 0.01 {
+                interest.score = 0.0;
+            }
+        }
+        save_store(store);
+    }
+}
+
+pub fn get_interest_score(user_id: u64) -> f32 {
+    let store_guard = STORE.lock().unwrap();
+    store_guard.as_ref()
+        .and_then(|s| s.user_interest.get(&user_id))
+        .map(|i| i.score)
+        .unwrap_or(0.0)
+}
+
+// ── Admin API ──────────────────────────────────────────────────
+
+pub fn get_all_interest() -> HashMap<u64, UserInterest> {
+    let store_guard = STORE.lock().unwrap();
+    store_guard.as_ref()
+        .map(|s| s.user_interest.clone())
+        .unwrap_or_default()
+}
+
+pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
+    let store_guard = STORE.lock().unwrap();
+    store_guard.as_ref()
+        .and_then(|s| s.segment_log.get(&group_id))
+        .map(|logs| {
+            let mut sorted = logs.clone();
+            sorted.sort_by(|a, b| b.segment_start.cmp(&a.segment_start));
+            sorted.into_iter().take(limit).collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn get_groups_with_logs() -> Vec<u64> {
+    let store_guard = STORE.lock().unwrap();
+    store_guard.as_ref()
+        .map(|s| s.segment_log.keys().copied().collect())
+        .unwrap_or_default()
 }
