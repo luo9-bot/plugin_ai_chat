@@ -989,12 +989,45 @@ fn value_to_yaml_inline(val: &serde_json::Value) -> String {
             format!("[{}]", items.join(", "))
         }
         serde_json::Value::Object(map) => {
-            let pairs: Vec<String> = map.iter()
-                .map(|(k, v)| format!("{}: {}", k, value_to_yaml_inline(v)))
-                .collect();
-            format!("{{{}}}", pairs.join(", "))
+            // 按预定义顺序输出字段，未定义的排在最后按字母序
+            let ordered = object_to_ordered_pairs(map);
+            format!("{{{}}}", ordered.join(", "))
         }
     }
+}
+
+/// 已知结构的字段顺序（不在列表中的键按字母序追加到末尾）
+fn field_order_hint(obj: &serde_json::Map<String, serde_json::Value>) -> Option<&'static [&'static str]> {
+    // 配额时段
+    if obj.contains_key("start_hour") && obj.contains_key("end_hour") && obj.contains_key("max_replies") {
+        return Some(&["start_hour", "end_hour", "max_replies"]);
+    }
+    None
+}
+
+fn object_to_ordered_pairs(map: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    let hint = field_order_hint(map);
+    let mut pairs = Vec::with_capacity(map.len());
+    if let Some(order) = hint {
+        // 按预定义顺序输出
+        for &key in order {
+            if let Some(val) = map.get(key) {
+                pairs.push(format!("{}: {}", key, value_to_yaml_inline(val)));
+            }
+        }
+        // 追加不在预定义顺序中的键（字母序）
+        for (k, v) in map {
+            if !order.contains(&k.as_str()) {
+                pairs.push(format!("{}: {}", k, value_to_yaml_inline(v)));
+            }
+        }
+    } else {
+        // 无特殊顺序要求，按字母序
+        for (k, v) in map {
+            pairs.push(format!("{}: {}", k, value_to_yaml_inline(v)));
+        }
+    }
+    pairs
 }
 
 /// 提取行尾注释（如 "value  # 注释" -> "# 注释"）

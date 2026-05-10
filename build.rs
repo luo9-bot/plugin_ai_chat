@@ -59,7 +59,8 @@ fn main() {
             .status();
         match status {
             Ok(s) if s.success() => {
-                // 更新编译时间戳
+                // 删除后重建以确保修改时间更新（Windows 上写入相同内容不会更新 mtime）
+                let _ = std::fs::remove_file(stamp);
                 std::fs::write(stamp, "").ok();
                 println!("cargo:warning=Frontend build succeeded");
             }
