@@ -905,15 +905,36 @@ pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, S
             let new_value = find_nested_value(new_obj, &indent_stack, key);
 
             if let Some(val) = new_value {
-                let new_yaml = value_to_yaml_inline(val);
-                let comment = extract_inline_comment(old_rest);
-                if comment.is_empty() {
-                    output.push_str(&format!("{}{}: {}\n", indent_str, key, new_yaml));
+                // 检查是否是数组（需要输出为列表格式）
+                if let serde_json::Value::Array(arr) = val {
+                    let comment = extract_inline_comment(old_rest);
+                    if comment.is_empty() {
+                        output.push_str(&format!("{}{}:\n", indent_str, key));
+                    } else {
+                        output.push_str(&format!("{}{}: {}\n", indent_str, key, comment));
+                    }
+                    // 输出数组项为列表格式
+                    let item_indent = format!("{}  ", indent_str);
+                    for item in arr {
+                        let item_yaml = value_to_yaml_inline(item);
+                        output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                    }
+                    // 标记跳过后续的模板列表项
+                    skip_list_items = true;
+                    if indent_stack.is_empty() {
+                        handled_keys.insert(key);
+                    }
                 } else {
-                    output.push_str(&format!("{}{}: {} {}\n", indent_str, key, new_yaml, comment));
-                }
-                if indent_stack.is_empty() {
-                    handled_keys.insert(key);
+                    let new_yaml = value_to_yaml_inline(val);
+                    let comment = extract_inline_comment(old_rest);
+                    if comment.is_empty() {
+                        output.push_str(&format!("{}{}: {}\n", indent_str, key, new_yaml));
+                    } else {
+                        output.push_str(&format!("{}{}: {} {}\n", indent_str, key, new_yaml, comment));
+                    }
+                    if indent_stack.is_empty() {
+                        handled_keys.insert(key);
+                    }
                 }
             } else {
                 output.push_str(line);

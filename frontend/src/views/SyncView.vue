@@ -82,14 +82,14 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 h3 { font-size: 14px; margin: 20px 0 8px; color: var(--text-dim); font-weight: 500; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: #fff; border: 2px solid var(--accent-light); border-radius: var(--radius); padding: 16px; text-align: center; box-shadow: var(--shadow); }
+.stat-card { background: var(--surface); border: 2px solid var(--accent-light); border-radius: var(--radius); padding: 16px; text-align: center; box-shadow: var(--shadow); }
 .stat-card .label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; }
 .stat-card .value { font-size: 24px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .sync-result { padding: 12px 20px; border-radius: var(--radius); margin-bottom: 16px; font-size: 13px; }
 .sync-result.ok { background: var(--success-light); color: var(--success); }
 .sync-result.err { background: var(--danger-light); color: var(--danger); }
 .deleted-section { margin-top: 24px; padding: 20px; background: var(--surface2); border: 2px solid var(--border); border-radius: var(--radius); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
 th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 tr:hover { background: var(--surface2); }
@@ -103,7 +103,7 @@ tr:hover { background: var(--surface2); }
 .btn-primary { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-success { background: var(--success); color: #fff; }
-.btn-outline { background: #fff; border: 1.5px solid var(--border); color: var(--accent); }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
 .btn-outline:hover { background: var(--accent-light); }
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 </style>

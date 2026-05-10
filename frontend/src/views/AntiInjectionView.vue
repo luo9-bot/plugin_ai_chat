@@ -289,7 +289,7 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text); }
 
 .section {
-  background: #fff;
+  background: var(--surface);
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 16px;
@@ -323,7 +323,7 @@ h3 { font-size: 14px; margin-bottom: 12px; font-weight: 600; color: var(--text);
 }
 
 .toolbar input {
-  background: #fff;
+  background: var(--surface);
   border: 1.5px solid var(--border);
   color: var(--text);
   padding: 8px 12px;

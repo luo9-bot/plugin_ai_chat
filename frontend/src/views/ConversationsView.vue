@@ -128,14 +128,14 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 
 .stats-row { display: flex; gap: 12px; margin-bottom: 16px; }
 .stat-card {
-  flex: 1; background: #fff; border-radius: var(--radius); padding: 16px 20px;
+  flex: 1; background: var(--surface); border-radius: var(--radius); padding: 16px 20px;
   box-shadow: var(--shadow); text-align: center;
 }
 .stat-num { font-size: 28px; font-weight: 700; color: var(--accent); }
 .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 
 .section {
-  background: #fff; border-radius: var(--radius); padding: 16px;
+  background: var(--surface); border-radius: var(--radius); padding: 16px;
   margin-bottom: 12px; box-shadow: var(--shadow);
 }
 

@@ -98,12 +98,12 @@ onMounted(load)
 .count { color: var(--text-dim); font-size: 14px; }
 h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-.search-input { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; flex: 1; min-width: 150px; }
+.search-input { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; flex: 1; min-width: 150px; }
 .search-input:focus { border-color: var(--accent); }
-.date-input { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; width: 130px; }
+.date-input { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; width: 130px; }
 .date-input:focus { border-color: var(--accent); }
 .sep { color: var(--text-dim); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 th { background: #f9fafb; color: var(--text-dim); font-weight: 600; font-size: 12px; }
 tr:hover { background: #f9fafb; }
@@ -118,14 +118,14 @@ tr.selected { background: var(--accent-light); }
 .btn:hover { opacity: 0.9; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-outline { background: #fff; border: 1.5px solid var(--border); color: var(--accent); }
-.btn-export { background: #fff; color: var(--accent); border: 1.5px solid var(--border); text-decoration: none; }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
+.btn-export { background: var(--surface); color: var(--accent); border: 1.5px solid var(--border); text-decoration: none; }
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.15); }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.15); }
 .modal h3 { margin-top: 0; font-size: 16px; color: var(--text); }
 .modal label { display: block; margin: 14px 0 4px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
-.modal input, .modal select, .modal textarea { width: 100%; background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-size: 13px; font-family: inherit; outline: none; transition: border .2s; }
+.modal input, .modal select, .modal textarea { width: 100%; background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-size: 13px; font-family: inherit; outline: none; transition: border .2s; }
 .modal textarea { min-height: 80px; resize: vertical; }
 .modal input:focus, .modal select:focus, .modal textarea:focus { border-color: var(--accent); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }

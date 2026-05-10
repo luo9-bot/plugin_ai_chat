@@ -64,7 +64,7 @@ onMounted(load)
 h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 h3 { font-size: 14px; margin: 20px 0 8px; color: var(--text-dim); }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px; }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
 th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 tr:hover { background: var(--surface2); }
@@ -75,10 +75,10 @@ tr:hover { background: var(--surface2); }
 .btn { border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 4px; }
 .btn-primary { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-outline { background: #fff; border: 1.5px solid var(--border); color: var(--accent); }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(74,53,72,.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #fff; border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 500px; max-width: 90vw; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
+.modal { background: var(--surface); border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 500px; max-width: 90vw; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
 .modal h3 { margin-top: 0; font-size: 16px; color: var(--accent); }
 .modal label { display: block; margin: 14px 0 4px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
 .modal input, .modal select, .modal textarea { width: 100%; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-size: 13px; font-family: inherit; outline: none; }

@@ -125,7 +125,7 @@ h4 { font-size: 13px; margin: 16px 0 8px; font-weight: 600; color: var(--text-di
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
 
 .section {
-  background: #fff; border-radius: var(--radius); padding: 16px;
+  background: var(--surface); border-radius: var(--radius); padding: 16px;
   box-shadow: var(--shadow);
 }
 
@@ -169,12 +169,12 @@ textarea:focus { border-color: var(--accent); }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-outline { background: #fff; border: 1.5px solid var(--border); color: var(--accent); }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
 .btn-outline:hover { background: var(--accent-light); }
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(74,53,72,.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #fff; border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 400px; max-width: 90vw; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
+.modal { background: var(--surface); border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 400px; max-width: 90vw; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
 .modal h3 { margin-top: 0; font-size: 16px; color: var(--accent); }
 .modal label { display: block; margin: 14px 0 4px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
 .modal input { width: 100%; background: var(--accent-light); border: 1.5px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-size: 13px; outline: none; }

@@ -37,7 +37,7 @@ onMounted(load)
 <style scoped>
 h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 h3 { font-size: 14px; margin: 20px 0 8px; color: var(--text-dim); font-weight: 500; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
 th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }

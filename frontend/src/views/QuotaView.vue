@@ -107,8 +107,8 @@ onMounted(() => { loadGroups(); loadInterest() })
 h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 h3 { font-size: 14px; margin: 24px 0 8px; color: var(--text-dim); }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
-.toolbar select { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px; }
+.toolbar select { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px; }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
 th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 tr:hover { background: var(--surface2); }
@@ -125,6 +125,6 @@ tr:hover { background: var(--surface2); }
 .tag-replied { background: var(--success); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
 .tag-skipped { background: var(--border); color: var(--text-dim); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
 .bar-wrap { position: relative; width: 100px; height: 20px; background: var(--surface); border-radius: 10px; overflow: hidden; }
-.bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 10px; transition: width 0.3s; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, #ec4899, #8b5cf6); border-radius: 10px; transition: width 0.3s; }
 .bar-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--text); }
 </style>

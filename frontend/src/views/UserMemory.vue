@@ -124,14 +124,14 @@ onMounted(load)
 <style scoped>
 h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-.search-input { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; flex: 1; max-width: 260px; }
+.search-input { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; flex: 1; max-width: 260px; }
 .search-input:focus { border-color: var(--accent); }
-.date-input { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
+.date-input { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
 .date-input:focus { border-color: var(--accent); }
 .sep { color: var(--text-dim); }
-.toolbar select { background: #fff; border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
+.toolbar select { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
 .toolbar select:focus { border-color: var(--accent); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
 th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
 tr:hover { background: var(--surface2); }
@@ -149,13 +149,13 @@ tr.selected { background: var(--accent-light); }
 .btn:hover { transform: translateY(-1px); }
 .btn-primary { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-outline { background: #fff; border: 1.5px solid var(--border); color: var(--accent); }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
 .btn-outline:hover { background: var(--accent-light); }
 .btn-export { background: var(--blue-light); color: var(--blue); border: 1.5px solid var(--blue); text-decoration: none; }
 .btn-export:hover { background: var(--blue); color: #fff; }
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(74,53,72,.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #fff; border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
+.modal { background: var(--surface); border: 2px solid var(--border); border-radius: 16px; padding: 28px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
 .modal h3 { margin-top: 0; font-size: 16px; color: var(--accent); }
 .modal label { display: block; margin: 14px 0 4px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
 .modal input, .modal select, .modal textarea { width: 100%; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: var(--radius); font-size: 13px; font-family: inherit; outline: none; transition: border .2s; }

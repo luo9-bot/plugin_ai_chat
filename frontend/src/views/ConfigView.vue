@@ -17,7 +17,12 @@
       <div class="field-grid">
         <div class="field">
           <label title="OpenAI 兼容接口的 API Key，支持 DeepSeek / OpenAI / 通义千问 / 硅基流动等">API Key</label>
-          <input v-model="cfg.api_key" type="password" placeholder="sk-..." />
+          <div class="password-field">
+            <input v-model="cfg.api_key" :type="showApiKey ? 'text' : 'password'" placeholder="sk-..." autocomplete="new-password" />
+            <button class="btn-toggle-vis" @click="showApiKey = !showApiKey" :title="showApiKey ? '隐藏' : '显示'">
+              {{ showApiKey ? '🙈' : '👀' }}
+            </button>
+          </div>
           <span class="hint">已脱敏，保存时保留原值</span>
         </div>
         <div class="field">
@@ -161,8 +166,8 @@ const DEFAULTS = {
   mental_state: { concerns_max: 5, concern_decay_rate: 0.1, deliberations_max: 8, deliberation_decay_rate: 0.05, defect_base_probability: 0.1 },
   style: { max_reply_chars: 30, omit_subject: true, punctuation_style: 'casual' },
   quota: { enabled: true, segment_minutes: 5, segments: [
-    {start_hour:0,end_hour:6,max_replies:0},{start_hour:6,end_hour:8,max_replies:1},
-    {start_hour:8,end_hour:10,max_replies:2},{start_hour:10,end_hour:14,max_replies:3},
+    {start_hour:0,end_hour:6,max_replies:0},{start_hour:6,end_hour:8,max_replies:2},
+    {start_hour:8,end_hour:10,max_replies:3},{start_hour:10,end_hour:14,max_replies:5},
     {start_hour:14,end_hour:16,max_replies:1},{start_hour:16,end_hour:20,max_replies:2},
     {start_hour:20,end_hour:24,max_replies:1}
   ]},
@@ -292,6 +297,7 @@ const saving = ref(false)
 const saveMsg = ref('')
 const saveOk = ref(true)
 const expanded = ref({})
+const showApiKey = ref(false)
 
 function toggle(key) { expanded.value[key] = !expanded.value[key] }
 
@@ -385,9 +391,10 @@ onMounted(load)
 .section {
   background: #fff; border-radius: var(--radius); padding: 16px;
   margin-bottom: 10px; box-shadow: var(--shadow);
+  border: 1.5px solid #fce7f3;
 }
 
-.section.highlight { border-left: 3px solid var(--accent); }
+.section.highlight { border-left: 4px solid var(--accent); }
 
 h3 { font-size: 14px; margin: 0 0 12px; font-weight: 600; color: var(--text); }
 h3.collapsible { cursor: pointer; user-select: none; margin: 0; padding: 2px 0; transition: color .15s; }
@@ -425,14 +432,22 @@ h3.collapsible:hover { color: var(--accent); }
 .field input[type="number"],
 .field select,
 .field textarea {
-  background: #fff; border: 1.5px solid var(--border); color: var(--text);
+  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text);
   padding: 8px 10px; border-radius: var(--radius); font-size: 13px;
-  outline: none; transition: border .15s; width: 100%;
+  outline: none; transition: all .15s; width: 100%;
 }
 
-.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(236,72,153,.15); }
 .field input[type="range"] { accent-color: var(--accent); }
 .field textarea { font-family: 'SFMono-Regular', Consolas, monospace; resize: vertical; font-size: 12px; }
+.password-field { display: flex; gap: 4px; }
+.password-field input { flex: 1; }
+.btn-toggle-vis {
+  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text-dim);
+  padding: 8px; border-radius: var(--radius); cursor: pointer; font-size: 14px;
+  transition: all .15s; display: flex; align-items: center; justify-content: center;
+}
+.btn-toggle-vis:hover { border-color: var(--accent); color: var(--accent); background: #fce7f3; }
 .hint { font-size: 11px; color: var(--text-dim); }
 
 .btn {
@@ -440,9 +455,10 @@ h3.collapsible:hover { color: var(--accent); }
   cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+.btn-primary { background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%); color: #fff; box-shadow: 0 4px 12px rgba(236,72,153,.3); }
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(236,72,153,.4); }
+.btn-outline { background: transparent; border: 1.5px solid #f9a8d4; color: var(--accent); }
+.btn-outline:hover { background: #fce7f3; }
 
 /* Mobile */
 @media (max-width: 768px) {
@@ -457,11 +473,11 @@ h3.collapsible:hover { color: var(--accent); }
 .quota-row { display: grid; grid-template-columns: 80px 80px 100px 32px; gap: 8px; align-items: center; }
 .quota-row.quota-header { font-size: 12px; font-weight: 500; color: var(--text-dim); }
 .quota-row input {
-  background: #fff; border: 1.5px solid var(--border); color: var(--text);
+  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text);
   padding: 6px 8px; border-radius: var(--radius); font-size: 13px;
-  outline: none; transition: border .15s; width: 100%;
+  outline: none; transition: all .15s; width: 100%;
 }
-.quota-row input:focus { border-color: var(--accent); }
+.quota-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(236,72,153,.15); }
 .btn-icon {
   background: none; border: none; color: var(--text-dim); cursor: pointer;
   font-size: 14px; padding: 4px; border-radius: 4px; transition: all .15s;
