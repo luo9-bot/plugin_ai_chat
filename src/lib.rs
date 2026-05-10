@@ -1630,32 +1630,49 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
         extra_context
     };
 
-    // ── Planner 多轮推理 ──
-    info!(user_id, group_id, ai_message = %ai_message, penalty = penalty_multiplier, "planner: starting");
-    let planner_ctx = planner::PlannerContext {
-        group_id,
-        user_id,
-        user_message: ai_message.clone(),
-        identity: config::prompt().to_string(),
-        extra_context: extra_context.clone(),
-        history: history.clone(),
+    // ── 回复生成 ──
+    // 私聊：直接 ai::chat()，跳过 Planner 和 Replyer（保持 AI 自然输出）
+    // 群聊：Planner 多轮推理 → Replyer 生成回复
+    let result: Result<(String, String), String> = if group_id == 0 {
+        // 私聊：直接调用 ai::chat，不经过 Replyer 的额外 prompt 处理
+        debug!(user_id, "private chat: direct ai::chat");
+        ai::chat(config::prompt(), &extra_context, &history, &ai_message)
+    } else {
+        // 群聊：Planner → Replyer
+        info!(user_id, group_id, ai_message = %ai_message, penalty = penalty_multiplier, "planner: starting");
+        let planner_ctx = planner::PlannerContext {
+            group_id,
+            user_id,
+            user_message: ai_message.clone(),
+            identity: config::prompt().to_string(),
+            extra_context: extra_context.clone(),
+            history: history.clone(),
+        };
+
+        let reference_info = match planner::run_planner(&planner_ctx) {
+            planner::PlannerAction::Reply { reference_info, .. } => reference_info,
+            planner::PlannerAction::Silent => {
+                debug!(user_id, group_id, "planner: silent -> 不回复");
+                return;
+            }
+        };
+
+        let reply_ctx = replyer::ReplyContext {
+            user_id,
+            group_id,
+            user_message: ai_message.clone(),
+            identity: config::prompt().to_string(),
+            extra_context: extra_context.clone(),
+            history: history.clone(),
+            reference_info,
+        };
+        replyer::generate_reply(&reply_ctx).map(|r| (r, String::new()))
     };
 
-    match planner::run_planner(&planner_ctx) {
-        planner::PlannerAction::Reply { reference_info, .. } => {
-            // ── Replyer 生成回复 ──
-            let reply_ctx = replyer::ReplyContext {
-                user_id,
-                group_id,
-                user_message: ai_message.clone(),
-                identity: config::prompt().to_string(),
-                extra_context: extra_context.clone(),
-                history: history.clone(),
-                reference_info,
-            };
-
-            match replyer::generate_reply(&reply_ctx) {
-                Ok(reply) => {
+    // ── 处理回复结果 ──
+    {
+        match result {
+            Ok((reply, _)) => {
                     // 从回复中解析情绪标签 (AI 自报告)
                     let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
                     let cleaned_reply = clean_reply(&cleaned_reply);
@@ -1709,10 +1726,6 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
                     sender::send_msg(group_id, user_id, "睡着了...");
                 }
             }
-        }
-        planner::PlannerAction::Silent => {
-            debug!(user_id, group_id, "planner: silent -> 不回复");
-        }
     }
 }
 
