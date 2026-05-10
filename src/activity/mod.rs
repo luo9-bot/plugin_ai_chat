@@ -65,6 +65,9 @@ pub struct ActivityState {
 /// 活动状态存储 (user_id -> ActivityState)
 static ACTIVITY_STATE: Mutex<Option<HashMap<u64, ActivityState>>> = Mutex::new(None);
 
+/// darling_qq 的活动持续时间缩减比例（darling 发消息时活动更快结束）
+const DARLING_ACTIVITY_DURATION_RATIO: f64 = 0.3;
+
 /// 活动关键词映射 + 每日计划任务匹配
 fn detect_activity(message: &str) -> Option<ActivityType> {
     // 先检查是否匹配每日计划任务
@@ -144,17 +147,32 @@ pub fn check_bot_message(user_id: u64, message: &str) {
 }
 
 /// 检查用户是否有活跃的活动状态
+///
+/// darling_qq 的活动持续时间会大幅缩短（更容易被"打断"）
 pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
     let guard = ACTIVITY_STATE.lock().unwrap();
     if let Some(ref map) = *guard {
         if let Some(state) = map.get(&user_id) {
             let now = crate::util::now_secs();
-            if now < state.expires_at {
+            // darling_qq 的活动持续时间缩短
+            let effective_expires = if is_darling(user_id) {
+                let shortened = state.started_at
+                    + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO) as u64;
+                shortened
+            } else {
+                state.expires_at
+            };
+            if now < effective_expires {
                 return Some(state.clone());
             }
         }
     }
     None
+}
+
+fn is_darling(user_id: u64) -> bool {
+    let darling = crate::config::get().darling_qq;
+    darling > 0 && user_id == darling
 }
 
 /// 清除用户的活动状态（当用户主动对话时）
@@ -173,11 +191,18 @@ pub fn get_activity_context(user_id: u64) -> Option<String> {
     let remaining = state.expires_at.saturating_sub(crate::util::now_secs());
     let remaining_min = remaining / 60;
 
+    let darling_note = if is_darling(user_id) {
+        "\n注意：这是你认定的人(Darling)，即使在忙你也愿意去回复他，要温柔一些。"
+    } else {
+        ""
+    };
+
     Some(format!(
-        "# 当前活动状态\n你刚才说了要去做某事（{}），现在还在进行中（还剩约{}分钟）。\n{}",
+        "# 当前活动状态\n你刚才说了要去做某事（{}），现在还在进行中（还剩约{}分钟）。\n{}{}",
         describe_activity(&state.activity),
         remaining_min,
-        state.activity.reply_hint()
+        state.activity.reply_hint(),
+        darling_note
     ))
 }
 
