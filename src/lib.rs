@@ -491,7 +491,6 @@ fn do_daily_plan_generation() {
         "根据你的人设，为自己制定今天的计划。",
         &[ai::daily_plan_tool()],
         None,
-        None,
     ) {
         Ok(parsed) => {
             if let Some(tasks) = parsed.get("tasks").and_then(|t| t.as_array()) {
@@ -616,7 +615,7 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
 
     let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
 
-    match ai::analyze_with_tools(REVIEW_CONVERSATION_PROMPT, &full_context, &[ai::review_conversation_tool()], None, None) {
+    match ai::analyze_with_tools(REVIEW_CONVERSATION_PROMPT, &full_context, &[ai::review_conversation_tool()], None) {
         Ok(parsed) => {
             if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
                 for item in relevant {
@@ -1457,7 +1456,7 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
     let content = format!("群聊消息流（选择要回复的 user_id）:\n{}", batch_lines.join("\n"));
 
     // AI 批量决策
-    match ai::analyze_with_tools(&full_prompt, &content, &[ai::batch_decide_tool()], None, Some("batch_decide")) {
+    match ai::analyze_with_tools(&full_prompt, &content, &[ai::batch_decide_tool()], None) {
         Ok(parsed) => {
             if let Some(reply_to) = parsed.get("reply_to").and_then(|v| v.as_array()) {
                 // 按配额限制回复数量

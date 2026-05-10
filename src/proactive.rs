@@ -78,7 +78,7 @@ fn ai_generate_message(
     let user_prompt = config::prompt();
     let full_context = ctx.join("\n\n");
 
-    match crate::ai::analyze_with_tools(&format!("{}\n\n{}", user_prompt, PROACTIVE_PROMPT), &full_context, &[crate::ai::proactive_message_tool()], None, None) {
+    match crate::ai::analyze_with_tools(&format!("{}\n\n{}", user_prompt, PROACTIVE_PROMPT), &full_context, &[crate::ai::proactive_message_tool()], None) {
         Ok(parsed) => {
             let msg = parsed.get("message").and_then(|v| v.as_str()).unwrap_or("");
             if msg.is_empty() {
