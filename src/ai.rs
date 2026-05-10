@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 use crate::config;
 
+/// 创建不把 HTTP 错误状态码当作 ureq Error 的 Agent
+/// 这样 4xx/5xx 响应体可以被正常读取，用于排查 API 错误原因
+fn no_error_agent() -> ureq::Agent {
+    let config = ureq::config::Config::builder()
+        .http_status_as_error(false)
+        .build();
+    ureq::Agent::new_with_config(config)
+}
+
 /// 从 AI 响应中提取 JSON 对象 (处理 <think> 标签、markdown 代码块等)
 pub fn extract_json(raw: &str) -> Option<String> {
     let cleaned = if let Some(pos) = raw.find("</think>") {
@@ -256,16 +265,22 @@ pub fn chat(
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
-    let mut resp = ureq::post(&url)
+    let agent = no_error_agent();
+    let mut resp = agent.post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
         .map_err(|e| format!("API request failed: {}", e))?;
 
+    let status = resp.status();
     let resp_str = resp
         .body_mut()
         .read_to_string()
         .map_err(|e| format!("API read failed: {}", e))?;
+
+    if !(200..300).contains(&status.as_u16()) {
+        return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
+    }
 
     let body: ChatResponse = serde_json::from_str(&resp_str)
         .map_err(|e| format!("API parse failed: {}", e))?;
@@ -322,16 +337,22 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
     debug!(model = %cfg.model, "analyze: sending API request");
-    let mut resp = ureq::post(&url)
+    let agent = no_error_agent();
+    let mut resp = agent.post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
         .map_err(|e| format!("API request failed: {}", e))?;
 
+    let status = resp.status();
     let resp_str = resp
         .body_mut()
         .read_to_string()
         .map_err(|e| format!("API read failed: {}", e))?;
+
+    if !(200..300).contains(&status.as_u16()) {
+        return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
+    }
 
     let body: ChatResponse = serde_json::from_str(&resp_str)
         .map_err(|e| format!("API parse failed: {}", e))?;
@@ -405,24 +426,30 @@ pub fn analyze_with_tools(
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
     // 打印请求 JSON (截断避免日志过长，UTF-8 安全截断)
-    let req_preview = if json_body.len() > 2000 {
-        let truncated: String = json_body.chars().take(2000).collect();
+    let req_preview = if json_body.len() > 4000 {
+        let truncated: String = json_body.chars().take(4000).collect();
         format!("{}...[truncated]", truncated)
     } else {
         json_body.clone()
     };
     debug!(model = %cfg.model, tools_count = tools.len(), "analyze_with_tools: request JSON:\n{}", req_preview);
 
-    let mut resp = ureq::post(&url)
+    let agent = no_error_agent();
+    let mut resp = agent.post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
         .map_err(|e| format!("API request failed: {}", e))?;
 
+    let status = resp.status();
     let resp_str = resp
         .body_mut()
         .read_to_string()
         .map_err(|e| format!("API read failed: {}", e))?;
+
+    if !(200..300).contains(&status.as_u16()) {
+        return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
+    }
 
     debug!("analyze_with_tools: raw response:\n{}", resp_str);
 
