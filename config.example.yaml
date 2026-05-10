@@ -265,13 +265,13 @@ quota:
   enabled: true                 # 是否启用配额系统
   segment_minutes: 5            # 配额段长度 (分钟)
   segments:                     # 各时段每段最大回复次数
-    - {start_hour: 0,  end_hour: 6,  max_replies: 0}   # 深夜不回复
-    - {start_hour: 6,  end_hour: 8,  max_replies: 2}   # 早上偏少
-    - {start_hour: 8,  end_hour: 10, max_replies: 3}   # 正常
-    - {start_hour: 10, end_hour: 14, max_replies: 5}   # 活跃
-    - {start_hour: 14, end_hour: 16, max_replies: 1}   # 下午偏少
-    - {start_hour: 16, end_hour: 20, max_replies: 2}   # 傍晚中等
-    - {start_hour: 20, end_hour: 24, max_replies: 1}   # 晚间话少
+    - {start_hour: 0,  end_hour: 6,  max_replies: 5}   # 深夜不回复
+    - {start_hour: 6,  end_hour: 8,  max_replies: 20}   # 早上偏少
+    - {start_hour: 8,  end_hour: 10, max_replies: 30}   # 正常
+    - {start_hour: 10, end_hour: 14, max_replies: 50}   # 活跃
+    - {start_hour: 14, end_hour: 16, max_replies: 10}   # 下午偏少
+    - {start_hour: 16, end_hour: 20, max_replies: 20}   # 傍晚中等
+    - {start_hour: 20, end_hour: 24, max_replies: 10}   # 晚间话少
 
 
 # ── 回复风格 ─────────────────────────────────────────────────────

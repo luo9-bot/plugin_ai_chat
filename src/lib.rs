@@ -1457,10 +1457,9 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
             }
         }
         timing_gate::GateDecision::NoReply => {
-            debug!(group_id, "timing_gate: no_reply -> 沉默");
+            // TODO
         }
         timing_gate::GateDecision::Wait(seconds) => {
-            debug!(group_id, seconds, "timing_gate: wait");
             // TODO: 实现延迟重新评估
         }
     }
