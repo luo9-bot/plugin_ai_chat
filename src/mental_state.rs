@@ -453,7 +453,7 @@ pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
         MENTAL_STATE_PROMPT,
         &full_context,
         &[crate::ai::mental_state_generate_tool()],
-        None,
+        Some(serde_json::json!("required")),
     ) {
         Ok(parsed) => {
             let mut count = 0;

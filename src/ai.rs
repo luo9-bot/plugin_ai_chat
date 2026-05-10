@@ -396,7 +396,7 @@ pub fn analyze_with_tools(
         user_content.to_string()
     };
 
-    let tc_value = tool_choice.unwrap_or(serde_json::json!("auto"));
+    let tc_value = tool_choice.unwrap_or(serde_json::json!("required"));
     let agent = no_error_agent();
 
     // 最多重试 2 次：模型偶尔忽略 tool_calls 返回纯文本
@@ -413,7 +413,7 @@ pub fn analyze_with_tools(
                 tool_calls: None,
             },
         ];
-
+        debug!(tc_value = %tc_value, "analyze_with_tools: request");
         let req = ChatRequest {
             model: cfg.model.clone(),
             messages,

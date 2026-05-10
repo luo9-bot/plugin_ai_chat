@@ -472,6 +472,63 @@ pub fn detect_crisis(message: &str) -> CrisisLevel {
     CrisisLevel::None
 }
 
+/// AI 辅助危机检测（关键词未命中时使用）
+///
+/// 用于检测关键词无法覆盖的隐晦危机表达，如告别语、隐喻等。
+/// 返回 None 表示无危机，Some(level) 表示检测到危机。
+pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
+    let prompt = r#"判断以下消息是否包含心理危机信号，分为两个等级：
+
+【severe】明确的自残/自杀意图或告别：
+- 直接提到死、自杀、自残、跳楼、割腕、遗书等
+- 暗示即将自我伤害（"想跳"、"解脱吧"、"一了百了"等）
+- "活着没意思/没意义"、"不想活了"、"死了算了"等
+
+【mild】极度消极、绝望情绪：
+- 崩溃、撑不下去、受不了
+- 没有人在乎/在意/爱我、所有人都讨厌我
+- 我是多余的、我很没用、给人添麻烦
+- 看不到希望、没有未来、一切都没有意义
+- 想消失、想逃、被困住了
+- 极度疲惫+无意义感的组合（"好累"+"生活没意思"等）
+
+没有以上信号则为 none。
+
+只回复 JSON，不要解释：
+{"crisis": "none"} 或 {"crisis": "mild"} 或 {"crisis": "severe"}"#;
+
+    let result = crate::ai::analyze(prompt, message);
+
+    match result {
+        Ok(reply) => {
+            let json_str = match crate::ai::extract_json(&reply) {
+                Some(s) => s,
+                None => {
+                    debug!("crisis AI: no JSON in response: {}", reply.chars().take(100).collect::<String>());
+                    return None;
+                }
+            };
+            let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
+                Ok(v) => v,
+                Err(e) => {
+                    debug!("crisis AI: JSON parse failed: {}", e);
+                    return None;
+                }
+            };
+            let level_str = parsed.get("crisis").and_then(|v| v.as_str()).unwrap_or("none");
+            match level_str {
+                "severe" => Some(CrisisLevel::Severe),
+                "mild" => Some(CrisisLevel::Mild),
+                _ => None,
+            }
+        }
+        Err(e) => {
+            debug!("crisis AI detection failed: {}", e);
+            None
+        }
+    }
+}
+
 /// Severe 降级到 Mild：需要 2 小时 + 连续 5 条无危机消息
 const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
 const CRISIS_SEVERE_CLEAN_MESSAGES: u32 = 5;
@@ -560,8 +617,7 @@ const CRISIS_MILD_PROMPT: &str = r#"# 紧急状态
 - 先用你角色的语气表达真诚的关心，不要冷冰冰的
 - 认真倾听，不要急着给建议或说"振作起来"之类的话
 - 让对方知道有人在意他/她
-- 在对话的合适位置，自然地提及：如果感觉很难受，可以跟身边信任的人聊聊，或者拨打心理援助热线
-- 24小时心理援助热线：全国 400-161-9995 | 北京 010-82951332 | 希望24热线 400-161-9995
+- 在对话的合适位置，自然地提及：如果感觉很难受，可以跟身边信任的人聊聊
 - 保持温和耐心，不要说教"#;
 
 const CRISIS_SEVERE_PROMPT: &str = r#"# 极度紧急状态 ⚠️

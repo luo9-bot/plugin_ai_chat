@@ -302,7 +302,12 @@ pub fn reflect(
 
     let full_context = context_parts.join("\n\n");
 
-    match crate::ai::analyze_with_tools(REFLECT_PROMPT, &full_context, &[crate::ai::self_reflect_tool()], None) {
+    match crate::ai::analyze_with_tools(
+        REFLECT_PROMPT,
+        &full_context,
+        &[crate::ai::self_reflect_tool()],
+        Some(serde_json::json!("required"))
+    ) {
         Ok(parsed) => {
             // 解析 thoughts
             let mut count = 0;
