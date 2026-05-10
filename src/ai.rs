@@ -377,6 +377,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
 ///
 /// 使用 tools 参数定义可用函数，AI 会通过 tool_calls 返回结构化数据。
 /// 如果 API 没有返回 tool_calls，fallback 到从文本中提取 JSON。
+/// 模型偶尔会忽略 tool_calls 直接返回文本，此时自动重试一次。
 pub fn analyze_with_tools(
     system_prompt: &str,
     user_content: &str,
@@ -384,34 +385,7 @@ pub fn analyze_with_tools(
     tool_choice: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let cfg = config::get();
-
-    let messages = vec![
-        ChatMessage {
-            role: "system".to_string(),
-            content: Some(system_prompt.to_string()),
-            tool_calls: None,
-        },
-        ChatMessage {
-            role: "user".to_string(),
-            content: Some(user_content.to_string()),
-            tool_calls: None,
-        },
-    ];
-
-    let req = ChatRequest {
-        model: cfg.model.clone(),
-        messages,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        temperature: cfg.ai.analysis_temperature,
-        top_p: 0.3,
-        max_tokens: cfg.ai.analysis_max_tokens,
-        tools: Some(tools.to_vec()),
-        tool_choice: Some(tool_choice.unwrap_or(serde_json::json!("auto"))),
-    };
-
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
     // 精简日志：只显示 tools、tool_choice 和 user content，跳过 system prompt
     let tools_summary: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
@@ -421,72 +395,115 @@ pub fn analyze_with_tools(
     } else {
         user_content.to_string()
     };
-    debug!(
-        model = %cfg.model,
-        tools = ?tools_summary,
-        tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(),
-        user_content = %user_content_preview,
-        "analyze_with_tools: request"
-    );
 
+    let tc_value = tool_choice.unwrap_or(serde_json::json!("auto"));
     let agent = no_error_agent();
-    let mut resp = agent.post(&url)
-        .header("Authorization", &format!("Bearer {}", cfg.api_key))
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-        .map_err(|e| format!("API request failed: {}", e))?;
 
-    let status = resp.status();
-    let resp_str = resp
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| format!("API read failed: {}", e))?;
+    // 最多重试 2 次：模型偶尔忽略 tool_calls 返回纯文本
+    for attempt in 0..2u8 {
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: Some(system_prompt.to_string()),
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(user_content.to_string()),
+                tool_calls: None,
+            },
+        ];
 
-    if !(200..300).contains(&status.as_u16()) {
-        return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
-    }
+        let req = ChatRequest {
+            model: cfg.model.clone(),
+            messages,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            temperature: cfg.ai.analysis_temperature,
+            top_p: 0.3,
+            max_tokens: cfg.ai.analysis_max_tokens,
+            tools: Some(tools.to_vec()),
+            tool_choice: Some(tc_value.clone()),
+        };
 
-    debug!("analyze_with_tools: raw response:\n{}", resp_str);
+        let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
-    let body: ChatResponse = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("API parse failed: {}", e))?;
-
-    let choice = body
-        .choices
-        .into_iter()
-        .next()
-        .ok_or("API returned empty choices")?;
-
-    // 优先从 message.tool_calls 中提取结果
-    let has_tool_calls = choice.message.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
-    let has_content = choice.message.content.as_ref().map_or(false, |c| !c.is_empty());
-    debug!(has_tool_calls, has_content, "analyze_with_tools: response analysis");
-
-    if let Some(tool_calls) = &choice.message.tool_calls {
-        if let Some(first_call) = tool_calls.first() {
-            debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
-                "analyze_with_tools: got tool call");
-            let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
-                .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
-            return Ok(args);
+        if attempt == 0 {
+            debug!(
+                model = %cfg.model,
+                tools = ?tools_summary,
+                tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+                user_content = %user_content_preview,
+                "analyze_with_tools: request"
+            );
+        } else {
+            debug!(attempt, "analyze_with_tools: retrying (no tool_calls)");
         }
+
+        let mut resp = agent.post(&url)
+            .header("Authorization", &format!("Bearer {}", cfg.api_key))
+            .header("Content-Type", "application/json")
+            .send(json_body.as_bytes())
+            .map_err(|e| format!("API request failed: {}", e))?;
+
+        let status = resp.status();
+        let resp_str = resp
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| format!("API read failed: {}", e))?;
+
+        if !(200..300).contains(&status.as_u16()) {
+            return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
+        }
+
+        debug!("analyze_with_tools: raw response:\n{}", resp_str);
+
+        let body: ChatResponse = serde_json::from_str(&resp_str)
+            .map_err(|e| format!("API parse failed: {}", e))?;
+
+        let choice = body
+            .choices
+            .into_iter()
+            .next()
+            .ok_or("API returned empty choices")?;
+
+        // 优先从 message.tool_calls 中提取结果
+        let has_tool_calls = choice.message.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
+        let has_content = choice.message.content.as_ref().map_or(false, |c| !c.is_empty());
+        debug!(has_tool_calls, has_content, "analyze_with_tools: response analysis");
+
+        if let Some(tool_calls) = &choice.message.tool_calls {
+            if let Some(first_call) = tool_calls.first() {
+                debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
+                    "analyze_with_tools: got tool call");
+                let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
+                    .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
+                return Ok(args);
+            }
+        }
+
+        // Fallback: 从文本内容中提取 JSON (兼容旧行为)
+        let mut reply = choice.message.content.unwrap_or_default();
+        debug!(reply_len = reply.len(), "analyze_with_tools: falling back to text extraction");
+
+        if let Some(pos) = reply.find("</think>") {
+            reply = reply[pos + 8..].trim().to_string();
+        }
+
+        if let Some(json_str) = extract_json(&reply) {
+            return serde_json::from_str(&json_str)
+                .map_err(|e| format!("Fallback JSON parse failed: {}", e));
+        }
+
+        // 有内容但无 JSON → 模型未走 tool_calls，重试
+        if has_content && attempt == 0 {
+            continue;
+        }
+
+        return Err("No tool_calls and no JSON found in response".to_string());
     }
 
-    // Fallback: 从文本内容中提取 JSON (兼容旧行为)
-    let mut reply = choice.message.content.unwrap_or_default();
-    debug!(reply_len = reply.len(), "analyze_with_tools: falling back to text extraction");
-
-    if let Some(pos) = reply.find("</think>") {
-        reply = reply[pos + 8..].trim().to_string();
-    }
-
-    // 尝试提取 JSON
-    if let Some(json_str) = extract_json(&reply) {
-        serde_json::from_str(&json_str)
-            .map_err(|e| format!("Fallback JSON parse failed: {}", e))
-    } else {
-        Err("No tool_calls and no JSON found in response".to_string())
-    }
+    unreachable!()
 }
 
 // ── Function Call 工具定义 ────────────────────────────────────
