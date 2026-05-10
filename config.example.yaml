@@ -7,7 +7,7 @@
 # OpenAI 兼容接口，支持 DeepSeek / OpenAI / 通义千问 / 硅基流动等
 
 api_key: "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-base_url: "https://api.deepseek.com/v1"
+base_url: "https://api.deepseek.com"
 model: "deepseek-chat"
 
 # 机器人自身 QQ 号 (必填)
