@@ -54,7 +54,7 @@
     <div class="section highlight">
       <h3>🔒 用户访问控制</h3>
       <p class="desc">白名单优先：配置白名单后只允许白名单用户使用私聊，黑名单无效。两个都为空则全体可用。</p>
-      <div class="field-grid cols-3">
+      <div class="field-grid cols-2">
         <div class="field">
           <label title="只允许这些用户使用私聊，为空则不限制。白名单优先于黑名单">白名单 (每行一个 QQ 号)</label>
           <textarea v-model="whitelistText" rows="3" placeholder="留空 = 不限制，所有用户可用"></textarea>
@@ -63,9 +63,15 @@
           <label title="禁止这些用户使用私聊，为空则不限制">黑名单 (每行一个 QQ 号)</label>
           <textarea v-model="blacklistText" rows="3" placeholder="留空 = 不限制"></textarea>
         </div>
+      </div>
+      <div class="field-grid cols-2">
         <div class="field">
           <label title="启动插件后自动开启这些用户的私聊，无需手动发送开启对话">自动开启私聊 (每行一个 QQ 号)</label>
           <textarea v-model="autoStartText" rows="3" placeholder="启动后自动开启这些用户的私聊"></textarea>
+        </div>
+        <div class="field">
+          <label title="启动插件后自动开启这些群聊，无需管理员手动发送开启对话">自动开启群聊 (每行一个群号)</label>
+          <textarea v-model="autoStartGroupsText" rows="3" placeholder="启动后自动开启这些群聊"></textarea>
         </div>
       </div>
     </div>
@@ -162,7 +168,7 @@ const DEFAULTS = {
   ]},
   log: { enabled: true, level: 'info' },
   vision: { api_key: '', base_url: '', model: '', max_tokens: 256 },
-  whitelist: [], blacklist: [], auto_start_users: [],
+  whitelist: [], blacklist: [], auto_start_users: [], auto_start_groups: [],
 }
 
 const sections = [
@@ -312,6 +318,7 @@ function textToArr(text) { return text.split('\n').map(s => s.trim()).filter(Boo
 const whitelistText = ref('')
 const blacklistText = ref('')
 const autoStartText = ref('')
+const autoStartGroupsText = ref('')
 
 async function load() {
   loading.value = true
@@ -329,6 +336,7 @@ async function load() {
     whitelistText.value = arrToText(merged.whitelist)
     blacklistText.value = arrToText(merged.blacklist)
     autoStartText.value = arrToText(merged.auto_start_users)
+    autoStartGroupsText.value = arrToText(merged.auto_start_groups)
   } catch (e) {
     saveMsg.value = '加载失败: ' + e.message
     saveOk.value = false
@@ -343,6 +351,7 @@ async function save() {
   cfg.value.whitelist = textToArr(whitelistText.value)
   cfg.value.blacklist = textToArr(blacklistText.value)
   cfg.value.auto_start_users = textToArr(autoStartText.value)
+  cfg.value.auto_start_groups = textToArr(autoStartGroupsText.value)
   try {
     const res = await api('/api/config', { method: 'PUT', body: JSON.stringify(cfg.value) })
     saveMsg.value = res.message || '已保存 ✓'

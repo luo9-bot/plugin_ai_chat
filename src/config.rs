@@ -60,6 +60,9 @@ pub struct Config {
     /// 默认开启私聊的用户列表（无需手动发送"开启对话"）
     #[serde(default)]
     pub auto_start_users: Vec<u64>,
+    /// 默认开启群聊的群号列表（无需管理员手动发送"开启对话"）
+    #[serde(default)]
+    pub auto_start_groups: Vec<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -796,10 +799,13 @@ anti_injection:
 # whitelist: []               # 示例: [123456789, 987654321]
 # blacklist: []               # 示例: [111111111, 222222222]
 
-# ── 默认启动对话用户 ─────────────────────────────────────────────
+# ── 默认启动对话 ─────────────────────────────────────────────────
 # 这些用户无需手动发送"开启对话"，启动插件后自动开启私聊
 # 也会受到白名单/黑名单的限制
 # auto_start_users: []        # 示例: [123456789]
+
+# 这些群无需管理员手动发送"开启对话"，启动插件后自动开启群聊
+# auto_start_groups: []       # 示例: [123456789]
 
 # ── 系统消息模板 ─────────────────────────────────────────────────
 messages:
@@ -1044,6 +1050,7 @@ pub fn init() {
                 whitelist: Vec::new(),
                 blacklist: Vec::new(),
                 auto_start_users: Vec::new(),
+                auto_start_groups: Vec::new(),
             }
         }
     };

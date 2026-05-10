@@ -292,7 +292,6 @@ pub fn chat(
         .ok_or("API returned empty choices")?;
 
     let mut reply = choice.message.content.unwrap_or_default();
-    debug!(reply_len = reply.len(), raw_reply = %reply, "chat: received response");
 
     // 去除 <think> 标签
     if let Some(pos) = reply.find("</think>") {
@@ -408,20 +407,26 @@ pub fn analyze_with_tools(
         top_p: 0.3,
         max_tokens: cfg.ai.analysis_max_tokens,
         tools: Some(tools.to_vec()),
-        tool_choice: Some(tool_choice.unwrap_or(serde_json::json!("required"))),
+        tool_choice: Some(tool_choice.unwrap_or(serde_json::json!("auto"))),
     };
 
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
-    // 打印请求 JSON (截断避免日志过长，UTF-8 安全截断)
-    let req_preview = if json_body.len() > 4000 {
-        let truncated: String = json_body.chars().take(4000).collect();
-        format!("{}...[truncated]", truncated)
+    // 精简日志：只显示 tools、tool_choice 和 user content，跳过 system prompt
+    let tools_summary: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    let user_content_preview = if user_content.len() > 500 {
+        format!("{}...[truncated]", &user_content[..500])
     } else {
-        json_body.clone()
+        user_content.to_string()
     };
-    debug!(model = %cfg.model, tools_count = tools.len(), "analyze_with_tools: request JSON:\n{}", req_preview);
+    debug!(
+        model = %cfg.model,
+        tools = ?tools_summary,
+        tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+        user_content = %user_content_preview,
+        "analyze_with_tools: request"
+    );
 
     let agent = no_error_agent();
     let mut resp = agent.post(&url)

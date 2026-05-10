@@ -232,6 +232,16 @@ pub extern "C" fn plugin_main() {
         }
     }
 
+    // ── 默认启动群聊 ──
+    // 根据配置自动开启指定群聊
+    {
+        let cfg = config::get();
+        for &group_id in &cfg.auto_start_groups {
+            with_state(|s| { s.active_groups.insert(group_id); });
+            info!(group_id, "auto_start: 活跃群聊");
+        }
+    }
+
     // 初始化 ECC 密钥对 (在注册之前)
     crypto::init();
 
@@ -1062,7 +1072,6 @@ fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<Str
 // ── 人格管理命令 ────────────────────────────────────────────────
 
 fn handle_personality_command(msg: &str) -> Option<String> {
-    debug!(msg, "handle_personality_command: 检查命令");
     if msg == "查看人格" {
         let ctx = personality::get_prompt_context();
         return Some(format!("当前人格设定:\n{}", ctx));
@@ -1110,7 +1119,6 @@ fn handle_personality_command(msg: &str) -> Option<String> {
 // ── 主动对话命令 ────────────────────────────────────────────────
 
 fn handle_proactive_command(msg: &str) -> Option<String> {
-    debug!(msg, "handle_proactive_command: 检查命令");
     match msg {
         "开启主动对话" => {
             proactive::set_enabled(true);
@@ -1150,7 +1158,6 @@ fn handle_proactive_command(msg: &str) -> Option<String> {
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
 fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
-    debug!(msg, "handle_admin_command: 检查命令");
     match msg {
         "查看群聊" => {
             let groups = with_state(|s| s.active_groups.iter().copied().collect::<Vec<u64>>());
