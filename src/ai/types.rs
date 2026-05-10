@@ -42,6 +42,9 @@ pub(crate) struct ChatRequest {
     pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// DeepSeek 思考模式控制：{"type": "disabled"} 禁用思考，提升 tool_calls 返回率
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

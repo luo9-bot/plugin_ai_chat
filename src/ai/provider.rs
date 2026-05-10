@@ -138,6 +138,7 @@ pub fn chat(
         max_tokens: cfg.ai.max_tokens,
         tools: None,
         tool_choice: None,
+        thinking: Some(serde_json::json!({"type": "disabled"})),
     };
 
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
@@ -210,6 +211,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
         max_tokens: cfg.ai.analysis_max_tokens,
         tools: None,
         tool_choice: None,
+        thinking: Some(serde_json::json!({"type": "disabled"})),
     };
 
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
@@ -305,6 +307,7 @@ pub fn analyze_with_tools(
             max_tokens: cfg.ai.analysis_max_tokens,
             tools: Some(tools.to_vec()),
             tool_choice: Some(tc_value.clone()),
+            thinking: Some(serde_json::json!({"type": "disabled"})),
         };
 
         let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
@@ -430,6 +433,7 @@ pub fn analyze_with_tools_named(
             max_tokens: cfg.ai.analysis_max_tokens,
             tools: Some(tools.to_vec()),
             tool_choice: Some(tc_value.clone()),
+            thinking: Some(serde_json::json!({"type": "disabled"})),
         };
 
         let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
