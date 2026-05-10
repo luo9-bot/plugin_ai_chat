@@ -143,12 +143,12 @@ pub struct FunctionDef {
     pub parameters: serde_json::Value,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ToolCall {
     pub function: ToolCallFunction,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ToolCallFunction {
     pub name: String,
     pub arguments: String,
@@ -176,8 +176,11 @@ struct ChatMessage {
     role: String,
     #[serde(default)]
     content: Option<String>,
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     tool_calls: Option<Vec<ToolCall>>,
+    /// DeepSeek V4 等模型的推理内容，后续请求必须回传
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -233,6 +236,7 @@ pub fn chat(
         role: "system".to_string(),
         content: Some(full_system),
         tool_calls: None,
+        reasoning_content: None,
     }];
 
     for (role, content) in history {
@@ -240,6 +244,7 @@ pub fn chat(
             role: role.clone(),
             content: Some(content.clone()),
             tool_calls: None,
+            reasoning_content: None,
         });
     }
 
@@ -247,6 +252,7 @@ pub fn chat(
         role: "user".to_string(),
         content: Some(user_message.to_string()),
         tool_calls: None,
+        reasoning_content: None,
     });
 
     debug!(model = %cfg.model, messages_count = messages.len(), "chat: sending API request");
@@ -312,11 +318,13 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
             role: "system".to_string(),
             content: Some(system_prompt.to_string()),
             tool_calls: None,
+            reasoning_content: None,
         },
         ChatMessage {
             role: "user".to_string(),
             content: Some(user_content.to_string()),
             tool_calls: None,
+            reasoning_content: None,
         },
     ];
 
@@ -396,7 +404,7 @@ pub fn analyze_with_tools(
         user_content.to_string()
     };
 
-    let tc_value = tool_choice.unwrap_or(serde_json::json!("required"));
+    let tc_value = tool_choice.unwrap_or(serde_json::json!("auto"));
     let agent = no_error_agent();
 
     // 最多重试 2 次：模型偶尔忽略 tool_calls 返回纯文本
@@ -406,11 +414,13 @@ pub fn analyze_with_tools(
                 role: "system".to_string(),
                 content: Some(system_prompt.to_string()),
                 tool_calls: None,
+                reasoning_content: None,
             },
             ChatMessage {
                 role: "user".to_string(),
                 content: Some(user_content.to_string()),
                 tool_calls: None,
+                reasoning_content: None,
             },
         ];
         debug!(tc_value = %tc_value, "analyze_with_tools: request");
@@ -425,8 +435,12 @@ pub fn analyze_with_tools(
             tools: Some(tools.to_vec()),
             tool_choice: Some(tc_value.clone()),
         };
-
+        
         let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
+        
+
+        // 打印tools 和 tool_choice 用于调试
+        debug!(tools = ?tools_summary, tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(), "analyze_with_tools: tools 和 tool_choice");
 
         if attempt == 0 {
             debug!(

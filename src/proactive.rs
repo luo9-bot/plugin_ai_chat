@@ -82,7 +82,7 @@ fn ai_generate_message(
         &format!("{}\n\n{}",user_prompt, PROACTIVE_PROMPT),
         &full_context,
         &[crate::ai::proactive_message_tool()],
-        Some(serde_json::json!("required"))) {
+        Some(serde_json::json!("auto"))) {
         Ok(parsed) => {
             let msg = parsed.get("message").and_then(|v| v.as_str()).unwrap_or("");
             if msg.is_empty() {

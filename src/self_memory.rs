@@ -306,7 +306,7 @@ pub fn reflect(
         REFLECT_PROMPT,
         &full_context,
         &[crate::ai::self_reflect_tool()],
-        Some(serde_json::json!("required"))
+        Some(serde_json::json!("auto"))
     ) {
         Ok(parsed) => {
             // 解析 thoughts

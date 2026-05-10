@@ -508,7 +508,7 @@ fn do_daily_plan_generation() {
         &context,
         "根据你的人设，为自己制定今天的计划。",
         &[ai::daily_plan_tool()],
-        Some(serde_json::json!("required")),
+        Some(serde_json::json!("auto")),
     ) {
         Ok(parsed) => {
             if let Some(tasks) = parsed.get("tasks").and_then(|t| t.as_array()) {
@@ -637,7 +637,7 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
     REVIEW_CONVERSATION_PROMPT,
     &full_context,
     &[ai::review_conversation_tool()],
-    Some(serde_json::json!("required"))
+    Some(serde_json::json!("auto"))
     ) {
         Ok(parsed) => {
             if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
@@ -1512,7 +1512,7 @@ fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
         &full_prompt,
         &content,
         &[ai::batch_decide_tool()],
-        Some(serde_json::json!("required"))
+        Some(serde_json::json!("auto"))
     ) { // tool_choice打印
         Ok(parsed) => {
             if let Some(reply_to) = parsed.get("reply_to").and_then(|v| v.as_array()) {

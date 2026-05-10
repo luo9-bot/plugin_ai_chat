@@ -568,7 +568,7 @@ pub fn ai_review_all() {
             REVIEW_PROMPT,
             &context,
             &[crate::ai::memory_review_tool()],
-            Some(serde_json::json!("required"))
+            Some(serde_json::json!("auto"))
         );
         match result {
             Ok(parsed) => {
