@@ -197,3 +197,81 @@ pub fn should_finalize(record: &ReplyEffectRecord) -> bool {
 
     false
 }
+
+// ── LLM Judge（可选增强）────────────────────────────────────────
+
+/// LLM 评判结果
+#[derive(Debug, Clone)]
+pub struct LlmJudgeScores {
+    pub social_presence: f64,
+    pub warmth: f64,
+    pub competence: f64,
+    pub appropriateness: f64,
+    pub uncanny_risk: f64,
+}
+
+/// 使用 LLM 评判回复质量（5 维度，1-5 分）
+///
+/// 可选增强：当 API 预算允许时调用，规则匹配作为 fallback。
+pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
+    let prompt = crate::prompt::PromptManager::get().raw("reply_effect_judge");
+    if prompt.is_empty() {
+        return None;
+    }
+
+    // 构建 followup 消息文本
+    let followup_text: Vec<String> = record.followups.iter()
+        .take(5)
+        .map(|f| format!("[user_id:{}] {}", f.user_id, f.content))
+        .collect();
+
+    let followup_joined = followup_text.join("\n");
+    let vars = std::collections::HashMap::from([
+        ("reply_text", record.reply_text.as_str()),
+        ("followup_messages", followup_joined.as_str()),
+    ]);
+
+    let rendered = crate::prompt::PromptManager::get().render("reply_effect_judge", &vars);
+
+    match crate::ai::analyze("", &rendered) {
+        Ok(response) => {
+            if let Some(json_str) = crate::ai::extract_json(&response) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    return Some(LlmJudgeScores {
+                        social_presence: parsed.get("social_presence").and_then(|v| v.as_f64()).unwrap_or(3.0),
+                        warmth: parsed.get("warmth").and_then(|v| v.as_f64()).unwrap_or(3.0),
+                        competence: parsed.get("competence").and_then(|v| v.as_f64()).unwrap_or(3.0),
+                        appropriateness: parsed.get("appropriateness").and_then(|v| v.as_f64()).unwrap_or(3.0),
+                        uncanny_risk: parsed.get("uncanny_risk").and_then(|v| v.as_f64()).unwrap_or(1.0),
+                    });
+                }
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// 计算 LLM Judge 的关系分
+pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
+    // 归一化到 0-1：(score - 1) / 4
+    let sp = (scores.social_presence - 1.0) / 4.0;
+    let w = (scores.warmth - 1.0) / 4.0;
+    let c = (scores.competence - 1.0) / 4.0;
+    let a = (scores.appropriateness - 1.0) / 4.0;
+    (0.35 * sp + 0.25 * w + 0.25 * c + 0.15 * a).clamp(0.0, 1.0)
+}
+
+/// 计算 LLM Judge 的摩擦分（含 uncanny_risk）
+pub fn calculate_friction_from_llm(record: &ReplyEffectRecord, uncanny_risk: f64) -> f64 {
+    let neg = NEGATIVE_PATTERNS.iter()
+        .any(|p| record.followups.iter().any(|f| f.content.contains(p)));
+    let rep = REPAIR_PATTERNS.iter()
+        .any(|p| record.followups.iter().any(|f| f.content.contains(p)));
+
+    let explicit_negative = if neg { 1.0 } else { 0.0 };
+    let repair_loop = if rep { 1.0 } else { 0.0 };
+    let uncanny = (uncanny_risk - 1.0) / 4.0; // 归一化到 0-1
+
+    (0.40 * explicit_negative + 0.30 * repair_loop + 0.30 * uncanny).clamp(0.0, 1.0)
+}

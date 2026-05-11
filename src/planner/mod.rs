@@ -12,7 +12,21 @@ pub use types::*;
 use tools::*;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info, warn};
+
+/// Planner 中断标志：新消息到达时设置，中断当前推理
+static INTERRUPT_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// 请求中断当前 Planner 推理（由消息到达时调用）
+pub fn request_interrupt() {
+    INTERRUPT_FLAG.store(true, Ordering::Relaxed);
+}
+
+/// 检查并清除中断标志
+fn check_interrupt() -> bool {
+    INTERRUPT_FLAG.swap(false, Ordering::Relaxed)
+}
 
 /// 工具可见性
 #[derive(Debug, Clone, PartialEq)]
@@ -111,9 +125,19 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, disc
     match name {
         "query_memory" => {
             let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
             if uid == 0 { return "错误：未提供 user_id".into(); }
-            let m = crate::memory::get_context(uid);
-            if m.is_empty() { format!("用户 {} 没有已知的记忆", uid) } else { m }
+            // 使用 BM25 检索最相关的记忆（而非全量注入）
+            let results = crate::memory::search_memories(uid, query, 10);
+            if results.is_empty() {
+                format!("用户 {} 没有相关记忆（查询: {}）", uid, query)
+            } else {
+                let mut output = format!("用户 {} 的相关记忆：\n", uid);
+                for r in &results {
+                    output.push_str(&format!("- {}\n", r.content));
+                }
+                output
+            }
         }
         "query_person_info" => {
             let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);

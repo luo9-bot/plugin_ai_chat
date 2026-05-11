@@ -4,6 +4,8 @@
 pub enum PlannerAction {
     Reply { user_id: u64, group_id: u64, message: String, reference_info: Option<String> },
     Silent,
+    /// 被新消息中断，需要重新开始
+    Interrupted,
 }
 
 pub struct PlannerContext {

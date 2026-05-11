@@ -67,7 +67,10 @@ pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
                             let t = match j.get("type").and_then(|v| v.as_str()).unwrap_or("") { "pinyin" => JargonType::Pinyin, "english" => JargonType::English, "chinese" => JargonType::Chinese, _ => continue };
                             if c.is_empty() { continue; }
                             if !s.jargon.iter().any(|e| e.content == c) {
-                                s.jargon.push(JargonEntry { content: c.into(), jargon_type: t, meaning: String::new(), source_group: group_id });
+                                // 推断黑话含义
+                                let meaning = infer_jargon_meaning(c, &msg_text);
+                                info!(content = %c, meaning = %meaning, "learner: new jargon");
+                                s.jargon.push(JargonEntry { content: c.into(), jargon_type: t, meaning, source_group: group_id });
                             }
                         }
                     }
@@ -85,4 +88,34 @@ fn text_sim(a: &str, b: &str) -> f64 {
     let ca: Vec<char> = a.chars().collect();
     let cb: std::collections::HashSet<char> = b.chars().collect();
     ca.iter().filter(|c| cb.contains(c)).count() as f64 / ca.len().max(1) as f64
+}
+
+/// 使用 LLM 推断黑话含义
+fn infer_jargon_meaning(jargon: &str, context_lines: &[String]) -> String {
+    // 取包含该黑话的上下文（前后各 3 条）
+    let context: Vec<&str> = context_lines.iter()
+        .filter(|line| line.contains(jargon))
+        .take(3)
+        .map(|s| s.as_str())
+        .collect();
+
+    let prompt = format!(
+        "在以下对话上下文中，\"{}\" 是什么意思？\n\n\
+         上下文：\n{}\n\n\
+         用一句话简短解释这个词的含义。如果无法确定，返回空。",
+        jargon,
+        context.join("\n")
+    );
+
+    match crate::ai::analyze("", &prompt) {
+        Ok(response) => {
+            let trimmed = response.trim().to_string();
+            if trimmed.is_empty() || trimmed.len() > 100 {
+                String::new()
+            } else {
+                trimmed
+            }
+        }
+        Err(_) => String::new(),
+    }
 }

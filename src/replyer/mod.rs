@@ -33,8 +33,12 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
         format!("# 你的身份\n{}", ctx.identity)
     };
 
-    // 获取表达习惯上下文
-    let expression_block = crate::learner::get_expression_context(ctx.group_id, 5);
+    // 获取表达习惯上下文（带 LLM 选择）
+    let chat_context = ctx.history.iter()
+        .map(|(r, c)| format!("{}: {}", r, c))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expression_block = crate::learner::get_expression_context(ctx.group_id, 5, &chat_context);
 
     // 注入额外上下文（记忆、情绪、人格等）
     if !ctx.extra_context.is_empty() {

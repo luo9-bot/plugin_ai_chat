@@ -59,3 +59,31 @@ pub fn get_group_members_context(group_id: u64, user_ids: &[u64]) -> String {
     }
     if lines.is_empty() { String::new() } else { format!("# 群成员信息\n{}", lines.join("\n")) }
 }
+
+/// 从对话中自动提取用户事实并存储
+///
+/// 使用 LLM 从用户消息和 bot 回复中提取稳定事实。
+pub fn extract_facts_from_conversation(user_id: u64, user_message: &str, bot_reply: &str) {
+    if user_id == 0 || user_message.is_empty() { return; }
+
+    let prompt = format!(
+        "从以下对话中提取关于用户的稳定事实（如姓名、兴趣、职业、习惯等）。\n\
+         只提取有明确证据的事实，不要推测。\n\n\
+         用户消息：{}\n\
+         Bot回复：{}\n\n\
+         如果没有可提取的事实，返回空。否则返回一行一个事实。",
+        user_message, bot_reply
+    );
+
+    match crate::ai::analyze("", &prompt) {
+        Ok(response) => {
+            for line in response.lines() {
+                let fact = line.trim();
+                if !fact.is_empty() && fact.len() > 2 && fact.len() < 100 {
+                    add_memory_point(user_id, fact);
+                }
+            }
+        }
+        Err(_) => {} // 静默失败
+    }
+}
