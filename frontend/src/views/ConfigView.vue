@@ -164,7 +164,7 @@ const DEFAULTS = {
   proactive: { enabled: true, quiet_start: 23, quiet_end: 7, interval: 7200, max_ignore: 3, low_mood_multiplier: 2.0 },
   self_reflection: { interval: 1800, max_thoughts: 8, post_conversation_delay_secs: 120 },
   mental_state: { concerns_max: 5, concern_decay_rate: 0.1, deliberations_max: 8, deliberation_decay_rate: 0.05, defect_base_probability: 0.1 },
-  style: { max_reply_chars: 30, omit_subject: true, punctuation_style: 'casual' },
+  style: { max_reply_chars: 30, omit_subject: true, punctuation_style: 'casual', reply_style: '', multiple_reply_styles: [], style_random_probability: 0.3 },
   quota: { enabled: true, segment_minutes: 5, segments: [
     {start_hour:0,end_hour:6,max_replies:0},{start_hour:6,end_hour:8,max_replies:2},
     {start_hour:8,end_hour:10,max_replies:3},{start_hour:10,end_hour:14,max_replies:5},
@@ -272,6 +272,10 @@ const sections = [
       tip: 'true = "我觉得很无聊" → "无聊"，"我在想事情" → "在想事情"' },
     { key: 'style.punctuation_style', label: '标点风格', type: 'select', options: [{value:'casual',label:'日常 (不加句号)'},{value:'formal',label:'正式 (正常标点)'}],
       tip: 'casual = 日常发言不加句号，用换行代替停顿；formal = 使用正常标点符号' },
+    { key: 'style.reply_style', label: '默认回复风格', type: 'text',
+      tip: '回复风格描述，如"日常口语化，简短自然"。留空使用默认', hint: '留空 = 默认' },
+    { key: 'style.style_random_probability', label: '风格随机概率', type: 'range', min: 0, max: 1, step: 0.05, default: 0.3,
+      tip: '使用备选回复风格的概率 (0.0~1.0)。0.3=30%概率随机选择备选风格', hint: '0.3 = 30%' },
   ]},
   { key: 'vision', icon: '👁️', title: '识图功能', fields: [
     { key: 'vision.api_key', label: 'API Key', type: 'text',
