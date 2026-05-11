@@ -5,6 +5,7 @@ mod review;
 pub mod retrieval;
 pub mod sqlite;
 pub mod graph;
+pub mod embedding;
 
 use std::collections::HashMap;
 
@@ -37,8 +38,22 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
             .map(|(i, e)| (format!("{}_{}", user_id, i), e.content.clone()))
             .collect();
 
-        // 获取 embeddings
-        let embeddings = sqlite::get_user_embeddings(user_id);
+        // 获取 embeddings（如果可用）
+        let mut embeddings = sqlite::get_user_embeddings(user_id);
+
+        // 如果没有存储的 embeddings，尝试实时生成查询向量
+        if embeddings.is_empty() {
+            if let Some(query_embedding) = embedding::embed_text(query) {
+                // 为文档生成 embeddings
+                let doc_texts: Vec<String> = documents.iter().map(|(_, c)| c.clone()).collect();
+                let doc_embeddings = embedding::embed_batch(&doc_texts);
+                for (i, emb_opt) in doc_embeddings.into_iter().enumerate() {
+                    if let Some(emb) = emb_opt {
+                        embeddings.push((documents[i].0.clone(), emb));
+                    }
+                }
+            }
+        }
 
         // 使用 RRF 融合
         let config = retrieval::RetrievalConfig {
@@ -94,4 +109,31 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
     }
 
     results
+}
+
+/// 存储记忆时自动生成 embedding
+pub fn store_memory_with_embedding(user_id: u64, content: &str, importance: store::Importance) {
+    let now = crate::util::now_secs();
+    let entry = store::MemoryEntry {
+        content: content.to_string(),
+        importance,
+        created: now,
+        last_accessed: now,
+        access_count: 0,
+    };
+
+    // 存储到 SQLite
+    if sqlite::is_available() {
+        sqlite::save_memory(user_id, &entry);
+
+        // 异步生成 embedding
+        if let Some(embedding) = embedding::embed_text(content) {
+            sqlite::save_embedding(user_id, content, &embedding);
+        }
+    }
+
+    // 同时存储到 JSON（兼容）
+    let mut store = store::MemoryStore::load();
+    store.get_user_mut(user_id).entries.push(entry);
+    store.save();
 }

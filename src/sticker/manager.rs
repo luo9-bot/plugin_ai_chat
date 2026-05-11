@@ -294,8 +294,6 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
 /// 使用 VLM 从多个候选中选择最佳表情包
 ///
 /// 使用 VLM 网格选择最合适的表情包
-///
-***REMOVED***
 fn select_with_vlm(
     image_paths: &[String],
     context: &str,
@@ -306,7 +304,6 @@ fn select_with_vlm(
         return None;
     }
 
-    ***REMOVED***
     let grid_bytes = match create_grid_image(image_paths) {
         Some(bytes) => bytes,
         None => {

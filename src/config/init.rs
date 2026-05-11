@@ -69,6 +69,7 @@ pub fn init() {
                 mental_state: MentalStateConfig::default(),
                 style: StyleConfig::default(),
                 vision: VisionConfig::default(),
+                embedding: EmbeddingConfig::default(),
                 messages: Messages::default(),
                 log: LogConfig::default(),
                 sync: SyncConfig::default(),

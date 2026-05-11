@@ -35,6 +35,8 @@ pub struct Config {
     #[serde(default)]
     pub vision: VisionConfig,
     #[serde(default)]
+    pub embedding: EmbeddingConfig,
+    #[serde(default)]
     pub messages: Messages,
     #[serde(default)]
     pub log: LogConfig,
@@ -288,6 +290,35 @@ impl Default for VisionConfig {
 }
 
 impl VisionConfig {
+    pub fn enabled(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct EmbeddingConfig {
+    /// Embedding API key，为空则禁用 embedding
+    #[serde(default)]
+    pub api_key: String,
+    /// API base URL
+    #[serde(default = "default_embedding_base_url")]
+    pub base_url: String,
+    /// Embedding 模型
+    #[serde(default = "default_embedding_model")]
+    pub model: String,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: default_embedding_base_url(),
+            model: default_embedding_model(),
+        }
+    }
+}
+
+impl EmbeddingConfig {
     pub fn enabled(&self) -> bool {
         !self.api_key.is_empty()
     }
@@ -624,9 +655,11 @@ fn default_defect_base_probability() -> f32 { 0.1 }
 fn default_max_reply_chars() -> usize { 30 }
 fn default_punctuation_style() -> String { "casual".into() }
 fn default_style_random_probability() -> f64 { 0.3 }
-fn default_vision_base_url() -> String { "https://api.deepseek.com/v1".into() }
-fn default_vision_model() -> String { "deepseek-chat".into() }
+fn default_vision_base_url() -> String { "https://api.deepseek.com".into() }
+fn default_vision_model() -> String { "	deepseek-v4-flash".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
+fn default_embedding_base_url() -> String { "https://ark.cn-beijing.volces.com/api/v3".into() }
+fn default_embedding_model() -> String { "doubao-embedding-text-240715".into() }
 fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }

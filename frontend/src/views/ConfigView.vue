@@ -173,6 +173,7 @@ const DEFAULTS = {
   ]},
   log: { enabled: true, level: 'info' },
   vision: { api_key: '', base_url: '', model: '', max_tokens: 256 },
+  embedding: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-embedding-text-240715' },
   whitelist: [], blacklist: [], auto_start_users: [], auto_start_groups: [],
 }
 
@@ -286,6 +287,14 @@ const sections = [
       tip: '识图模型名称，如 doubao-seed-1-8-251228' },
     { key: 'vision.max_tokens', label: '最大 Token', type: 'number',
       tip: '识图响应的最大 token 数' },
+  ]},
+  { key: 'embedding', icon: '🧮', title: 'Embedding 向量模型', fields: [
+    { key: 'embedding.api_key', label: 'API Key', type: 'text',
+      tip: 'Embedding API key，留空则禁用向量检索，只使用 BM25 关键词检索', hint: '留空 = 禁用' },
+    { key: 'embedding.base_url', label: 'Base URL', type: 'text',
+      tip: 'Embedding API 地址，如 https://ark.cn-beijing.volces.com/api/v3' },
+    { key: 'embedding.model', label: '模型', type: 'text',
+      tip: 'Embedding 模型名称，如 doubao-embedding-text-240715' },
   ]},
   { key: 'log', icon: '📝', title: '日志', fields: [
     { key: 'log.enabled', label: '启用', type: 'select', options: [{value:true,label:'开启'},{value:false,label:'关闭'}],

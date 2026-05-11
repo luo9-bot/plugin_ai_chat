@@ -33,6 +33,13 @@ vision:
   model: "doubao-seed-1-8-251228"                # 识图模型
   max_tokens: 256
 
+# ── Embedding 向量模型 (可选) ──────────────────────────────────
+# 用于记忆的语义检索，留空则禁用向量检索，只使用 BM25 关键词检索
+embedding:
+  api_key: ""                                    # Embedding API key，留空 = 禁用
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"  # API 地址
+  model: "doubao-embedding-text-240715"          # Embedding 模型
+
 # ── 提示词 ─────────────────────────────────────────────────────
 # 放在 prompts/ 目录下的文件名
 
