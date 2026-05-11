@@ -218,6 +218,12 @@ pub extern "C" fn plugin_main() {
     // 初始化错别字生成器（加载字频和拼音字典）
     typo::init(&config::data_dir());
 
+    // 初始化记忆系统（SQLite + JSON 迁移）
+    memory::init(&config::data_dir());
+
+    // 初始化知识图谱
+    memory::graph::init();
+
     // 初始化防注入模块
     anti_injection::init();
 
