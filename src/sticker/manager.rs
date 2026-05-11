@@ -5,22 +5,8 @@
 
 use tracing::{debug, info, warn};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use image::{
-    codecs::gif::GifDecoder,
-    codecs::png::PngEncoder,
-    ImageEncoder,
-    ExtendedColorType,
-    AnimationDecoder,
-    Frame
-};
-
-use std::io::BufReader;
-use std::fs::File;/// GIF 最大帧数
 
 use super::store::*;
-
-const MAX_GIF_FRAMES: usize = 20;
-
 
 /// 表情包选择结果
 pub struct StickerSelection {
@@ -145,8 +131,7 @@ pub fn select_sticker_vlm(
         return None;
     }
 
-    // 采样：最多 20 个候选
-    let sample_size = candidates.len().min(20);
+    let sample_size = candidates.len().min(25);
     let sampled = weighted_sample(&candidates, sample_size);
 
     // 加载图片路径
@@ -262,7 +247,6 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
         .join("data").join("plugin_ai_chat").join("temp");
     std::fs::create_dir_all(&temp_dir).ok();
 
-
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -271,17 +255,21 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
     debug!("文件写入路径: {:?}", tmp_path);
     std::fs::write(&tmp_path, image_bytes).ok();
 
-    let prompt = crate::prompt::PromptManager::get()
-        .raw("sticker_content_filtration")
-        .to_string();
-
-    let result = if format == "gif" {
-        call_vlm_with_gif(&tmp_path, &prompt)
-    } else {
-        call_vlm_with_image(&tmp_path, &prompt)
+    let prompt = if format == "gif" {
+        format!(
+            "这是一个动态图表情包，每一张图代表了动态图的一帧。{}",
+            crate::prompt::PromptManager::get()
+            .raw("sticker_content_filtration")
+            .to_string()
+        )
+    }
+    else {
+        crate::prompt::PromptManager::get()
+            .raw("sticker_content_filtration")
+            .to_string()
     };
 
-    // let result = call_vlm_with_image(&tmp_path, &prompt);
+    let result = call_vlm_with_image(&tmp_path, &prompt);
 
     match result {
         Some(response) => {
@@ -305,7 +293,9 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
 
 /// 使用 VLM 从多个候选中选择最佳表情包
 ///
-/// 发送多张图片给 VLM，让它根据上下文和目标情绪选择最合适的
+/// 使用 VLM 网格选择最合适的表情包
+///
+***REMOVED***
 fn select_with_vlm(
     image_paths: &[String],
     context: &str,
@@ -316,53 +306,54 @@ fn select_with_vlm(
         return None;
     }
 
-    // 构建多图请求
-    let mut content_items: Vec<serde_json::Value> = Vec::new();
+    ***REMOVED***
+    let grid_bytes = match create_grid_image(image_paths) {
+        Some(bytes) => bytes,
+        None => {
+            warn!("sticker: grid creation failed, falling back to single image");
+            std::fs::read(&image_paths[0]).unwrap_or_default()
+        }
+    };
 
-    // 添加图片
-    for (i, path) in image_paths.iter().enumerate() {
-        content_items.push(serde_json::json!({
-            "type": "input_image",
-            "image_url": format!("file://{}", path)
-        }));
-    }
+    // 使用 base64 编码网格图（不依赖文件系统）
+    let base64_image = STANDARD.encode(&grid_bytes);
 
-    // 添加选择 prompt
+    // 构建 VLM 请求：单张网格图 + 选择 prompt
+    let (cols, rows) = calculate_grid_shape(image_paths.len());
     let prompt = format!(
         "你是洛玖的临时表情包选择子代理。\n\n\
          当前对话上下文：\n{}\n\n\
          目标情绪：{}\n\n\
-         上面是 {} 个候选表情包（按顺序编号 1-{}）。\n\
+         上面是 {} 个候选表情包，排列成 {}×{} 网格（按顺序编号 1-{}）。\n\
          请根据对话情境和目标情绪，选择最合适的一个。\n\
          只返回 JSON：{{\"index\": N, \"reason\": \"选择原因\"}}\n\
          N 为候选列表中的序号（从 1 开始）。",
-        context, target_emotion, image_paths.len(), image_paths.len()
+        context, target_emotion, image_paths.len(), cols, rows, image_paths.len()
     );
-
-    content_items.push(serde_json::json!({
-        "type": "input_text",
-        "text": prompt
-    }));
 
     let request_body = serde_json::json!({
         "model": cfg.vision.model,
         "input": [{
             "role": "user",
-            "content": content_items
+            "content": [
+                { "type": "input_image", "image_url": format!("data:image/png;base64,{}", base64_image) },
+                { "type": "input_text", "text": prompt }
+            ]
         }],
         "max_output_tokens": 256
     });
 
     let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
 
-    match call_vlm_api(&url, &cfg.vision.api_key, &request_body) {
+    let result = call_vlm_api(&url, &cfg.vision.api_key, &request_body);
+
+    match result {
         Some(response) => {
-            // 解析 JSON 响应
             if let Some(json_str) = crate::ai::extract_json(&response) {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     let index = parsed.get("index")
                         .and_then(|v| v.as_u64())
-                        .map(|n| (n as usize).saturating_sub(1))  // 1-based -> 0-based
+                        .map(|n| (n as usize).saturating_sub(1))
                         .unwrap_or(0);
                     let reason = parsed.get("reason")
                         .and_then(|v| v.as_str())
@@ -371,7 +362,6 @@ fn select_with_vlm(
                     return Some((index, reason));
                 }
             }
-            // JSON 解析失败，尝试从文本中提取数字
             if let Some(n) = extract_number(&response) {
                 return Some((n.saturating_sub(1), "从文本提取".to_string()));
             }
@@ -381,114 +371,125 @@ fn select_with_vlm(
     }
 }
 
-/// 处理 GIF：拆帧 → 分别转 base64 → 多图输入 VLM
-fn call_vlm_with_gif(gif_path: &std::path::Path, prompt: &str) -> Option<String> {
-    let cfg = crate::config::get();
-    if !cfg.vision.enabled() {
+/// 将多张图片拼成网格图
+///
+/// - 每张图缩放到 256x256 格子
+/// - 格子之间 12px 间距
+/// - 左上角绘制序号角标
+fn create_grid_image(image_paths: &[String]) -> Option<Vec<u8>> {
+    use image::{ImageBuffer, Rgb, RgbImage};
+
+    let count = image_paths.len();
+    if count == 0 {
         return None;
     }
 
-    // 打开 GIF 文件
-    let file = match File::open(gif_path) {
-        Ok(f) => f,
-        Err(e) => {
-            warn!("打开 GIF 文件失败: {}", e);
-            return None;
+    // 计算网格尺寸（接近正方形）
+    let (cols, rows) = calculate_grid_shape(count);
+    let tile_size: u32 = 256;
+    let gap: u32 = 12;
+
+    let canvas_w = cols * tile_size + (cols + 1) * gap;
+    let canvas_h = rows * tile_size + (rows + 1) * gap;
+
+    // 创建白色画布
+    let mut canvas: RgbImage = ImageBuffer::from_pixel(canvas_w, canvas_h, Rgb([255u8, 255, 255]));
+
+    for (i, path) in image_paths.iter().enumerate() {
+        let col = (i as u32) % cols;
+        let row = (i as u32) / cols;
+
+        let x = gap + col * (tile_size + gap);
+        let y = gap + row * (tile_size + gap);
+
+        // 加载并缩放图片
+        if let Ok(img) = image::open(path) {
+            let resized = img.resize_exact(tile_size, tile_size, image::imageops::FilterType::Lanczos3);
+            let rgb = resized.to_rgb8();
+
+            // 复制到画布
+            for py in 0..tile_size {
+                for px in 0..tile_size {
+                    let pixel = rgb.get_pixel(px, py);
+                    canvas.put_pixel(x + px, y + py, *pixel);
+                }
+            }
+
+            // 绘制序号角标（简单实现：左上角黑色方块 + 白色数字）
+            draw_number_badge(&mut canvas, x + 14, y + 14, i + 1);
         }
-    };
-
-    let reader = BufReader::new(file);
-    let decoder = match GifDecoder::new(reader) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!("GIF 解码失败: {}", e);
-            return None;
-        }
-    };
-
-    // 收集帧（带跳帧逻辑）
-    let frames: Vec<Frame> = decoder
-        .into_frames()
-        .filter_map(|f| f.ok())
-        .collect();
-
-    let total_frames = frames.len();
-    
-    // 如果帧数超过上限，均匀跳帧
-    let selected_frames = if total_frames > MAX_GIF_FRAMES {
-        let step = total_frames as f64 / MAX_GIF_FRAMES as f64;
-        let mut selected = Vec::with_capacity(MAX_GIF_FRAMES);
-        for i in 0..MAX_GIF_FRAMES {
-            let idx = (i as f64 * step) as usize;
-            selected.push(idx);
-        }
-        debug!("GIF 跳帧: {} 帧 → {} 帧", total_frames, MAX_GIF_FRAMES);
-        selected
-    } else {
-        (0..total_frames).collect()
-    };
-
-    // 将每帧转为 base64
-    let mut base64_frames = Vec::new();
-    for &idx in &selected_frames {
-        let frame = &frames[idx];
-        let buffer = frame.buffer();
-        let (width, height) = buffer.dimensions();
-        
-        // 将帧编码为 PNG bytes
-        let mut png_bytes = Vec::new();
-        let encoder = PngEncoder::new(&mut png_bytes);
-        if let Err(e) = encoder.write_image(
-            buffer.as_raw(),
-            width,
-            height,
-            ExtendedColorType::Rgba8,
-        ) {
-            warn!("编码帧 {} 为 PNG 失败: {}", idx, e);
-            continue;
-        }
-
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        let base64_str = STANDARD.encode(&png_bytes);
-        base64_frames.push(format!("data:image/png;base64,{}", base64_str));
     }
 
-    debug!("GIF 处理完成，共 {} 帧用于分析", base64_frames.len());
+    // 编码为 PNG
+    let mut buf = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    image::ImageEncoder::write_image(encoder, canvas.as_raw(), canvas.width(), canvas.height(), image::ExtendedColorType::Rgb8).ok()?;
+    Some(buf)
+}
 
-    // 构建多图请求
-    let gif_prompt = format!(
-        "这是一个动态图表情包，每一张图代表了动态图的一帧。{}",
-        prompt
-    );
+/// 计算网格形状（接近正方形）
+fn calculate_grid_shape(count: usize) -> (u32, u32) {
+    let n = count as u32;
+    let sqrt = (n as f64).sqrt() as u32;
+    for cols in (1..=sqrt + 1).rev() {
+        let rows = (n + cols - 1) / cols;
+        if cols * rows >= n && (cols as i32 - rows as i32).abs() <= 1 {
+            return (cols, rows);
+        }
+    }
+    (n.min(5), (n + 4) / 5)
+}
 
-    // 构建 content 数组
-    let mut content: Vec<serde_json::Value> = base64_frames
-        .iter()
-        .map(|data_url| {
-            serde_json::json!({
-                "type": "input_image",
-                "image_url": data_url
-            })
-        })
-        .collect();
+/// 在画布上绘制数字角标（简化的像素字体）
+fn draw_number_badge(canvas: &mut image::RgbImage, x: u32, y: u32, num: usize) {
+    let badge_size = 28u32;
+    // 黑色半透明背景
+    for dy in 0..badge_size {
+        for dx in 0..badge_size {
+            if x + dx < canvas.width() && y + dy < canvas.height() {
+                canvas.put_pixel(x + dx, y + dy, image::Rgb([40u8, 40, 40]));
+            }
+        }
+    }
+    // 白色数字（简化：用像素点绘制）
+    let digits = format!("{}", num);
+    let mut offset_x = 6u32;
+    for ch in digits.chars() {
+        draw_digit(canvas, x + offset_x, y + 6, ch);
+        offset_x += 10;
+    }
+}
 
-    // 添加文本提示
-    content.push(serde_json::json!({
-        "type": "input_text",
-        "text": gif_prompt
-    }));
+/// 绘制单个数字字符（5x7 像素字体）
+fn draw_digit(canvas: &mut image::RgbImage, x: u32, y: u32, ch: char) {
+    let patterns: &[u8] = match ch {
+        '0' => &[0b111, 0b101, 0b101, 0b101, 0b101, 0b101, 0b111],
+        '1' => &[0b010, 0b110, 0b010, 0b010, 0b010, 0b010, 0b111],
+        '2' => &[0b111, 0b001, 0b001, 0b111, 0b100, 0b100, 0b111],
+        '3' => &[0b111, 0b001, 0b001, 0b111, 0b001, 0b001, 0b111],
+        '4' => &[0b101, 0b101, 0b101, 0b111, 0b001, 0b001, 0b001],
+        '5' => &[0b111, 0b100, 0b100, 0b111, 0b001, 0b001, 0b111],
+        '6' => &[0b111, 0b100, 0b100, 0b111, 0b101, 0b101, 0b111],
+        '7' => &[0b111, 0b001, 0b001, 0b010, 0b010, 0b100, 0b100],
+        '8' => &[0b111, 0b101, 0b101, 0b111, 0b101, 0b101, 0b111],
+        '9' => &[0b111, 0b101, 0b101, 0b111, 0b001, 0b001, 0b111],
+        _ => &[0b111, 0b101, 0b101, 0b101, 0b101, 0b101, 0b111],
+    };
 
-    let request_body = serde_json::json!({
-        "model": cfg.vision.model,
-        "input": [{
-            "role": "user",
-            "content": content
-        }],
-        "max_output_tokens": cfg.vision.max_tokens
-    });
-
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-    call_vlm_api(&url, &cfg.vision.api_key, &request_body)
+    for (dy, &row) in patterns.iter().enumerate() {
+        for dx in 0..3 {
+            if (row >> (2 - dx)) & 1 == 1 {
+                let px = x + dx * 2;
+                let py = y + dy as u32 * 2;
+                if px + 1 < canvas.width() && py + 1 < canvas.height() {
+                    canvas.put_pixel(px, py, image::Rgb([255u8, 255, 255]));
+                    canvas.put_pixel(px + 1, py, image::Rgb([255u8, 255, 255]));
+                    canvas.put_pixel(px, py + 1, image::Rgb([255u8, 255, 255]));
+                    canvas.put_pixel(px + 1, py + 1, image::Rgb([255u8, 255, 255]));
+                }
+            }
+        }
+    }
 }
 
 fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<String> {

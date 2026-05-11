@@ -851,12 +851,10 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 
     // ── 表情包自动注册（仅表情包，非普通图片）──
     if trimmed.contains("[CQ:image,") {
-        debug!("表情包注册: {:?}", trimmed);
         let trimmed_cpy = trimmed.to_string();
         std::thread::spawn(move || {
             sticker::register_from_cq(&trimmed_cpy);
         });
-        
     }
 
     // ── 所有消息加入批次，由 AI 决策是否回复 ──

@@ -41,12 +41,29 @@ pub fn tool_send_sticker() -> Tool {
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
-                "emotion": { 
-                    "type": "string", 
-                    "description": "想要表达的情绪，如'开心'、'难过'、'搞笑'" 
+                "emotion": {
+                    "type": "string",
+                    "description": "想要表达的情绪，如'开心'、'难过'、'搞笑'"
                 }
             },
             "required": ["emotion"]
+        }),
+    }}
+}
+
+pub fn tool_tool_search() -> Tool {
+    Tool { tool_type: "function".into(), function: FunctionDef {
+        name: "tool_search".into(),
+        description: "搜索可用的延迟工具。找到的工具会在后续轮次中变为可用。".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词，如工具名称或功能描述"
+                }
+            },
+            "required": ["query"]
         }),
     }}
 }
