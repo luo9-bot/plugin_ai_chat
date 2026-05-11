@@ -33,3 +33,17 @@ pub fn tool_finish() -> Tool {
         parameters: serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]}),
     }}
 }
+
+pub fn tool_send_emoji() -> Tool {
+    Tool { tool_type: "function".into(), function: FunctionDef {
+        name: "send_emoji".into(),
+        description: "发送一个表情包。当你想用表情包表达情绪时调用。".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "emotion": { "type": "string", "description": "想要表达的情绪，如'开心'、'难过'、'搞笑'" }
+            },
+            "required": ["emotion"]
+        }),
+    }}
+}

@@ -1,0 +1,502 @@
+//! 洛玖表情包管理器
+//!
+//! 负责表情包的注册、选择和维护。
+//! 使用视觉模型（VLM）进行表情包选择和描述生成。
+
+use tracing::{debug, info, warn};
+
+use super::store::*;
+
+/// 表情包选择结果
+pub struct EmojiSelection {
+    pub hash: String,
+    pub path: String,
+    pub description: String,
+    pub reason: String,
+}
+
+// ── 注册 ────────────────────────────────────────────────────────
+
+/// 注册表情包（从用户发送的图片）
+///
+/// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 注册
+pub fn register_emoji(image_bytes: &[u8], format: &str) -> Option<String> {
+    let hash = compute_hash(image_bytes);
+    let mut store = load_store();
+
+    // 去重检查
+    if store.emojis.iter().any(|e| e.hash == hash) {
+        debug!(hash = %hash[..16.min(hash.len())], "emoji: already registered");
+        return None;
+    }
+
+    // 保存文件
+    let dir = emoji_dir();
+    std::fs::create_dir_all(&dir).ok();
+    let filename = format!("{}.{}", hash, format);
+    let path = dir.join(&filename);
+    std::fs::write(&path, image_bytes).ok();
+
+    // 通过 VLM 生成描述和情绪标签
+    let (description, emotions) = generate_description_with_vlm(&path);
+
+    let now = crate::util::now_secs();
+    let entry = EmojiEntry {
+        hash: hash.clone(),
+        path: format!("emoji/{}", filename),
+        description: description.clone(),
+        emotions,
+        query_count: 0,
+        is_registered: true,
+        is_banned: false,
+        registered_at: now,
+        last_used_at: now,
+    };
+
+    info!(hash = %hash[..16.min(hash.len())], description = %description, "emoji: registered");
+    store.emojis.push(entry);
+    save_store(&store);
+    Some(hash)
+}
+
+/// 从 CQ 码中提取图片 URL 并注册
+pub fn register_from_cq(cq_message: &str) -> Option<String> {
+    let urls = crate::vision::extract_image_urls(cq_message);
+    for url in urls {
+        // 下载图片
+        if let Ok(mut resp) = ureq::get(&url).call() {
+            if let Ok(bytes) = resp.body_mut().read_to_vec() {
+                let format = detect_format(&bytes);
+                return register_emoji(&bytes, &format);
+            }
+        }
+    }
+    None
+}
+
+// ── 选择 ────────────────────────────────────────────────────────
+
+/// 使用 VLM 网格选择最合适的表情包
+///
+/// 1. 从候选中随机采样
+/// 2. 加载图片
+/// 3. 发送给 VLM 让它选择
+/// 4. 解析选择结果
+pub fn select_emoji_vlm(
+    context: &str,
+    target_emotion: &str,
+    exclude_hashes: &[String],
+) -> Option<EmojiSelection> {
+    let store = load_store();
+    let candidates: Vec<&EmojiEntry> = store.emojis.iter()
+        .filter(|e| e.is_registered && !e.is_banned)
+        .filter(|e| !exclude_hashes.contains(&e.hash))
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    // 采样：最多 20 个候选
+    let sample_size = candidates.len().min(20);
+    let sampled = weighted_sample(&candidates, sample_size);
+
+    // 加载图片路径
+    let data_dir = crate::config::data_dir();
+    let image_paths: Vec<String> = sampled.iter()
+        .map(|e| data_dir.join(&e.path).to_string_lossy().to_string())
+        .collect();
+
+    // 构建 VLM 请求：多张图片 + 选择 prompt
+    let selection = select_with_vlm(&image_paths, context, target_emotion);
+
+    match selection {
+        Some((index, reason)) => {
+            if index < sampled.len() {
+                let selected = sampled[index];
+                debug!(
+                    hash = %selected.hash[..16.min(selected.hash.len())],
+                    emotion = target_emotion,
+                    reason = %reason,
+                    "emoji: vlm selected"
+                );
+                Some(EmojiSelection {
+                    hash: selected.hash.clone(),
+                    path: selected.path.clone(),
+                    description: selected.description.clone(),
+                    reason,
+                })
+            } else {
+                // 索引越界，fallback 到第一个
+                let selected = sampled[0];
+                Some(EmojiSelection {
+                    hash: selected.hash.clone(),
+                    path: selected.path.clone(),
+                    description: selected.description.clone(),
+                    reason: "VLM 索引越界，使用默认".to_string(),
+                })
+            }
+        }
+        None => {
+            // VLM 失败，fallback 到情绪标签匹配
+            select_emoji_by_emotion(target_emotion, &candidates)
+        }
+    }
+}
+
+/// 情绪标签匹配选择（VLM 的 fallback）
+fn select_emoji_by_emotion(
+    target_emotion: &str,
+    candidates: &[&EmojiEntry],
+) -> Option<EmojiSelection> {
+    let mut scored: Vec<(&EmojiEntry, f64)> = candidates.iter()
+        .map(|e| {
+            let emotion_score = calculate_emotion_similarity(target_emotion, &e.emotions);
+            let usage_bonus = (e.query_count as f64).ln().max(0.0) * 0.1;
+            (*e, emotion_score + usage_bonus)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let top_n: Vec<_> = scored.into_iter().take(10).collect();
+    if top_n.is_empty() {
+        return None;
+    }
+
+    let idx = (crate::util::now_millis() as usize) % top_n.len();
+    let (selected, _) = &top_n[idx];
+
+    Some(EmojiSelection {
+        hash: selected.hash.clone(),
+        path: selected.path.clone(),
+        description: selected.description.clone(),
+        reason: format!("情绪标签匹配: {}", target_emotion),
+    })
+}
+
+// ── VLM 调用 ────────────────────────────────────────────────────
+
+/// 通过 VLM 生成表情包描述和情绪标签
+fn generate_description_with_vlm(path: &std::path::Path) -> (String, Vec<String>) {
+    let cfg = crate::config::get();
+    if !cfg.vision.enabled() {
+        return ("表情包".to_string(), vec!["未知".to_string()]);
+    }
+
+    let prompt = "这是一个表情包图片。请提取该表情主要表达的情绪或语气标签，最多5个，用逗号分隔。只返回标签，不要解释。";
+
+    match call_vlm_with_image(path, prompt) {
+        Some(response) => {
+            let emotions = parse_emotions(&response);
+            let description = emotions.join(",");
+            (description, emotions)
+        }
+        None => ("表情包".to_string(), vec!["未知".to_string()]),
+    }
+}
+
+/// 使用 VLM 从多个候选中选择最佳表情包
+///
+/// 发送多张图片给 VLM，让它根据上下文和目标情绪选择最合适的
+fn select_with_vlm(
+    image_paths: &[String],
+    context: &str,
+    target_emotion: &str,
+) -> Option<(usize, String)> {
+    let cfg = crate::config::get();
+    if !cfg.vision.enabled() || image_paths.is_empty() {
+        return None;
+    }
+
+    // 构建多图请求
+    let mut content_items: Vec<serde_json::Value> = Vec::new();
+
+    // 添加图片
+    for (i, path) in image_paths.iter().enumerate() {
+        content_items.push(serde_json::json!({
+            "type": "input_image",
+            "image_url": format!("file://{}", path)
+        }));
+    }
+
+    // 添加选择 prompt
+    let prompt = format!(
+        "你是洛玖的临时表情包选择子代理。\n\n\
+         当前对话上下文：\n{}\n\n\
+         目标情绪：{}\n\n\
+         上面是 {} 个候选表情包（按顺序编号 1-{}）。\n\
+         请根据对话情境和目标情绪，选择最合适的一个。\n\
+         只返回 JSON：{{\"index\": N, \"reason\": \"选择原因\"}}\n\
+         N 为候选列表中的序号（从 1 开始）。",
+        context, target_emotion, image_paths.len(), image_paths.len()
+    );
+
+    content_items.push(serde_json::json!({
+        "type": "input_text",
+        "text": prompt
+    }));
+
+    let request_body = serde_json::json!({
+        "model": cfg.vision.model,
+        "input": [{
+            "role": "user",
+            "content": content_items
+        }],
+        "max_output_tokens": 256
+    });
+
+    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
+
+    match call_vlm_api(&url, &cfg.vision.api_key, &request_body) {
+        Some(response) => {
+            // 解析 JSON 响应
+            if let Some(json_str) = crate::ai::extract_json(&response) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    let index = parsed.get("index")
+                        .and_then(|v| v.as_u64())
+                        .map(|n| (n as usize).saturating_sub(1))  // 1-based -> 0-based
+                        .unwrap_or(0);
+                    let reason = parsed.get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    return Some((index, reason));
+                }
+            }
+            // JSON 解析失败，尝试从文本中提取数字
+            if let Some(n) = extract_number(&response) {
+                return Some((n.saturating_sub(1), "从文本提取".to_string()));
+            }
+            None
+        }
+        None => None,
+    }
+}
+
+/// 调用 VLM API（单图）
+fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<String> {
+    let cfg = crate::config::get();
+    if !cfg.vision.enabled() {
+        return None;
+    }
+
+    let path_str = image_path.to_string_lossy();
+    let request_body = serde_json::json!({
+        "model": cfg.vision.model,
+        "input": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": format!("file://{}", path_str)
+                },
+                {
+                    "type": "input_text",
+                    "text": prompt
+                }
+            ]
+        }],
+        "max_output_tokens": cfg.vision.max_tokens
+    });
+
+    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
+    call_vlm_api(&url, &cfg.vision.api_key, &request_body)
+}
+
+/// 通用 VLM API 调用
+fn call_vlm_api(url: &str, api_key: &str, body: &serde_json::Value) -> Option<String> {
+    let json_body = serde_json::to_string(body).ok()?;
+
+    let mut resp = ureq::post(url)
+        .header("Authorization", &format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .send(json_body.as_bytes())
+        .ok()?;
+
+    let resp_str = resp.body_mut().read_to_string().ok()?;
+
+    // 解析响应
+    serde_json::from_str::<serde_json::Value>(&resp_str).ok().and_then(|v| {
+        // responses 格式
+        v.get("output").and_then(|o| o.as_array()).and_then(|output| {
+            output.iter().find_map(|item| {
+                item.get("content").and_then(|c| c.as_array()).and_then(|contents| {
+                    contents.iter().find_map(|content| {
+                        content.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    })
+                })
+            })
+        })
+        // chat completions 格式
+        .or_else(|| {
+            v.get("choices").and_then(|c| c.as_array()).and_then(|choices| {
+                choices.first().and_then(|c| {
+                    c.get("message").and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str()).map(|s| s.to_string())
+                })
+            })
+        })
+    })
+}
+
+// ── 工具函数 ────────────────────────────────────────────────────
+
+/// 更新表情包使用次数
+pub fn update_usage(hash: &str) {
+    let mut store = load_store();
+    if let Some(entry) = store.emojis.iter_mut().find(|e| e.hash == hash) {
+        entry.query_count += 1;
+        entry.last_used_at = crate::util::now_secs();
+        save_store(&store);
+    }
+}
+
+/// 获取表情包文件路径
+pub fn get_emoji_path(hash: &str) -> Option<String> {
+    let store = load_store();
+    store.emojis.iter()
+        .find(|e| e.hash == hash && e.is_registered && !e.is_banned)
+        .map(|e| crate::config::data_dir().join(&e.path).to_string_lossy().to_string())
+}
+
+/// 获取表情包统计
+pub fn get_stats() -> (usize, usize) {
+    let store = load_store();
+    let total = store.emojis.len();
+    let registered = store.emojis.iter().filter(|e| e.is_registered && !e.is_banned).count();
+    (total, registered)
+}
+
+/// 维护：清理无效条目
+pub fn maintenance() {
+    let mut store = load_store();
+    let data_dir = crate::config::data_dir();
+    let before = store.emojis.len();
+
+    store.emojis.retain(|e| {
+        let full_path = data_dir.join(&e.path);
+        if e.is_registered && !full_path.exists() {
+            warn!(hash = %e.hash[..16.min(e.hash.len())], "emoji: file missing, removing");
+            false
+        } else {
+            true
+        }
+    });
+
+    let removed = before - store.emojis.len();
+    if removed > 0 {
+        info!(removed, "emoji: maintenance cleaned");
+        save_store(&store);
+    }
+}
+
+/// 加权采样：使用次数高的更容易被选中
+fn weighted_sample<'a>(candidates: &[&'a EmojiEntry], n: usize) -> Vec<&'a EmojiEntry> {
+    if candidates.len() <= n {
+        return candidates.to_vec();
+    }
+
+    // 简单实现：按使用次数加权随机选择
+    let total_weight: f64 = candidates.iter().map(|e| (e.query_count as f64 + 1.0).sqrt()).sum();
+    let mut selected = Vec::new();
+    let mut used = std::collections::HashSet::new();
+
+    for _ in 0..n {
+        let mut roll = (crate::util::now_millis() as f64 / 1000.0) % 1.0;
+        // 简单的伪随机
+        roll = (roll * 7919.0) % 1.0;
+        let mut cumulative = 0.0;
+        for (i, candidate) in candidates.iter().enumerate() {
+            if used.contains(&i) { continue; }
+            let weight = (candidate.query_count as f64 + 1.0).sqrt();
+            cumulative += weight / total_weight;
+            if roll < cumulative {
+                selected.push(*candidate);
+                used.insert(i);
+                break;
+            }
+        }
+    }
+
+    // 如果没选够，补上未选的
+    for (i, candidate) in candidates.iter().enumerate() {
+        if selected.len() >= n { break; }
+        if !used.contains(&i) {
+            selected.push(*candidate);
+        }
+    }
+
+    selected
+}
+
+fn compute_hash(data: &[u8]) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in data {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{:016x}_{:08x}", h, data.len())
+}
+
+/// 从描述文本中解析情绪标签
+fn parse_emotions(description: &str) -> Vec<String> {
+    description
+        .split(|c: char| c == ',' || c == '，' || c == '；' || c == ';' || c == '\n')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s.len() <= 10)
+        .collect()
+}
+
+/// 计算目标情绪与表情包情绪标签的匹配度
+fn calculate_emotion_similarity(target: &str, emotions: &[String]) -> f64 {
+    if emotions.is_empty() {
+        return 0.1;
+    }
+    let target_lower = target.to_lowercase();
+    let mut max_score: f64 = 0.0;
+
+    for emotion in emotions {
+        let emotion_lower = emotion.to_lowercase();
+        if target_lower == emotion_lower {
+            max_score = max_score.max(1.0);
+        } else if target_lower.contains(&emotion_lower) || emotion_lower.contains(&target_lower) {
+            max_score = max_score.max(0.7);
+        } else {
+            let overlap = text_similarity(&target_lower, &emotion_lower);
+            max_score = max_score.max(overlap * 0.5);
+        }
+    }
+    max_score
+}
+
+fn text_similarity(a: &str, b: &str) -> f64 {
+    if a.is_empty() || b.is_empty() { return 0.0; }
+    let chars_a: Vec<char> = a.chars().collect();
+    let chars_b: std::collections::HashSet<char> = b.chars().collect();
+    let overlap = chars_a.iter().filter(|c| chars_b.contains(c)).count();
+    overlap as f64 / chars_a.len().max(1) as f64
+}
+
+/// 从文本中提取第一个数字
+fn extract_number(text: &str) -> Option<usize> {
+    let mut num = String::new();
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            num.push(c);
+        } else if !num.is_empty() {
+            break;
+        }
+    }
+    num.parse().ok()
+}
+
+/// 检测图片格式
+fn detect_format(bytes: &[u8]) -> String {
+    if bytes.len() >= 4 {
+        if bytes[0] == 0x89 && bytes[1] == 0x50 { return "png".to_string(); }
+        if bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg".to_string(); }
+        if bytes[0] == 0x47 && bytes[1] == 0x49 { return "gif".to_string(); }
+        if bytes[0] == 0x52 && bytes[1] == 0x49 { return "webp".to_string(); }
+    }
+    "png".to_string()
+}

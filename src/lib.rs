@@ -11,6 +11,7 @@ pub mod util;
 #[cfg(feature = "plugin")]
 pub mod cron;
 pub mod emotion;
+pub mod emoji_system;
 pub mod learner;
 pub mod memory;
 pub mod mental_state;
