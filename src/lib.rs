@@ -10,8 +10,9 @@ pub mod crypto;
 pub mod util;
 #[cfg(feature = "plugin")]
 pub mod cron;
+pub mod emoji;
 pub mod emotion;
-pub mod emoji_system;
+pub mod sticker;
 pub mod learner;
 pub mod memory;
 pub mod mental_state;
@@ -847,6 +848,16 @@ fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 
     // ── 回复效果追踪：观察后续消息 ──
     reply_effect::observe_message(group_id, user_id, &text_only);
+
+    // ── 表情包自动注册（仅表情包，非普通图片）──
+    if trimmed.contains("[CQ:image,") {
+        debug!("表情包注册: {:?}", trimmed);
+        let trimmed_cpy = trimmed.to_string();
+        std::thread::spawn(move || {
+            sticker::register_from_cq(&trimmed_cpy);
+        });
+        
+    }
 
     // ── 所有消息加入批次，由 AI 决策是否回复 ──
     with_state(|s| s.append_batch(group_id, user_id, trimmed, record_ts));

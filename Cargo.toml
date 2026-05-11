@@ -37,6 +37,8 @@ unicode-normalization = "0.1"
 aho-corasick = "1"
 unicode-security = "0.1"
 smallvec = "1"
+base64 = "0.22.1"
+image = { version = "0.25", features = ["gif", "png"] }
 
 [dev-dependencies]
 proptest = "1"

@@ -22,10 +22,10 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext) -> S
             let m = crate::memory::get_context(uid);
             if m.is_empty() { format!("用户 {} 没有已知的人物信息", uid) } else { m }
         }
-        "send_emoji" => {
+        "send_sticker" => {
             let emotion = args.get("emotion").and_then(|v| v.as_str()).unwrap_or("开心");
             let context = format!("用户消息: {}", ctx.user_message);
-            match crate::emoji_system::send_emoji(ctx.group_id, ctx.user_id, emotion, &context, &[]) {
+            match crate::sticker::send_sticker(ctx.group_id, ctx.user_id, emotion, &context, &[]) {
                 Ok(desc) => format!("已发送表情包: {}", desc),
                 Err(e) => format!("发送表情包失败: {}", e),
             }
@@ -39,14 +39,14 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     let prompt = crate::prompt::PromptManager::get().raw("planner");
 
     // 构建工具列表（包含表情包工具）
-    let mut tools = vec![tool_reply(), tool_query_memory(), tool_query_person_info(), tool_send_emoji(), tool_finish()];
+    let tools = vec![tool_reply(), tool_query_memory(), tool_query_person_info(), tool_send_sticker(), tool_finish()];
 
     // 注入表情包上下文
-    let emoji_ctx = crate::emoji_system::get_emoji_context();
-    let extra = if emoji_ctx.is_empty() {
+    let sticker_ctx = crate::sticker::get_sticker_context();
+    let extra = if sticker_ctx.is_empty() {
         ctx.extra_context.clone()
     } else {
-        format!("{}\n\n{}", ctx.extra_context, emoji_ctx)
+        format!("{}\n\n{}", ctx.extra_context, sticker_ctx)
     };
 
     let system_prompt = format!("{}\n\n{}", prompt, extra);

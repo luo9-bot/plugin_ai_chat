@@ -34,14 +34,17 @@ pub fn tool_finish() -> Tool {
     }}
 }
 
-pub fn tool_send_emoji() -> Tool {
+pub fn tool_send_sticker() -> Tool {
     Tool { tool_type: "function".into(), function: FunctionDef {
-        name: "send_emoji".into(),
-        description: "发送一个表情包。当你想用表情包表达情绪时调用。".into(),
+        name: "send_sticker".into(),
+        description: "【非必需工具】仅在需要强化情绪表达时偶尔使用。不要每次回复都调用。当文字表达已足够时，应优先使用reply工具。".into(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
-                "emotion": { "type": "string", "description": "想要表达的情绪，如'开心'、'难过'、'搞笑'" }
+                "emotion": { 
+                    "type": "string", 
+                    "description": "想要表达的情绪，如'开心'、'难过'、'搞笑'" 
+                }
             },
             "required": ["emotion"]
         }),

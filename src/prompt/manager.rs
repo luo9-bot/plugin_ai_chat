@@ -130,7 +130,8 @@ impl PromptManager {
             ("vision_describe", include_str!("../../defaults/vision_describe.prompt")),
             ("daily_plan", include_str!("../../defaults/daily_plan.prompt")),
             ("learn_style", include_str!("../../defaults/learn_style.prompt")),
-            ("reply_effect_judge", include_str!("../../defaults/reply_effect_judge.prompt")),
+            ("sticker_content_filtration", include_str!("../../defaults/sticker_content_filtration.prompt")),
+            ("sticker_select", include_str!("../../defaults/sticker_select.prompt")),
         ];
 
         for (name, content) in defaults {

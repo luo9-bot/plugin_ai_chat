@@ -1,14 +1,18 @@
 use super::store::{Entry, WorkingMemoryStore};
 
 /// 记录一条群聊消息 (无论是否回复)，返回写入时间戳
+///
+/// 存储前剥离 Unicode emoji，防止污染记忆
 pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> u64 {
     if group_id == 0 { return 0; }
     let mut store = WorkingMemoryStore::load();
     let ts = crate::util::now_secs();
     let group = store.groups.entry(group_id.to_string()).or_default();
+    // 剥离 Unicode emoji 后存储
+    let cleaned = crate::emoji::strip_emoji(content);
     group.entries.push(Entry {
         user_id,
-        content: content.to_string(),
+        content: cleaned,
         timestamp: ts,
         bot_replied,
     });

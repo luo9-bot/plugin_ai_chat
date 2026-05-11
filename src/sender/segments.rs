@@ -52,7 +52,7 @@ pub fn normalize_segment_sep(reply: &str) -> String {
     out
 }
 
-/// 清理 AI 回复：移除自记忆标签，将中文字符间的空格转为分段符
+/// 清理 AI 回复：移除自记忆标签、Unicode emoji，将中文字符间的空格转为分段符
 ///
 /// 所有 AI 生成的消息发送前都应经过此函数。
 pub fn clean_reply(reply: &str) -> String {
@@ -63,7 +63,10 @@ pub fn clean_reply(reply: &str) -> String {
         result = result.replace(tag, "");
     }
 
-    // 2. 将中文字符之间的空格转为 |^| 分段符
+    // 2. 移除 Unicode emoji（AI 不应发送 emoji，使用表情包系统代替）
+    result = crate::emoji::strip_emoji(&result);
+
+    // 3. 将中文字符之间的空格转为 |^| 分段符
     let chars: Vec<char> = result.chars().collect();
     let mut out = String::with_capacity(result.len());
     for i in 0..chars.len() {

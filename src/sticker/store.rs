@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 /// 表情包条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmojiEntry {
+pub struct StickerEntry {
     /// SHA256 哈希（唯一标识）
     pub hash: String,
     /// 文件路径（相对 data 目录）
@@ -28,21 +28,21 @@ pub struct EmojiEntry {
 
 /// 表情包存储
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EmojiStore {
-    pub emojis: Vec<EmojiEntry>,
+pub struct StickerStore {
+    pub stickers: Vec<StickerEntry>,
 }
 
-static STORE: Mutex<Option<EmojiStore>> = Mutex::new(None);
+static STORE: Mutex<Option<StickerStore>> = Mutex::new(None);
 
 pub(crate) fn store_path() -> std::path::PathBuf {
-    crate::config::data_dir().join("emojis.json")
+    crate::config::data_dir().join("stickers.json")
 }
 
-pub(crate) fn emoji_dir() -> std::path::PathBuf {
-    crate::config::data_dir().join("emoji")
+pub(crate) fn sticker_dir() -> std::path::PathBuf {
+    crate::config::data_dir().join("sticker")
 }
 
-pub(crate) fn load_store() -> EmojiStore {
+pub(crate) fn load_store() -> StickerStore {
     let mut guard = STORE.lock().unwrap();
     if guard.is_none() {
         *guard = Some(crate::util::load_json(&store_path()));
@@ -50,7 +50,7 @@ pub(crate) fn load_store() -> EmojiStore {
     guard.clone().unwrap_or_default()
 }
 
-pub(crate) fn save_store(store: &EmojiStore) {
+pub(crate) fn save_store(store: &StickerStore) {
     let mut guard = STORE.lock().unwrap();
     *guard = Some(store.clone());
     crate::util::save_json(&store_path(), store);

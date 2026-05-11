@@ -4,11 +4,26 @@
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
 use tracing::{debug, info, warn};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use image::{
+    codecs::gif::GifDecoder,
+    codecs::png::PngEncoder,
+    ImageEncoder,
+    ExtendedColorType,
+    AnimationDecoder,
+    Frame
+};
+
+use std::io::BufReader;
+use std::fs::File;/// GIF 最大帧数
 
 use super::store::*;
 
+const MAX_GIF_FRAMES: usize = 20;
+
+
 /// 表情包选择结果
-pub struct EmojiSelection {
+pub struct StickerSelection {
     pub hash: String,
     pub path: String,
     pub description: String,
@@ -20,18 +35,18 @@ pub struct EmojiSelection {
 /// 注册表情包（从用户发送的图片）
 ///
 /// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 注册
-pub fn register_emoji(image_bytes: &[u8], format: &str) -> Option<String> {
+pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
     let mut store = load_store();
 
     // 去重检查
-    if store.emojis.iter().any(|e| e.hash == hash) {
-        debug!(hash = %hash[..16.min(hash.len())], "emoji: already registered");
+    if store.stickers.iter().any(|e| e.hash == hash) {
+        debug!(hash = %hash[..16.min(hash.len())], "sticker: already registered");
         return None;
     }
 
     // 保存文件
-    let dir = emoji_dir();
+    let dir = sticker_dir();
     std::fs::create_dir_all(&dir).ok();
     let filename = format!("{}.{}", hash, format);
     let path = dir.join(&filename);
@@ -41,9 +56,9 @@ pub fn register_emoji(image_bytes: &[u8], format: &str) -> Option<String> {
     let (description, emotions) = generate_description_with_vlm(&path);
 
     let now = crate::util::now_secs();
-    let entry = EmojiEntry {
+    let entry = StickerEntry {
         hash: hash.clone(),
-        path: format!("emoji/{}", filename),
+        path: format!("sticker/{}", filename),
         description: description.clone(),
         emotions,
         query_count: 0,
@@ -53,25 +68,58 @@ pub fn register_emoji(image_bytes: &[u8], format: &str) -> Option<String> {
         last_used_at: now,
     };
 
-    info!(hash = %hash[..16.min(hash.len())], description = %description, "emoji: registered");
-    store.emojis.push(entry);
+    info!(hash = %hash[..16.min(hash.len())], description = %description, "sticker: registered");
+    store.stickers.push(entry);
     save_store(&store);
     Some(hash)
 }
 
-/// 从 CQ 码中提取图片 URL 并注册
+/// 从 CQ 码中提取图片 URL 并注册（仅表情包，不注册普通图片）
+///
+/// 区分方式：
+/// - sub_type=1 + summary=[动画表情] → 表情包，自动注册
+/// - sub_type=0 → 普通图片，跳过
 pub fn register_from_cq(cq_message: &str) -> Option<String> {
+    // 只处理表情包，跳过普通图片
+    if !is_sticker_cq(cq_message) {
+        debug!("sticker: not an sticker CQ code, skipping registration");
+        return None;
+    }
+
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in urls {
+        debug!("图片url: {:?} ", url);
         // 下载图片
         if let Ok(mut resp) = ureq::get(&url).call() {
             if let Ok(bytes) = resp.body_mut().read_to_vec() {
                 let format = detect_format(&bytes);
-                return register_emoji(&bytes, &format);
+
+                // 内容过滤
+                if !content_filtration(&bytes, &format) {
+                    warn!("sticker: content filtration rejected");
+                    return None;
+                }
+
+                return register_sticker(&bytes, &format);
             }
         }
     }
     None
+}
+
+/// 判断 CQ 码是否为表情包（而非普通图片）
+///
+/// 表情包特征：sub_type=1，或 summary 包含 [动画表情]
+pub fn is_sticker_cq(cq_message: &str) -> bool {
+    // sub_type=1 表示表情包
+    if cq_message.contains("sub_type=1") {
+        return true;
+    }
+    // summary=[动画表情]（HTML 转义形式 &#91;动画表情&#93;）
+    if cq_message.contains("&#91;动画表情&#93;") || cq_message.contains("[动画表情]") {
+        return true;
+    }
+    false
 }
 
 // ── 选择 ────────────────────────────────────────────────────────
@@ -82,13 +130,13 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 /// 2. 加载图片
 /// 3. 发送给 VLM 让它选择
 /// 4. 解析选择结果
-pub fn select_emoji_vlm(
+pub fn select_sticker_vlm(
     context: &str,
     target_emotion: &str,
     exclude_hashes: &[String],
-) -> Option<EmojiSelection> {
+) -> Option<StickerSelection> {
     let store = load_store();
-    let candidates: Vec<&EmojiEntry> = store.emojis.iter()
+    let candidates: Vec<&StickerEntry> = store.stickers.iter()
         .filter(|e| e.is_registered && !e.is_banned)
         .filter(|e| !exclude_hashes.contains(&e.hash))
         .collect();
@@ -118,9 +166,9 @@ pub fn select_emoji_vlm(
                     hash = %selected.hash[..16.min(selected.hash.len())],
                     emotion = target_emotion,
                     reason = %reason,
-                    "emoji: vlm selected"
+                    "sticker: vlm selected"
                 );
-                Some(EmojiSelection {
+                Some(StickerSelection {
                     hash: selected.hash.clone(),
                     path: selected.path.clone(),
                     description: selected.description.clone(),
@@ -129,7 +177,7 @@ pub fn select_emoji_vlm(
             } else {
                 // 索引越界，fallback 到第一个
                 let selected = sampled[0];
-                Some(EmojiSelection {
+                Some(StickerSelection {
                     hash: selected.hash.clone(),
                     path: selected.path.clone(),
                     description: selected.description.clone(),
@@ -139,17 +187,17 @@ pub fn select_emoji_vlm(
         }
         None => {
             // VLM 失败，fallback 到情绪标签匹配
-            select_emoji_by_emotion(target_emotion, &candidates)
+            select_sticker_by_emotion(target_emotion, &candidates)
         }
     }
 }
 
 /// 情绪标签匹配选择（VLM 的 fallback）
-fn select_emoji_by_emotion(
+fn select_sticker_by_emotion(
     target_emotion: &str,
-    candidates: &[&EmojiEntry],
-) -> Option<EmojiSelection> {
-    let mut scored: Vec<(&EmojiEntry, f64)> = candidates.iter()
+    candidates: &[&StickerEntry],
+) -> Option<StickerSelection> {
+    let mut scored: Vec<(&StickerEntry, f64)> = candidates.iter()
         .map(|e| {
             let emotion_score = calculate_emotion_similarity(target_emotion, &e.emotions);
             let usage_bonus = (e.query_count as f64).ln().max(0.0) * 0.1;
@@ -166,7 +214,7 @@ fn select_emoji_by_emotion(
     let idx = (crate::util::now_millis() as usize) % top_n.len();
     let (selected, _) = &top_n[idx];
 
-    Some(EmojiSelection {
+    Some(StickerSelection {
         hash: selected.hash.clone(),
         path: selected.path.clone(),
         description: selected.description.clone(),
@@ -192,6 +240,66 @@ fn generate_description_with_vlm(path: &std::path::Path) -> (String, Vec<String>
             (description, emotions)
         }
         None => ("表情包".to_string(), vec!["未知".to_string()]),
+    }
+}
+
+/// 内容过滤：通过 VLM 检查表情包是否合规
+///
+/// 1. 符合公序良俗
+/// 2. 不能是色情、暴力等违法内容
+/// 3. 不能是截图、聊天记录
+/// 4. 不要出现 5 个以上文字
+fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
+    let cfg = crate::config::get();
+    if !cfg.vision.enabled() {
+        // 无 VLM 时跳过过滤
+        return true;
+    }
+
+    // 保存临时文件
+    let temp_dir = std::env::current_dir()
+        .unwrap_or_default()
+        .join("data").join("plugin_ai_chat").join("temp");
+    std::fs::create_dir_all(&temp_dir).ok();
+
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp_path = temp_dir.join(format!("sticker_filtration_{}.{}", timestamp, format));
+    debug!("文件写入路径: {:?}", tmp_path);
+    std::fs::write(&tmp_path, image_bytes).ok();
+
+    let prompt = crate::prompt::PromptManager::get()
+        .raw("sticker_content_filtration")
+        .to_string();
+
+    let result = if format == "gif" {
+        call_vlm_with_gif(&tmp_path, &prompt)
+    } else {
+        call_vlm_with_image(&tmp_path, &prompt)
+    };
+
+    // let result = call_vlm_with_image(&tmp_path, &prompt);
+
+    match result {
+        Some(response) => {
+            let trimmed = response.trim();
+            // 只接受"是"作为通过
+            let passed = trimmed.contains("是") && !trimmed.contains("否");
+            if !passed {
+                info!(response = %trimmed, "sticker: content filtration rejected");
+            }
+            std::fs::remove_file(&tmp_path).ok();
+            passed
+        }
+        None => {
+            // VLM 调用失败，保守起见拒绝
+            warn!("sticker: content filtration VLM call failed, rejecting");
+            std::fs::remove_file(&tmp_path).ok();
+            false
+        }
     }
 }
 
@@ -273,14 +381,147 @@ fn select_with_vlm(
     }
 }
 
-/// 调用 VLM API（单图）
+/// 处理 GIF：拆帧 → 分别转 base64 → 多图输入 VLM
+fn call_vlm_with_gif(gif_path: &std::path::Path, prompt: &str) -> Option<String> {
+    let cfg = crate::config::get();
+    if !cfg.vision.enabled() {
+        return None;
+    }
+
+    // 打开 GIF 文件
+    let file = match File::open(gif_path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("打开 GIF 文件失败: {}", e);
+            return None;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    let decoder = match GifDecoder::new(reader) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("GIF 解码失败: {}", e);
+            return None;
+        }
+    };
+
+    // 收集帧（带跳帧逻辑）
+    let frames: Vec<Frame> = decoder
+        .into_frames()
+        .filter_map(|f| f.ok())
+        .collect();
+
+    let total_frames = frames.len();
+    
+    // 如果帧数超过上限，均匀跳帧
+    let selected_frames = if total_frames > MAX_GIF_FRAMES {
+        let step = total_frames as f64 / MAX_GIF_FRAMES as f64;
+        let mut selected = Vec::with_capacity(MAX_GIF_FRAMES);
+        for i in 0..MAX_GIF_FRAMES {
+            let idx = (i as f64 * step) as usize;
+            selected.push(idx);
+        }
+        debug!("GIF 跳帧: {} 帧 → {} 帧", total_frames, MAX_GIF_FRAMES);
+        selected
+    } else {
+        (0..total_frames).collect()
+    };
+
+    // 将每帧转为 base64
+    let mut base64_frames = Vec::new();
+    for &idx in &selected_frames {
+        let frame = &frames[idx];
+        let buffer = frame.buffer();
+        let (width, height) = buffer.dimensions();
+        
+        // 将帧编码为 PNG bytes
+        let mut png_bytes = Vec::new();
+        let encoder = PngEncoder::new(&mut png_bytes);
+        if let Err(e) = encoder.write_image(
+            buffer.as_raw(),
+            width,
+            height,
+            ExtendedColorType::Rgba8,
+        ) {
+            warn!("编码帧 {} 为 PNG 失败: {}", idx, e);
+            continue;
+        }
+
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let base64_str = STANDARD.encode(&png_bytes);
+        base64_frames.push(format!("data:image/png;base64,{}", base64_str));
+    }
+
+    debug!("GIF 处理完成，共 {} 帧用于分析", base64_frames.len());
+
+    // 构建多图请求
+    let gif_prompt = format!(
+        "这是一个动态图表情包，每一张图代表了动态图的一帧。{}",
+        prompt
+    );
+
+    // 构建 content 数组
+    let mut content: Vec<serde_json::Value> = base64_frames
+        .iter()
+        .map(|data_url| {
+            serde_json::json!({
+                "type": "input_image",
+                "image_url": data_url
+            })
+        })
+        .collect();
+
+    // 添加文本提示
+    content.push(serde_json::json!({
+        "type": "input_text",
+        "text": gif_prompt
+    }));
+
+    let request_body = serde_json::json!({
+        "model": cfg.vision.model,
+        "input": [{
+            "role": "user",
+            "content": content
+        }],
+        "max_output_tokens": cfg.vision.max_tokens
+    });
+
+    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
+    call_vlm_api(&url, &cfg.vision.api_key, &request_body)
+}
+
 fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<String> {
     let cfg = crate::config::get();
     if !cfg.vision.enabled() {
         return None;
     }
 
-    let path_str = image_path.to_string_lossy();
+    // 读取文件
+    let image_bytes = match std::fs::read(image_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!("读取图片文件失败: {}", e);
+            return None;
+        }
+    };
+
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let base64_image = STANDARD.encode(&image_bytes);
+
+    // 根据扩展名推断 MIME 类型
+    let mime_type = image_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| match ext.to_lowercase().as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => "image/png",
+        })
+        .unwrap_or("image/png");
+
     let request_body = serde_json::json!({
         "model": cfg.vision.model,
         "input": [{
@@ -288,7 +529,7 @@ fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<Str
             "content": [
                 {
                     "type": "input_image",
-                    "image_url": format!("file://{}", path_str)
+                    "image_url": format!("data:{};base64,{}", mime_type, base64_image)
                 },
                 {
                     "type": "input_text",
@@ -344,7 +585,7 @@ fn call_vlm_api(url: &str, api_key: &str, body: &serde_json::Value) -> Option<St
 /// 更新表情包使用次数
 pub fn update_usage(hash: &str) {
     let mut store = load_store();
-    if let Some(entry) = store.emojis.iter_mut().find(|e| e.hash == hash) {
+    if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
         entry.query_count += 1;
         entry.last_used_at = crate::util::now_secs();
         save_store(&store);
@@ -352,9 +593,9 @@ pub fn update_usage(hash: &str) {
 }
 
 /// 获取表情包文件路径
-pub fn get_emoji_path(hash: &str) -> Option<String> {
+pub fn get_sticker_path(hash: &str) -> Option<String> {
     let store = load_store();
-    store.emojis.iter()
+    store.stickers.iter()
         .find(|e| e.hash == hash && e.is_registered && !e.is_banned)
         .map(|e| crate::config::data_dir().join(&e.path).to_string_lossy().to_string())
 }
@@ -362,8 +603,8 @@ pub fn get_emoji_path(hash: &str) -> Option<String> {
 /// 获取表情包统计
 pub fn get_stats() -> (usize, usize) {
     let store = load_store();
-    let total = store.emojis.len();
-    let registered = store.emojis.iter().filter(|e| e.is_registered && !e.is_banned).count();
+    let total = store.stickers.len();
+    let registered = store.stickers.iter().filter(|e| e.is_registered && !e.is_banned).count();
     (total, registered)
 }
 
@@ -371,27 +612,27 @@ pub fn get_stats() -> (usize, usize) {
 pub fn maintenance() {
     let mut store = load_store();
     let data_dir = crate::config::data_dir();
-    let before = store.emojis.len();
+    let before = store.stickers.len();
 
-    store.emojis.retain(|e| {
+    store.stickers.retain(|e| {
         let full_path = data_dir.join(&e.path);
         if e.is_registered && !full_path.exists() {
-            warn!(hash = %e.hash[..16.min(e.hash.len())], "emoji: file missing, removing");
+            warn!(hash = %e.hash[..16.min(e.hash.len())], "sticker: file missing, removing");
             false
         } else {
             true
         }
     });
 
-    let removed = before - store.emojis.len();
+    let removed = before - store.stickers.len();
     if removed > 0 {
-        info!(removed, "emoji: maintenance cleaned");
+        info!(removed, "sticker: maintenance cleaned");
         save_store(&store);
     }
 }
 
 /// 加权采样：使用次数高的更容易被选中
-fn weighted_sample<'a>(candidates: &[&'a EmojiEntry], n: usize) -> Vec<&'a EmojiEntry> {
+fn weighted_sample<'a>(candidates: &[&'a StickerEntry], n: usize) -> Vec<&'a StickerEntry> {
     if candidates.len() <= n {
         return candidates.to_vec();
     }

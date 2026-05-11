@@ -16,7 +16,12 @@ pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
     if now.saturating_sub(s.last_learned.get(&group_id).copied().unwrap_or(0)) < LEARN_INTERVAL_SECS { return; }
 
     let self_qq = crate::config::get().self_qq;
-    let user_msgs: Vec<&(u64, String)> = messages.iter().filter(|(u,_)| *u != self_qq).collect();
+    // 过滤：排除 bot 自身消息、纯 emoji 消息、剥离 Unicode emoji
+    let user_msgs: Vec<(u64, String)> = messages.iter()
+        .filter(|(u, _)| *u != self_qq)
+        .map(|(u, m)| (*u, crate::emoji::strip_emoji(m)))
+        .filter(|(_, m)| !m.trim().is_empty() && !crate::emoji::is_emoji_only(m))
+        .collect();
     if user_msgs.len() < MIN_MESSAGES { return; }
 
     let msg_text: Vec<String> = user_msgs.iter().map(|(u,m)| format!("[{}] {}", u, m)).collect();
