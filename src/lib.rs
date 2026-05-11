@@ -214,6 +214,9 @@ pub extern "C" fn plugin_main() {
     // 初始化 PromptManager（加载所有 .prompt 模板文件）
     prompt::PromptManager::init(&config::data_dir());
 
+    // 初始化错别字生成器（加载字频和拼音字典）
+    typo::init(&config::data_dir());
+
     // 初始化防注入模块
     anti_injection::init();
 
