@@ -138,6 +138,84 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     }
 }
 
+/// 群聊氛围评估：per-group 的主动参与
+///
+/// 不再对群里每个人独立检查，而是评估整个群的氛围：
+/// 1. 群聊是否安静了一段时间
+/// 2. bot 是否有活跃的活动状态（训练、吃饭等）
+/// 3. 情绪是否波动
+/// 4. 是否有特殊日期
+pub fn check_group_atmosphere(group_id: u64) {
+    let (enabled, quiet_start, quiet_end, _, _, _) = effective_config();
+    if !enabled {
+        return;
+    }
+
+    if is_quiet_hour(quiet_start, quiet_end) {
+        return;
+    }
+
+    let now = crate::util::now_secs();
+
+    // 检查 bot 是否有活跃的活动状态（训练、吃饭等）
+    // 活动状态下不主动参与群聊
+    let self_qq = crate::config::get().self_qq;
+    if self_qq > 0 {
+        if let Some(activity) = crate::activity::get_active_activity(self_qq) {
+            debug!(group_id, activity = ?activity.activity, "proactive: bot is busy, skipping");
+            return;
+        }
+    }
+
+    // 检查群聊最后活跃时间
+    let last_conversation = crate::with_shared_state(|s| {
+        s.last_conversation_times.get(&group_id).copied().unwrap_or(0)
+    });
+    let quiet_duration = now.saturating_sub(last_conversation);
+
+    // 群聊安静超过 10 分钟才考虑参与
+    if quiet_duration < 600 {
+        debug!(group_id, quiet_duration, "proactive: group not quiet enough");
+        return;
+    }
+
+    // 检查 bot 最近是否在群里发过消息
+    let recent_bot_msgs = crate::read_shared_state(|s| {
+        s.get_recent_bot_messages(group_id, 600, 3)
+    });
+    if !recent_bot_msgs.is_empty() {
+        debug!(group_id, "proactive: bot recently sent messages, skipping");
+        return;
+    }
+
+    // 检查同群消息去重
+    let msg = generate_atmosphere_message(group_id);
+    if msg.is_empty() {
+        return;
+    }
+
+    if is_duplicate_message(group_id, &msg) {
+        debug!(group_id, msg = %msg, "proactive: duplicate atmosphere message, skipping");
+        return;
+    }
+
+    // 发送氛围消息
+    info!(group_id, msg = %msg, quiet_duration, "proactive: atmosphere participation");
+    sender::safe_send_quiet(group_id, 0, &msg);
+    record_group_message(group_id, &msg);
+}
+
+/// 生成氛围消息（AI 生成，失败返回空）
+fn generate_atmosphere_message(group_id: u64) -> String {
+    let emo = emotion::get_state(crate::config::get().self_qq);
+    let trigger = if emo.intensity > 0.7 {
+        "mood_impulse"
+    } else {
+        "group_atmosphere"
+    };
+    super::generate::ai_generate_message(trigger, 0, group_id, &emo).unwrap_or_default()
+}
+
 /// 情绪冲动概率: 情绪越强烈，越可能突然想说话
 fn mood_impulse_probability(emo: &emotion::EmotionState) -> f64 {
     match emo.current {

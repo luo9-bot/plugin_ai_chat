@@ -12,4 +12,4 @@ pub use runtime::{
 };
 
 // trigger.rs
-pub use trigger::check_proactive_messages;
+pub use trigger::{check_proactive_messages, check_group_atmosphere};

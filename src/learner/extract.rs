@@ -25,11 +25,26 @@ pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
     if user_msgs.len() < MIN_MESSAGES { return; }
 
     let msg_text: Vec<String> = user_msgs.iter().map(|(u,m)| format!("[{}] {}", u, m)).collect();
-    let prompt = crate::prompt::PromptManager::get().raw("learn_style");
+
+    // 构建人设约束
+    let persona = crate::config::prompt();
+    let persona_constraint = if persona.is_empty() {
+        "只提取符合一般社交礼仪的表达。".to_string()
+    } else {
+        format!(
+            "重要约束：只提取符合以下人设的表达，不符合的直接忽略：\n{}\n\
+             提取的表达应该与上述人设的性格、语气、风格一致。\
+             如果某个表达与人设冲突（比如温柔的人设不应该学毒舌），不要提取。",
+            persona
+        )
+    };
+
+    let prompt_template = crate::prompt::PromptManager::get().raw("learn_style");
+    let prompt = prompt_template.replace("{persona_constraint}", &persona_constraint);
     let content = format!("群聊消息:\n{}", msg_text.join("\n"));
 
     debug!(group_id, msg_count = user_msgs.len(), "learner: starting");
-    match crate::ai::analyze(prompt, &content) {
+    match crate::ai::analyze(&prompt, &content) {
         Ok(response) => {
             if let Some(json_str) = crate::ai::extract_json(&response) {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {

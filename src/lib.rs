@@ -5,6 +5,7 @@ pub mod anti_injection;
 pub mod archive;
 pub mod blocklist;
 pub mod config;
+pub mod conversation_end;
 pub mod crisis;
 pub mod crypto;
 pub mod util;
@@ -30,6 +31,7 @@ pub mod self_memory;
 pub mod sender;
 pub mod state;
 pub mod timing_gate;
+pub mod typo;
 pub mod vision;
 pub mod working_memory;
 
@@ -370,9 +372,18 @@ fn check_periodic() {
     debug!(count = all_users.len(), "proactive: checking users");
 
     // 锁已释放，安全调用 proactive/emotion
+    // 私聊：per-user 检查（bot 可以主动找某个人聊天）
+    // 群聊：per-group 氛围评估（bot 自然参与群聊，不挨个找人）
+    let mut checked_groups: std::collections::HashSet<u64> = std::collections::HashSet::new();
     for (user_id, group_id) in &all_users {
         emotion::decay(*user_id);
-        proactive::check_proactive_messages(*user_id, *group_id);
+        if *group_id == 0 {
+            // 私聊：per-user 检查
+            proactive::check_proactive_messages(*user_id, *group_id);
+        } else if checked_groups.insert(*group_id) {
+            // 群聊：per-group 氛围评估（每个群只检查一次）
+            proactive::check_group_atmosphere(*group_id);
+        }
     }
 
     // 定期记忆审查 (每小时一次)
@@ -1662,6 +1673,21 @@ fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps
     let result: Result<(String, String), String> = if group_id == 0 {
         // 私聊：直接调用 ai::chat，不经过 Replyer 的额外 prompt 处理
         debug!(user_id, "private chat: direct ai::chat");
+
+        // 对话结束检测：关键词预筛选 + 上下文注入
+        let extra_context = if let Some((bot_last, _)) = history.last() {
+            let hour = util::current_hour_cst();
+            if conversation_end::keyword_screen(bot_last, &ai_message, hour) {
+                debug!(user_id, "conversation_end: keyword triggered, injecting context");
+                let end_ctx = conversation_end::get_context(bot_last, &ai_message);
+                format!("{}\n\n{}", extra_context, end_ctx)
+            } else {
+                extra_context
+            }
+        } else {
+            extra_context
+        };
+
         ai::chat(config::prompt(), &extra_context, &history, &ai_message)
     } else {
         // 群聊：Planner → Replyer
