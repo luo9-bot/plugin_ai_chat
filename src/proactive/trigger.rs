@@ -1,4 +1,6 @@
-use tracing::info;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::emotion;
 use crate::sender;
@@ -8,6 +10,33 @@ use super::runtime::{
     is_quiet_hour, check_date_reminders,
 };
 use super::generate::{generate_mood_message, generate_greeting};
+
+/// 群级消息去重：记录每个群最近发送的消息 (group_id -> (message, timestamp))
+static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, (String, u64)>>> = Mutex::new(None);
+
+/// 同群相同消息的冷却时间（秒）
+const GROUP_MSG_COOLDOWN_SECS: u64 = 600; // 10 分钟
+
+/// 检查同群是否 recently 发过相同消息
+fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
+    let guard = RECENT_GROUP_MESSAGES.lock().unwrap();
+    if let Some(ref map) = *guard {
+        if let Some((recent_msg, recent_time)) = map.get(&group_id) {
+            let now = crate::util::now_secs();
+            if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && recent_msg == msg {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 记录群级已发送消息
+fn record_group_message(group_id: u64, msg: &str) {
+    let mut guard = RECENT_GROUP_MESSAGES.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(group_id, (msg.to_string(), crate::util::now_secs()));
+}
 
 pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     info!(user_id, group_id, "proactive: 检查主动消息");
@@ -26,9 +55,14 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     // 日期提醒 -- 最高优先级
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
-        tracing::debug!(user_id, group_id, msg = %reminder_msg, "proactive: sending date reminder");
+        if is_duplicate_message(group_id, &reminder_msg) {
+            debug!(user_id, group_id, msg = %reminder_msg, "proactive: duplicate date reminder, skipping");
+            return;
+        }
+        debug!(user_id, group_id, msg = %reminder_msg, "proactive: sending date reminder");
         if sender::safe_send_quiet(group_id, user_id, &reminder_msg) {
             record_sent(user_id);
+            record_group_message(group_id, &reminder_msg);
         }
         return;
     }
@@ -54,9 +88,14 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         let roll = pseudo_random(user_id.wrapping_add(now));
         if impulse_prob > 0.0 && roll < impulse_prob {
             let msg = generate_mood_message(user_id, &emo, group_id);
-            tracing::debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
+            if is_duplicate_message(group_id, &msg) {
+                debug!(user_id, group_id, msg = %msg, "proactive: duplicate mood message, skipping");
+                return;
+            }
+            debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
             if sender::safe_send_quiet(group_id, user_id, &msg) {
                 record_sent(user_id);
+                record_group_message(group_id, &msg);
             }
             return;
         }
@@ -76,9 +115,14 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     if time_since_last >= mood_adjusted && time_since_reply >= mood_adjusted {
         let msg = generate_greeting(user_id, group_id);
-        tracing::debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending greeting");
+        if is_duplicate_message(group_id, &msg) {
+            debug!(user_id, group_id, msg = %msg, "proactive: duplicate greeting, skipping");
+            return;
+        }
+        debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending greeting");
         if sender::safe_send_quiet(group_id, user_id, &msg) {
             record_sent(user_id);
+            record_group_message(group_id, &msg);
         }
     } else {
         tracing::debug!(

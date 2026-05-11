@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
 
-use super::segments::{normalize_segment_sep, split_segments};
+use super::segments::{normalize_segment_sep, split_segments, clean_reply};
 use crate::anti_injection;
 use crate::config;
 
@@ -61,10 +61,11 @@ pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
     Bot::send_group_msg(group_id, msg);
 }
 
-/// 安全发送 AI 生成的消息：check_output + 分割 + 打字延迟
+/// 安全发送 AI 生成的消息：clean_reply + check_output + 分割 + 打字延迟
 pub fn safe_send(group_id: u64, user_id: u64, reply: &str) -> bool {
+    let cleaned = clean_reply(reply);
     let cfg = config::get();
-    let check = anti_injection::check_output(user_id, reply, &cfg.anti_injection);
+    let check = anti_injection::check_output(user_id, &cleaned, &cfg.anti_injection);
     if !check.passed {
         warn!(
             user_id, group_id,
@@ -77,14 +78,15 @@ pub fn safe_send(group_id: u64, user_id: u64, reply: &str) -> bool {
         }
         return false;
     }
-    send_with_typing(group_id, user_id, reply);
+    send_with_typing(group_id, user_id, &cleaned);
     true
 }
 
 /// 安静版安全发送：无打字延迟
 pub fn safe_send_quiet(group_id: u64, user_id: u64, reply: &str) -> bool {
+    let cleaned = clean_reply(reply);
     let cfg = config::get();
-    let check = anti_injection::check_output(user_id, reply, &cfg.anti_injection);
+    let check = anti_injection::check_output(user_id, &cleaned, &cfg.anti_injection);
     if !check.passed {
         warn!(
             user_id, group_id,
@@ -97,6 +99,6 @@ pub fn safe_send_quiet(group_id: u64, user_id: u64, reply: &str) -> bool {
         }
         return false;
     }
-    send_msg(group_id, user_id, reply);
+    send_msg(group_id, user_id, &cleaned);
     true
 }
