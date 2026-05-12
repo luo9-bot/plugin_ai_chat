@@ -71,7 +71,7 @@ pub(crate) fn processing_users() -> &'static Mutex<HashSet<(u64, u64)>> {
 
 /// 消息处理队列：替代 thread::spawn，串行化处理避免并发混乱
 pub(crate) struct MessageQueue {
-    pub(crate) tx: mpsc::SyncSender<ProcessingTask>,
+    pub(crate) tx: mpsc::Sender<ProcessingTask>,
 }
 
 pub(crate) struct ProcessingTask {
@@ -82,7 +82,7 @@ pub(crate) struct ProcessingTask {
 pub(crate) static MESSAGE_QUEUE: OnceLock<MessageQueue> = OnceLock::new();
 
 fn init_message_queue() {
-    let (tx, rx) = mpsc::sync_channel::<ProcessingTask>(100);
+    let (tx, rx) = mpsc::channel::<ProcessingTask>();
     MESSAGE_QUEUE.set(MessageQueue { tx }).ok();
 
     thread::spawn(move || {
