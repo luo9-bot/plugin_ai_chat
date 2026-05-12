@@ -48,17 +48,22 @@ import AntiInjectionView from './views/AntiInjectionView.vue'
 import ConversationsView from './views/ConversationsView.vue'
 import QuotaView from './views/QuotaView.vue'
 import ConfigView from './views/ConfigView.vue'
+import DashboardView from './views/DashboardView.vue'
+import StickerView from './views/StickerView.vue'
+import BlocklistView from './views/BlocklistView.vue'
 
 const loggedIn = ref(false)
 const tokenInput = ref('')
 const loginErr = ref('')
-const currentTab = ref('self-thoughts')
+const currentTab = ref('dashboard')
 const sidebarOpen = ref(false)
 
 const tabs = [
+  { id: 'dashboard', name: '仪表盘', comp: DashboardView },
   { id: 'config', name: '配置', comp: ConfigView },
   { id: 'conversations', name: '对话管理', comp: ConversationsView },
   { id: 'quota', name: '配额追踪', comp: QuotaView },
+  { id: 'sticker', name: '表情包', comp: StickerView },
   { id: 'self-thoughts', name: '自我记忆', comp: SelfThoughts },
   { id: 'memory', name: '用户记忆', comp: UserMemory },
   { id: 'working-memory', name: '工作记忆', comp: WorkingMemory },
@@ -66,6 +71,7 @@ const tabs = [
   { id: 'emotion', name: '情绪', comp: EmotionView },
   { id: 'mental-state', name: '心理状态', comp: MentalState },
   { id: 'proactive', name: '主动对话', comp: ProactiveView },
+  { id: 'blocklist', name: '黑名单', comp: BlocklistView },
   { id: 'anti-injection', name: '防注入', comp: AntiInjectionView },
   { id: 'archive', name: '归档', comp: ArchiveView },
   { id: 'backups', name: '备份', comp: BackupsView },

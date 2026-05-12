@@ -137,6 +137,80 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
     }
 }
 
+// ── 表情包管理 ────────────────────────────────────────────────
+
+pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
+    let (total, registered) = crate::sticker::get_stats();
+    let store = crate::sticker::store::load_store();
+    ok(serde_json::json!({
+        "total": total,
+        "registered": registered,
+        "stickers": store.stickers.iter().map(|e| serde_json::json!({
+            "hash": e.hash,
+            "description": e.description,
+            "emotions": e.emotions,
+            "query_count": e.query_count,
+            "is_registered": e.is_registered,
+            "is_banned": e.is_banned,
+            "is_builtin": e.is_builtin,
+            "path": e.path,
+            "registered_at": e.registered_at,
+            "last_used_at": e.last_used_at,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// 切换表情包封禁状态
+pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut store = crate::sticker::store::load_store();
+    let banned = store.stickers.iter_mut().find(|e| e.hash == hash).map(|entry| {
+        entry.is_banned = !entry.is_banned;
+        entry.is_banned
+    });
+    if let Some(is_banned) = banned {
+        crate::sticker::store::save_store(&store);
+        return ok(serde_json::json!({"ok": true, "is_banned": is_banned}));
+    }
+    err(404, "sticker not found")
+}
+
+/// 删除表情包
+pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut store = crate::sticker::store::load_store();
+    let data_dir = crate::config::data_dir();
+    if let Some(idx) = store.stickers.iter().position(|e| e.hash == hash) {
+        let entry = &store.stickers[idx];
+        let full_path = data_dir.join(&entry.path);
+        if full_path.exists() {
+            std::fs::remove_file(&full_path).ok();
+        }
+        store.stickers.remove(idx);
+        crate::sticker::store::save_store(&store);
+        return ok(serde_json::json!({"ok": true}));
+    }
+    err(404, "sticker not found")
+}
+
+// ── 仪表盘统计 ────────────────────────────────────────────────
+
+pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
+    let mem_store = crate::memory::MemoryStore::load();
+    let user_count = mem_store.users.len();
+    let mem_count: usize = mem_store.users.values().map(|u| u.entries.len()).sum();
+
+    let (_, sticker_registered) = crate::sticker::get_stats();
+    let emotion_count = crate::emotion::user_count();
+
+    ok(serde_json::json!({
+        "memory_users": user_count,
+        "memory_entries": mem_count,
+        "sticker_count": sticker_registered,
+        "emotion_users": emotion_count,
+        "active_groups": crate::get_active_groups().len(),
+        "active_users": crate::get_active_users().len(),
+    }))
+}
+
 // ── Handler: 用户记忆 ──────────────────────────────────────────
 
 pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {

@@ -158,6 +158,14 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handlers::handle_config(&method, &body),
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
+        Some(&"sticker") => {
+            match api_segs.get(1).copied() {
+                Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
+                Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
+                _ => handlers::handle_sticker(),
+            }
+        }
+        Some(&"dashboard") => handlers::handle_dashboard(),
         _ => err(404, "not found"),
     }
 }
