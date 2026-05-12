@@ -38,7 +38,7 @@ vision:
 embedding:
   api_key: ""                                    # Embedding API key，留空 = 禁用
   base_url: "https://ark.cn-beijing.volces.com/api/v3"  # API 地址
-  model: "doubao-embedding-text-240715"          # Embedding 模型
+  model: "doubao-embedding-vision-251215"          # Embedding 模型（多模态向量化）
 
 # ── 提示词 ─────────────────────────────────────────────────────
 # 放在 prompts/ 目录下的文件名

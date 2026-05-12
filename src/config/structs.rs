@@ -659,7 +659,7 @@ fn default_vision_base_url() -> String { "https://api.deepseek.com".into() }
 fn default_vision_model() -> String { "	deepseek-v4-flash".into() }
 fn default_vision_max_tokens() -> u32 { 256 }
 fn default_embedding_base_url() -> String { "https://ark.cn-beijing.volces.com/api/v3".into() }
-fn default_embedding_model() -> String { "doubao-embedding-text-240715".into() }
+fn default_embedding_model() -> String { "doubao-embedding-vision-251215".into() }
 fn default_msg_ok() -> String { "好的".into() }
 fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }

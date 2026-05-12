@@ -1,12 +1,13 @@
 //! Embedding 向量生成
 //!
-//! 调用外部 Embedding API（OpenAI 兼容格式）生成文本向量。
+//! 调用火山引擎多模态向量化 API 生成文本向量。
+//! API 文档: https://www.volcengine.com/docs/82379/1409291
 
 use tracing::{debug, warn};
 
-/// Embedding 向量维度（Doubao 模型输出 2560 维）
+/// Embedding 向量维度（doubao-embedding-vision 默认输出 2048 维）
 #[allow(dead_code)]
-const EMBEDDING_DIMENSION: usize = 2560;
+const EMBEDDING_DIMENSION: usize = 2048;
 
 /// 调用 Embedding API 生成单个文本的向量
 pub fn embed_text(text: &str) -> Option<Vec<f32>> {
@@ -15,34 +16,39 @@ pub fn embed_text(text: &str) -> Option<Vec<f32>> {
         return None;
     }
 
-    let results = embed_batch(&[text.to_string()]);
-    results.into_iter().next().flatten()
+    embed_single(text)
 }
 
-/// 批量生成 embedding（减少 API 调用次数）
-pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
+/// 调用多模态向量化 API，对单个文本生成向量
+fn embed_single(text: &str) -> Option<Vec<f32>> {
     let cfg = crate::config::get();
-    if !cfg.embedding.enabled() || texts.is_empty() {
-        return vec![None; texts.len()];
-    }
 
-    let url = format!("{}/embeddings", cfg.embedding.base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/embeddings/multimodal",
+        cfg.embedding.base_url.trim_end_matches('/')
+    );
 
     let request_body = serde_json::json!({
         "model": cfg.embedding.model,
-        "input": texts,
-        "encoding_format": "float"
+        "input": [
+            {
+                "type": "text",
+                "text": text
+            }
+        ],
+        "encoding_format": "float",
+        "dimensions": EMBEDDING_DIMENSION
     });
 
     let json_body = match serde_json::to_string(&request_body) {
         Ok(j) => j,
         Err(e) => {
             warn!(error = %e, "embedding: serialize failed");
-            return vec![None; texts.len()];
+            return None;
         }
     };
 
-    debug!(count = texts.len(), model = %cfg.embedding.model, "embedding: sending request");
+    debug!(model = %cfg.embedding.model, "embedding: sending request");
 
     let mut resp = match ureq::post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.embedding.api_key))
@@ -52,7 +58,7 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
         Ok(r) => r,
         Err(e) => {
             warn!(error = %e, "embedding: request failed");
-            return vec![None; texts.len()];
+            return None;
         }
     };
 
@@ -60,45 +66,66 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "embedding: read response failed");
-            return vec![None; texts.len()];
+            return None;
         }
     };
 
-    // 解析响应：OpenAI 兼容格式
-    // { "data": [{ "embedding": [0.1, 0.2, ...], "index": 0 }, ...] }
+    // 解析响应：多模态向量化格式
+    // { "data": { "embedding": [0.1, 0.2, ...], "object": "embedding" }, ... }
     let parsed: serde_json::Value = match serde_json::from_str(&resp_str) {
         Ok(v) => v,
         Err(e) => {
             warn!(error = %e, "embedding: parse response failed");
-            return vec![None; texts.len()];
+            return None;
         }
     };
 
-    let data = match parsed.get("data").and_then(|d| d.as_array()) {
+    let embedding = match parsed
+        .get("data")
+        .and_then(|d| d.get("embedding"))
+        .and_then(|e| e.as_array())
+    {
         Some(arr) => arr,
         None => {
-            warn!("embedding: no 'data' field in response");
-            return vec![None; texts.len()];
+            warn!("embedding: no 'data.embedding' field in response");
+            return None;
         }
     };
 
-    // 按 index 排序，构建结果
-    let mut results: Vec<Option<Vec<f32>>> = vec![None; texts.len()];
-    for item in data {
-        let index = item.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        if let Some(embedding) = item.get("embedding").and_then(|e| e.as_array()) {
-            let vec: Vec<f32> = embedding
-                .iter()
-                .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-                .collect();
-            if index < results.len() {
-                results[index] = Some(vec);
-            }
-        }
+    let vec: Vec<f32> = embedding
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+        .collect();
+
+    if vec.is_empty() {
+        warn!("embedding: received empty embedding vector");
+        return None;
     }
 
+    debug!("embedding: completed");
+    Some(vec)
+}
+
+/// 批量生成 embedding（对每个文本单独调用多模态 API）
+///
+/// 注意：多模态向量化 API 不支持旧版批量返回格式，
+/// 每个 input 数组整体只返回一个向量，因此需要逐个调用。
+pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
+    let cfg = crate::config::get();
+    if !cfg.embedding.enabled() || texts.is_empty() {
+        return vec![None; texts.len()];
+    }
+
+    let results: Vec<Option<Vec<f32>>> = texts
+        .iter()
+        .map(|t| {
+            debug!("embedding: sending batch item");
+            embed_single(t)
+        })
+        .collect();
+
     let success_count = results.iter().filter(|r| r.is_some()).count();
-    debug!(total = texts.len(), success = success_count, "embedding: completed");
+    debug!(total = texts.len(), success = success_count, "embedding: batch completed");
 
     results
 }

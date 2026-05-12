@@ -173,7 +173,7 @@ const DEFAULTS = {
   ]},
   log: { enabled: true, level: 'info' },
   vision: { api_key: '', base_url: '', model: '', max_tokens: 256 },
-  embedding: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-embedding-text-240715' },
+  embedding: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-embedding-vision-251215' },
   whitelist: [], blacklist: [], auto_start_users: [], auto_start_groups: [],
 }
 

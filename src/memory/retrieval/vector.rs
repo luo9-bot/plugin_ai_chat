@@ -9,22 +9,34 @@ pub struct VectorResult {
     pub score: f64,
 }
 
-/// 调用 Embedding API 生成查询向量
+/// 调用多模态向量化 API 生成查询向量
 pub fn embed_query(query: &str) -> Option<Vec<f32>> {
     let cfg = crate::config::get();
-    let base_url = cfg.base_url.trim_end_matches('/');
+    if !cfg.embedding.enabled() {
+        return None;
+    }
 
-    // 使用 OpenAI 兼容的 embedding API
-    let url = format!("{}/embeddings", base_url);
+    let url = format!(
+        "{}/embeddings/multimodal",
+        cfg.embedding.base_url.trim_end_matches('/')
+    );
+
     let request_body = serde_json::json!({
-        "model": cfg.model,
-        "input": [query]
+        "model": cfg.embedding.model,
+        "input": [
+            {
+                "type": "text",
+                "text": query
+            }
+        ],
+        "encoding_format": "float",
+        "dimensions": 2048
     });
 
     let json_body = serde_json::to_string(&request_body).ok()?;
 
     let mut resp = ureq::post(&url)
-        .header("Authorization", &format!("Bearer {}", cfg.api_key))
+        .header("Authorization", &format!("Bearer {}", cfg.embedding.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
         .ok()?;
@@ -32,12 +44,11 @@ pub fn embed_query(query: &str) -> Option<Vec<f32>> {
     let resp_str = resp.body_mut().read_to_string().ok()?;
     let v: serde_json::Value = serde_json::from_str(&resp_str).ok()?;
 
-    // 提取 embedding 向量
+    // 提取 embedding 向量（多模态向量化格式）
+    // { "data": { "embedding": [0.1, 0.2, ...], "object": "embedding" }, ... }
     let embedding = v
         .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|item| item.get("embedding"))
+        .and_then(|d| d.get("embedding"))
         .and_then(|e| e.as_array())?;
 
     let vec: Vec<f32> = embedding
