@@ -1,6 +1,6 @@
 [package]
 name = "plugin_ai_chat"
-version = "5.1.0-beta.6"
+version = "5.1.0-beta.7"
 edition = "2024"
 description = "AI 对话插件"
 authors = ["luoy-oss"]
