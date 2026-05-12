@@ -69,16 +69,21 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     let penalty_multiplier = anti_injection::get_penalty_multiplier(user_id);
 
     // ── 图片识别 (仅 vision 已配置时，检查用户识图禁用状态) ──
-    // 优先使用 sticker 缓存的描述，避免重复 VLM 调用
-    let image_descriptions: Vec<String> = if cfg.vision.enabled() {
+    // 优先使用 sticker 持久化缓存（按哈希），避免重复 VLM 调用
+    let is_sticker_msg = crate::sticker::is_sticker_cq(message);
+    let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
+    let image_descriptions: Vec<String> = if cfg.vision.enabled() && !vision_disabled {
         let urls = vision::extract_image_urls(message);
         urls.iter().filter_map(|url| {
-            // 先检查 sticker 缓存
-            if let Some(cached) = crate::sticker::store::get_cached_description(url) {
-                debug!(url = %url, desc = %cached, "vision: using cached sticker description");
-                return Some(cached);
+            // 表情包走持久化缓存路径（下载→哈希→查 stickers.json→VLM）
+            if is_sticker_msg {
+                let desc = crate::sticker::describe_sticker_cq(message);
+                if let Some(ref d) = desc {
+                    debug!("vision: got sticker description via hash cache");
+                    return Some(d.clone());
+                }
             }
-            // 缓存未命中，调用 vision API
+            // 普通图片或 VLM 缓存未命中，直接调用 VLM
             vision::recognize_for_user(url, user_id)
         }).collect()
     } else {

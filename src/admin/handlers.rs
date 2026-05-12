@@ -148,6 +148,7 @@ pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
         "stickers": store.stickers.iter().map(|e| serde_json::json!({
             "hash": e.hash,
             "description": e.description,
+            "vlm_description": e.vlm_description,
             "emotions": e.emotions,
             "query_count": e.query_count,
             "is_registered": e.is_registered,
@@ -273,6 +274,26 @@ pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<
         entry.description = new_tags.join(",");
         crate::sticker::store::save_store(&store);
         return super::ok(serde_json::json!({"ok": true, "tags": new_tags}));
+    }
+    super::err(404, "sticker not found")
+}
+
+/// 更新表情包 VLM 自然语言描述
+pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    let val: serde_json::Value = match super::parse_json(body) {
+        Ok(v) => v,
+        Err(e) => return super::err(400, &e),
+    };
+    let new_desc = match val.get("description").and_then(|v| v.as_str()) {
+        Some(s) => s.trim().to_string(),
+        None => return super::err(400, "description string required"),
+    };
+
+    let mut store = crate::sticker::store::load_store();
+    if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
+        entry.vlm_description = Some(new_desc.clone());
+        crate::sticker::store::save_store(&store);
+        return super::ok(serde_json::json!({"ok": true, "vlm_description": new_desc}));
     }
     super::err(404, "sticker not found")
 }

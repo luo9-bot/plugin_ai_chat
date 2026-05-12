@@ -1,7 +1,6 @@
 //! 洛玖表情包数据结构和持久化
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// 表情包条目
@@ -15,6 +14,9 @@ pub struct StickerEntry {
     pub description: String,
     /// 情绪标签列表
     pub emotions: Vec<String>,
+    /// VLM 生成的自然语言描述（用于 AI 上下文，持久化避免重复 VLM 调用）
+    #[serde(default)]
+    pub vlm_description: Option<String>,
     /// 使用次数
     pub query_count: u32,
     /// 是否已注册（可用）
@@ -36,23 +38,6 @@ pub struct StickerStore {
 }
 
 static STORE: Mutex<Option<StickerStore>> = Mutex::new(None);
-
-/// URL → 描述文本缓存（避免重复 VLM 调用）
-static URL_DESCRIPTION_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
-
-/// 缓存图片 URL 的描述文本
-pub fn cache_url_description(url: &str, description: &str) {
-    let mut guard = URL_DESCRIPTION_CACHE.lock().unwrap();
-    let cache = guard.get_or_insert_with(HashMap::new);
-    cache.insert(url.to_string(), description.to_string());
-}
-
-/// 获取缓存的图片描述
-pub fn get_cached_description(url: &str) -> Option<String> {
-    let guard = URL_DESCRIPTION_CACHE.lock().unwrap();
-    let cache: &HashMap<String, String> = guard.as_ref()?;
-    cache.get(url).cloned()
-}
 
 pub(crate) fn store_path() -> std::path::PathBuf {
     crate::config::data_dir().join("stickers.json")
@@ -81,6 +66,22 @@ pub(crate) fn load_store() -> StickerStore {
         *guard = Some(crate::util::load_json(&store_path()));
     }
     guard.clone().unwrap_or_default()
+}
+
+/// 按哈希查找表情包条目
+pub fn find_entry_by_hash(hash: &str) -> Option<StickerEntry> {
+    let store = load_store();
+    store.stickers.into_iter().find(|e| e.hash == hash)
+}
+
+/// 更新表情包的 VLM 自然语言描述
+pub fn update_vlm_description(hash: &str, description: &str) {
+    let mut guard = STORE.lock().unwrap();
+    let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
+    if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
+        entry.vlm_description = Some(description.to_string());
+        crate::util::save_json(&store_path(), store);
+    }
 }
 
 pub(crate) fn save_store(store: &StickerStore) {

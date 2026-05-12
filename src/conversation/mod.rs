@@ -300,6 +300,15 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
     if with_state(|s| s.active.contains(&user_id)) {
         crate::proactive::record_user_reply(user_id);
         crate::emotion::analyze_user_message(user_id, trimmed);
+
+        // 表情包自动注册（同群聊逻辑）
+        if trimmed.contains("[CQ:image,") {
+            let trimmed_cpy = trimmed.to_string();
+            std::thread::spawn(move || {
+                crate::sticker::register_from_cq(&trimmed_cpy);
+            });
+        }
+
         with_state(|s| s.append_batch(0, user_id, trimmed, 0));
     }
 }

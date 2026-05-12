@@ -30,6 +30,8 @@
         </div>
         <div class="info">
           <div class="desc" :title="s.description">{{ s.description || '无描述' }}</div>
+          <div class="vlm-desc" :title="s.vlm_description" @click="openDescEditor(s)" v-if="s.vlm_description">{{ truncate(s.vlm_description, 30) }}</div>
+          <div class="vlm-desc empty" @click="openDescEditor(s)" v-else>+ 添加描述</div>
           <div class="emotions">
             <span v-for="e in s.emotions" :key="e" class="emotion-tag">{{ e }}</span>
           </div>
@@ -48,7 +50,7 @@
     </div>
 
     <!-- 标签编辑弹窗 -->
-    <div v-if="editingSticker" class="modal-overlay" @click.self="closeTagEditor">
+    <div v-if="editingSticker && !editingDesc" class="modal-overlay" @click.self="closeTagEditor">
       <div class="modal">
         <h3>🏷️ 编辑标签</h3>
         <div class="modal-body">
@@ -71,6 +73,24 @@
         </div>
       </div>
     </div>
+
+    <!-- 描述编辑弹窗 -->
+    <div v-if="editingDesc" class="modal-overlay" @click.self="closeDescEditor">
+      <div class="modal">
+        <h3>📝 编辑描述</h3>
+        <div class="modal-body">
+          <img :src="`/api/sticker/image/${editingDesc.hash}`" class="preview" />
+          <div class="tag-editor">
+            <textarea v-model="editDescText" class="desc-textarea" rows="4" placeholder="输入 VLM 自然语言描述..."></textarea>
+            <div class="hint">此描述用于 AI 理解图片内容。修改后保存到持久化存储，下次同图直接命中缓存。</div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" @click="closeDescEditor">取消</button>
+          <button class="btn btn-primary btn-sm" @click="saveDesc">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -84,6 +104,8 @@ const search = ref('')
 const editingSticker = ref(null)
 const editTags = ref([])
 const newTag = ref('')
+const editingDesc = ref(null)
+const editDescText = ref('')
 
 const stats = computed(() => data.value)
 const allStickers = computed(() => data.value.stickers || [])
@@ -110,6 +132,27 @@ async function load() { data.value = await api('/api/sticker') }
 async function toggleBan(hash) { await api('/api/sticker/' + hash, { method: 'POST' }); load() }
 async function remove(hash) { if (!confirm('确定删除此表情包？')) return; await api('/api/sticker/' + hash, { method: 'DELETE' }); load() }
 function onImgError(e) { e.target.style.display = 'none' }
+
+function truncate(s, n) { if (!s) return ''; return s.length > n ? s.slice(0, n) + '...' : s }
+
+function openDescEditor(s) {
+  editingDesc.value = s
+  editDescText.value = s.vlm_description || ''
+}
+function closeDescEditor() {
+  editingDesc.value = null
+  editDescText.value = ''
+}
+async function saveDesc() {
+  if (!editingDesc.value) return
+  const desc = editDescText.value.trim()
+  await api('/api/sticker/' + editingDesc.value.hash + '/description', {
+    method: 'PUT',
+    body: JSON.stringify({ description: desc })
+  })
+  editingDesc.value.vlm_description = desc || null
+  closeDescEditor()
+}
 
 function openTagEditor(s) {
   editingSticker.value = s
@@ -184,6 +227,9 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 
 .info { padding: 10px 12px 6px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .desc { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vlm-desc { font-size: 11px; color: #6366f1; background: #eef2ff; padding: 2px 8px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background .15s; }
+.vlm-desc:hover { background: #e0e7ff; }
+.vlm-desc.empty { color: var(--text-dim); background: none; font-style: italic; padding: 2px 4px; }
 .emotions { display: flex; flex-wrap: wrap; gap: 3px; }
 .emotion-tag { font-size: 10px; background: var(--accent-light); color: var(--accent); padding: 1px 7px; border-radius: 8px; }
 .meta { font-size: 11px; color: var(--text-dim); }
@@ -222,6 +268,9 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 .add-tag-row { display: flex; gap: 6px; }
 .add-tag-input { flex: 1; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: var(--radius); font-size: 12px; outline: none; }
 .add-tag-input:focus { border-color: var(--accent); }
+.desc-textarea { width: 100%; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: var(--radius); font-size: 12px; outline: none; resize: vertical; font-family: inherit; min-height: 60px; }
+.desc-textarea:focus { border-color: var(--accent); }
+.hint { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
 :root { --purple: #8b5cf6; --purple-light: #f3e8ff; }

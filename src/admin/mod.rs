@@ -179,6 +179,9 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
                 Some(hash) if api_segs.get(2).copied() == Some("tags") && method == Method::Put => {
                     handlers::handle_sticker_tags(hash, &body)
                 }
+                Some(hash) if api_segs.get(2).copied() == Some("description") && method == Method::Put => {
+                    handlers::handle_sticker_description(hash, &body)
+                }
                 Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
                 Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
                 _ => handlers::handle_sticker(),

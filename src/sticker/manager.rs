@@ -49,6 +49,7 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
         path: format!("sticker/{}", filename),
         description: description.clone(),
         emotions,
+        vlm_description: None,
         query_count: 0,
         is_registered: true,
         is_banned: false,
@@ -90,16 +91,59 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
                 }
 
                 if let Some(hash) = register_sticker(&bytes, &format) {
-                    // 获取注册的表情包描述并缓存到 URL
-                    let store = load_store();
-                    if let Some(entry) = store.stickers.iter().find(|e| e.hash == hash) {
-                        let desc = entry.description.clone();
-                        super::store::cache_url_description(url, &desc);
-                        debug!(url = %url, desc = %desc, "sticker: cached URL description");
-                    }
+                    // 异步获取并持久化自然语言描述
+                    let hash_cp = hash.clone();
+                    let url_cp = url.clone();
+                    std::thread::spawn(move || {
+                        if let Some(nl_desc) = crate::vision::recognize(&url_cp) {
+                            super::store::update_vlm_description(&hash_cp, &nl_desc);
+                            debug!(hash = %hash_cp[..16.min(hash_cp.len())], "sticker: stored VLM description");
+                        }
+                    });
+
                     return Some(hash);
                 }
             }
+    }
+    None
+}
+
+/// 获取表情包的 VLM 自然语言描述（下载→哈希→查持久化缓存→VLM）
+///
+/// 优先使用 stickers.json 中已持久化的描述，避免重复 VLM 调用。
+/// 与 register_from_cq 不同，此函数不执行内容过滤和完整注册，
+/// 仅用于 handler.rs 中为 AI 上下文提供图片描述。
+pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
+    let urls = crate::vision::extract_image_urls(cq_message);
+    for url in &urls {
+        // 1. 下载文件
+        let resp = match ureq::get(url).call() {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let bytes = match resp.into_body().read_to_vec() {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let hash = compute_hash(&bytes);
+
+        // 2. 查持久化存储（按哈希）
+        if let Some(entry) = super::store::find_entry_by_hash(&hash) {
+            if let Some(ref desc) = entry.vlm_description {
+                debug!(hash = %hash[..16.min(hash.len())], "sticker: using stored VLM description");
+                return Some(desc.clone());
+            }
+        }
+
+        // 3. 调用 VLM 获取自然语言描述
+        let desc = crate::vision::recognize(url)?;
+
+        // 4. 如果已注册（有 entry 但无 vlm_description），更新之
+        if super::store::find_entry_by_hash(&hash).is_some() {
+            super::store::update_vlm_description(&hash, &desc);
+        }
+
+        return Some(desc);
     }
     None
 }
@@ -803,6 +847,7 @@ pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<Stri
         path: format!("ne_sticker/{}", filename),
         description: description.clone(),
         emotions,
+        vlm_description: None,
         query_count: 0,
         is_registered: true,
         is_banned: false,
@@ -984,6 +1029,7 @@ fn register_sticker_from_path(path: &std::path::Path, format: &str, bytes: &[u8]
         path: relative,
         description: description.clone(),
         emotions,
+        vlm_description: None,
         query_count: 0,
         is_registered: true,
         is_banned: false,
