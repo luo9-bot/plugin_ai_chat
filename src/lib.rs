@@ -389,18 +389,10 @@ fn check_periodic() {
     debug!(count = all_users.len(), "proactive: checking users");
 
     // 锁已释放，安全调用 proactive/emotion
-    // 私聊：per-user 检查（bot 可以主动找某个人聊天）
-    // 群聊：per-group 氛围评估（bot 自然参与群聊，不挨个找人）
-    let mut checked_groups: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    // 所有用户都走 per-user 检查，每个用户有独立的 last_sent/ignore_count 控制
     for (user_id, group_id) in &all_users {
         emotion::decay(*user_id);
-        if *group_id == 0 {
-            // 私聊：per-user 检查
-            proactive::check_proactive_messages(*user_id, *group_id);
-        } else if checked_groups.insert(*group_id) {
-            // 群聊：per-group 氛围评估（每个群只检查一次）
-            proactive::check_group_atmosphere(*group_id);
-        }
+        proactive::check_proactive_messages(*user_id, *group_id);
     }
 
     // 定期记忆审查 (每小时一次)

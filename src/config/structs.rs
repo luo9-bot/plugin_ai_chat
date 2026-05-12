@@ -640,10 +640,10 @@ fn default_affinity_threshold() -> f32 { 3.0 }
 fn default_true() -> bool { true }
 fn default_quiet_start() -> u32 { 23 }
 fn default_quiet_end() -> u32 { 7 }
-fn default_proactive_interval() -> u64 { 7200 }
-fn default_max_ignore() -> u32 { 3 }
+fn default_proactive_interval() -> u64 { 10800 }
+fn default_max_ignore() -> u32 { 5 }
 fn default_low_mood_multiplier() -> f64 { 2.0 }
-fn default_check_interval() -> u64 { 60 }
+fn default_check_interval() -> u64 { 120 }
 fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
 fn default_post_conversation_delay() -> u64 { 120 }
