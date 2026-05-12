@@ -15,18 +15,15 @@ pub use operations::*;
 pub use extract::*;
 pub use review::*;
 
-/// 初始化记忆系统（纯 JSON 存储 + 二进制向量文件）
+/// 初始化记忆系统（JSON 元数据 + 二进制向量文件 + 知识图谱）
 pub fn init(_data_dir: &std::path::Path) {
-    // 预加载缓存，确保 memory.json 可用
     store::MemoryStore::load();
-    // 预加载向量文件
     vector_store::init();
-    debug!("memory: JSON store + vectors.bin initialized");
+    graph::init();
+    debug!("memory: JSON store + vectors.bin + graph initialized");
 }
 
-/// 语义检索记忆：双路检索（向量 + BM25）+ RRF 融合
-///
-/// 从 JSON 文件中加载记忆，从 vectors.bin 加载向量
+/// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
 pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval::RetrievalResult> {
     let store = MemoryStore::load();
     let user_mem = match store.users.get(&user_id.to_string()) {
@@ -53,15 +50,14 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         })
         .collect();
 
-    // 如果没有存储的 embeddings 且 embedding 功能可用，实时生成并存入向量文件
+    // 如果没有存储的 embeddings，实时生成并存入向量文件
     let mut final_embeddings = embeddings;
     if final_embeddings.is_empty() && crate::config::get().embedding.enabled() {
-        if let Some(_query_embedding) = embedding::embed_text(query) {
+        if let Some(_qe) = embedding::embed_text(query) {
             let doc_texts: Vec<String> = documents.iter().map(|(_, c)| c.clone()).collect();
             let doc_embeddings = embedding::embed_batch(&doc_texts);
             for (i, emb_opt) in doc_embeddings.into_iter().enumerate() {
                 if let Some(emb) = emb_opt {
-                    // 持久化到向量文件
                     vector_store::add_vector(&documents[i].1, emb.clone());
                     final_embeddings.push((documents[i].0.clone(), emb));
                 }
@@ -69,11 +65,16 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         }
     }
 
+    // 配置完整检索 pipeline
     let config = retrieval::RetrievalConfig {
         top_k,
         vector_weight: 0.7,
         bm25_weight: 0.3,
         rrf_k: 60.0,
+        metadata_filter: None,
+        threshold_config: Some(retrieval::ThresholdConfig::default()),
+        posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
+        enable_fallback: true,
     };
 
     let mut results = retrieval::dual_path_retrieve(query, &documents, &final_embeddings, &config);
@@ -88,17 +89,20 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
     results
 }
 
-/// 存储记忆时自动生成 embedding（原子写入 JSON + 向量文件）
+/// 存储记忆时自动生成 embedding（原子写入 JSON + 向量文件 + 知识图谱）
 pub fn store_memory_with_embedding(user_id: u64, content: &str, importance: store::Importance) {
     let now = crate::util::now_secs();
 
-    // 生成 embedding（可选），成功后写入 vectors.bin
+    // 生成 embedding 并写入 vectors.bin
     if crate::config::get().embedding.enabled() {
         if let Some(embedding) = embedding::embed_text(content) {
             vector_store::add_vector(content, embedding);
             debug!(user_id, "store_memory: embedding saved to vectors.bin");
         }
     }
+
+    // 更新知识图谱
+    graph::update_graph_from_memory(user_id, content);
 
     let entry = store::MemoryEntry {
         content: content.to_string(),
@@ -114,5 +118,5 @@ pub fn store_memory_with_embedding(user_id: u64, content: &str, importance: stor
     let mut store = store::MemoryStore::load();
     store.get_user_mut(user_id).entries.push(entry);
     store.save();
-    info!(user_id, content = %content_preview, "store_memory: saved to JSON");
+    info!(user_id, content = %content_preview, "store_memory: saved to JSON + vectors + graph");
 }
