@@ -92,10 +92,7 @@ pub fn init() {
         debug!(path = ?prompt_path, "generated default prompt");
     }
 
-    let prompt_content = match fs::read_to_string(&prompt_path) {
-        Ok(content) => content,
-        Err(_) => String::new(),
-    };
+    let prompt_content = fs::read_to_string(&prompt_path).unwrap_or_default();
 
     let _ = CONFIG.set(config);
     let _ = PROMPT.set(prompt_content);

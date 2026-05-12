@@ -46,8 +46,8 @@ pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
     debug!(group_id, msg_count = user_msgs.len(), "learner: starting");
     match crate::ai::analyze(&prompt, &content) {
         Ok(response) => {
-            if let Some(json_str) = crate::ai::extract_json(&response) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(json_str) = crate::ai::extract_json(&response)
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     if let Some(exprs) = parsed.get("expressions").and_then(|v| v.as_array()) {
                         for expr in exprs {
                             let sit = expr.get("situation").and_then(|v| v.as_str()).unwrap_or("");
@@ -75,7 +75,6 @@ pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
                         }
                     }
                 }
-            }
             s.last_learned.insert(group_id, now);
             save_store(&s);
         }

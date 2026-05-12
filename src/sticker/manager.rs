@@ -79,8 +79,8 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
         // 下载图片
-        if let Ok(mut resp) = ureq::get(url).call() {
-            if let Ok(bytes) = resp.body_mut().read_to_vec() {
+        if let Ok(mut resp) = ureq::get(url).call()
+            && let Ok(bytes) = resp.body_mut().read_to_vec() {
                 let format = detect_format(&bytes);
 
                 // 内容过滤
@@ -100,7 +100,6 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
                     return Some(hash);
                 }
             }
-        }
     }
     None
 }
@@ -272,7 +271,6 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
             "这是一个动态图表情包，每一张图代表了动态图的一帧。{}",
             crate::prompt::PromptManager::get()
             .raw("sticker_content_filtration")
-            .to_string()
         )
     }
     else {
@@ -358,8 +356,8 @@ fn select_with_vlm(
 
     match result {
         Some(response) => {
-            if let Some(json_str) = crate::ai::extract_json(&response) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(json_str) = crate::ai::extract_json(&response)
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     let index = parsed.get("index")
                         .and_then(|v| v.as_u64())
                         .map(|n| (n as usize).saturating_sub(1))
@@ -370,7 +368,6 @@ fn select_with_vlm(
                         .to_string();
                     return Some((index, reason));
                 }
-            }
             if let Some(n) = extract_number(&response) {
                 return Some((n.saturating_sub(1), "从文本提取".to_string()));
             }
@@ -441,12 +438,12 @@ fn calculate_grid_shape(count: usize) -> (u32, u32) {
     let n = count as u32;
     let sqrt = (n as f64).sqrt() as u32;
     for cols in (1..=sqrt + 1).rev() {
-        let rows = (n + cols - 1) / cols;
+        let rows = n.div_ceil(cols);
         if cols * rows >= n && (cols as i32 - rows as i32).abs() <= 1 {
             return (cols, rows);
         }
     }
-    (n.min(5), (n + 4) / 5)
+    (n.min(5), n.div_ceil(5))
 }
 
 /// 在画布上绘制数字角标（简化的像素字体）
@@ -692,7 +689,7 @@ fn compute_hash(data: &[u8]) -> String {
 /// 从描述文本中解析情绪标签
 fn parse_emotions(description: &str) -> Vec<String> {
     description
-        .split(|c: char| c == ',' || c == '，' || c == '；' || c == ';' || c == '\n')
+        .split([',', '，', '；', ';', '\n'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty() && s.len() <= 10)
         .collect()

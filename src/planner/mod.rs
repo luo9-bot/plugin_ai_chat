@@ -58,7 +58,7 @@ fn get_deferred_tools() -> Vec<DeferredTool> {
 /// 搜索延迟工具
 fn search_deferred_tools(query: &str, discovered: &HashMap<String, usize>) -> Vec<String> {
     let query_lower = query.to_lowercase();
-    let query_terms: Vec<&str> = query_lower.split(|c: char| c == '_' || c == '-' || c == ' ').collect();
+    let query_terms: Vec<&str> = query_lower.split(['_', '-', ' ']).collect();
 
     let mut scored: Vec<(&str, i32)> = Vec::new();
 
@@ -187,11 +187,10 @@ fn build_visible_tools(discovered: &HashMap<String, usize>, current_round: usize
     ];
 
     // 只有在有效期内的已发现工具才加入可见列表
-    if let Some(&discovered_round) = discovered.get("send_sticker") {
-        if current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
+    if let Some(&discovered_round) = discovered.get("send_sticker")
+        && current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
             tools.push(tool_send_sticker());
         }
-    }
 
     tools
 }

@@ -8,17 +8,14 @@ use tracing::{debug, info};
 
 /// 危机等级：用于检测用户是否处于自残/自杀等极端情境
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Default)]
 pub enum CrisisLevel {
+    #[default]
     None,
     Mild,   // 情绪低落、消极，需要关注
     Severe, // 明确的自残/自杀信号，需要立即干预
 }
 
-impl Default for CrisisLevel {
-    fn default() -> Self {
-        CrisisLevel::None
-    }
-}
 
 impl CrisisLevel {
     pub fn is_crisis(&self) -> bool {

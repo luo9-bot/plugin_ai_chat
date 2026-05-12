@@ -62,7 +62,7 @@ fn select_expressions_with_llm(
         Ok(response) => {
             // 解析选中的序号
             let selected: Vec<&ExpressionHabit> = response
-                .split(|c: char| c == ',' || c == '，' || c == ' ')
+                .split([',', '，', ' '])
                 .filter_map(|s| s.trim().parse::<usize>().ok())
                 .filter(|&idx| idx > 0 && idx <= candidates.len())
                 .map(|idx| candidates[idx - 1])

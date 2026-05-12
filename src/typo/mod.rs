@@ -41,31 +41,27 @@ impl Default for TypoConfig {
 pub fn init(data_dir: &std::path::Path) {
     // 加载字频数据
     let freq_path = data_dir.join("char_frequency.json");
-    if freq_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&freq_path) {
-            if let Ok(raw) = serde_json::from_str::<HashMap<String, f64>>(&content) {
+    if freq_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&freq_path)
+            && let Ok(raw) = serde_json::from_str::<HashMap<String, f64>>(&content) {
                 let freq: HashMap<char, f64> = raw.into_iter()
                     .filter_map(|(k, v)| k.chars().next().map(|c| (c, v)))
                     .collect();
                 let _ = CHAR_FREQUENCY.set(freq);
                 tracing::info!("typo: loaded char_frequency.json");
             }
-        }
-    }
 
     // 加载拼音字典
     let pinyin_path = data_dir.join("pinyin_dict.json");
-    if pinyin_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pinyin_path) {
-            if let Ok(raw) = serde_json::from_str::<HashMap<String, Vec<String>>>(&content) {
+    if pinyin_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&pinyin_path)
+            && let Ok(raw) = serde_json::from_str::<HashMap<String, Vec<String>>>(&content) {
                 let dict: HashMap<String, Vec<char>> = raw.into_iter()
                     .map(|(k, v)| (k, v.into_iter().filter_map(|s| s.chars().next()).collect()))
                     .collect();
                 let _ = PINYIN_DICT.set(dict);
                 tracing::info!("typo: loaded pinyin_dict.json");
             }
-        }
-    }
 }
 
 /// 应用错别字到文本
@@ -91,13 +87,12 @@ pub fn apply_typos(text: &str, config: &TypoConfig) -> String {
     let mut result = String::with_capacity(text.len());
 
     for &ch in &chars {
-        if is_chinese(ch) && rng.r#gen::<f64>() < config.error_rate {
-            if let Some(replacement) = find_homophone(ch, config, freq, pinyin_dict, &mut rng) {
+        if is_chinese(ch) && rng.r#gen::<f64>() < config.error_rate
+            && let Some(replacement) = find_homophone(ch, config, freq, pinyin_dict, &mut rng) {
                 debug!(original = %ch, replacement = %replacement, "typo: applied");
                 result.push(replacement);
                 continue;
             }
-        }
         result.push(ch);
     }
 

@@ -178,7 +178,7 @@ fn value_to_yaml_inline(val: &serde_json::Value) -> String {
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(|v| value_to_yaml_inline(v)).collect();
+            let items: Vec<String> = arr.iter().map(value_to_yaml_inline).collect();
             format!("[{}]", items.join(", "))
         }
         serde_json::Value::Object(map) => {

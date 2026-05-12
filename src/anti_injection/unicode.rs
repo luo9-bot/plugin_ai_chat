@@ -196,7 +196,7 @@ pub fn detect_mixed_script(text: &str) -> bool {
         }
     }
 
-    (has_latin && has_cyrillic) || (has_latin && has_greek)
+    (has_greek || has_cyrillic) && has_latin
 }
 
 /// 计算 Shannon 熵

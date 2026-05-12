@@ -72,7 +72,7 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     // 优先使用 sticker 缓存的描述，避免重复 VLM 调用
     let image_descriptions: Vec<String> = if cfg.vision.enabled() {
         let urls = vision::extract_image_urls(message);
-        urls.iter().map(|url| {
+        urls.iter().filter_map(|url| {
             // 先检查 sticker 缓存
             if let Some(cached) = crate::sticker::store::get_cached_description(url) {
                 debug!(url = %url, desc = %cached, "vision: using cached sticker description");
@@ -80,7 +80,7 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
             }
             // 缓存未命中，调用 vision API
             vision::recognize_for_user(url, user_id)
-        }).filter_map(|x| x).collect()
+        }).collect()
     } else {
         Vec::new()
     };

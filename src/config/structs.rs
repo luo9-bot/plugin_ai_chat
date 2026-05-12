@@ -477,6 +477,7 @@ impl Default for AdminConfig {
 // 注意：防注入系统始终开启，不可关闭
 
 #[derive(Debug, Deserialize, Clone)]
+#[derive(Default)]
 pub struct AntiInjectionConfig {
     /// 输入层配置
     #[serde(default)]
@@ -489,15 +490,6 @@ pub struct AntiInjectionConfig {
     pub behavior: BehaviorConfig,
 }
 
-impl Default for AntiInjectionConfig {
-    fn default() -> Self {
-        Self {
-            input: InputFilterConfig::default(),
-            output: OutputFilterConfig::default(),
-            behavior: BehaviorConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InputFilterConfig {

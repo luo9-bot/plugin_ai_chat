@@ -25,9 +25,7 @@ pub fn calculate_priority(
 
     // bot 最近在群里发过消息（2 分钟内）= 对话窗口
     let bot_recently_active = crate::read_shared_state(|s| {
-        s.get_recent_bot_messages(group_id, 120, 1)
-            .first()
-            .is_some()
+        !s.get_recent_bot_messages(group_id, 120, 1).is_empty()
     });
 
     let mut score = 0.0f32;

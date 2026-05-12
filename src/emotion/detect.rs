@@ -181,12 +181,11 @@ fn detect_emotion(message: &str) -> (EmotionType, f32) {
 
     for (keywords, emotion, delta) in pairs {
         for kw in *keywords {
-            if message.contains(kw) {
-                if *delta > best_delta {
+            if message.contains(kw)
+                && *delta > best_delta {
                     best_delta = *delta;
                     best_emotion = *emotion;
                 }
-            }
         }
     }
 

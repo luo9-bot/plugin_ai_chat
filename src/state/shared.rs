@@ -39,6 +39,12 @@ pub struct SharedState {
     pub last_reflected_content: HashMap<u64, String>,
 }
 
+impl Default for SharedState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SharedState {
     pub fn new() -> Self {
         Self {
@@ -185,7 +191,7 @@ pub fn get_groups_needing_review(
             **gid > 0
                 && now.saturating_sub(**last_time) < max_idle
                 && review_times.get(*gid)
-                    .map_or(true, |&last_review| now.saturating_sub(last_review) >= review_interval)
+                    .is_none_or(|&last_review| now.saturating_sub(last_review) >= review_interval)
         })
         .map(|(gid, _)| *gid)
         .collect()

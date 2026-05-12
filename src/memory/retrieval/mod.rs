@@ -131,8 +131,8 @@ pub fn dual_path_retrieve(
             let fb_results = bm25::search(&fb_query, &[], config.top_k);
             let fb_map: HashMap<String, String> = HashMap::new();
             for r in fb_results {
-                if let Some(content) = fb_map.get(&r.id) {
-                    if !fused.iter().any(|f| f.id == r.id) {
+                if let Some(content) = fb_map.get(&r.id)
+                    && !fused.iter().any(|f| f.id == r.id) {
                         fused.push(RetrievalResult {
                             id: r.id,
                             content: content.clone(),
@@ -140,7 +140,6 @@ pub fn dual_path_retrieve(
                             source: "fallback",
                         });
                     }
-                }
             }
         }
     }

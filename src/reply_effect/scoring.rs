@@ -210,11 +210,9 @@ pub struct LlmJudgeScores {
     pub appropriateness: f64,
     pub uncanny_risk: f64,
 }
-
 /// 使用 LLM 评判回复质量（5 维度，1-5 分）
 ///
 /// 可选增强：当 API 预算允许时调用，规则匹配作为 fallback。
-
 pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
     let prompt = crate::prompt::PromptManager::get().raw("reply_effect_judge");
     if prompt.is_empty() {
@@ -237,8 +235,8 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
 
     match crate::ai::analyze("", &rendered) {
         Ok(response) => {
-            if let Some(json_str) = crate::ai::extract_json(&response) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(json_str) = crate::ai::extract_json(&response)
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     return Some(LlmJudgeScores {
                         social_presence: parsed.get("social_presence").and_then(|v| v.as_f64()).unwrap_or(3.0),
                         warmth: parsed.get("warmth").and_then(|v| v.as_f64()).unwrap_or(3.0),
@@ -247,7 +245,6 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
                         uncanny_risk: parsed.get("uncanny_risk").and_then(|v| v.as_f64()).unwrap_or(1.0),
                     });
                 }
-            }
             None
         }
         Err(_) => None,
@@ -255,7 +252,6 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
 }
 
 /// 计算 LLM Judge 的关系分
-
 pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
     // 归一化到 0-1：(score - 1) / 4
     let sp = (scores.social_presence - 1.0) / 4.0;
@@ -266,7 +262,6 @@ pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
 }
 
 /// 计算 LLM Judge 的摩擦分（含 uncanny_risk）
-
 pub fn calculate_friction_from_llm(record: &ReplyEffectRecord, uncanny_risk: f64) -> f64 {
     let neg = NEGATIVE_PATTERNS.iter()
         .any(|p| record.followups.iter().any(|f| f.content.contains(p)));

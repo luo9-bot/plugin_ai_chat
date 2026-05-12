@@ -66,6 +66,7 @@ impl KnowledgeGraph {
     }
 
     /// 添加有向关系
+    #[allow(clippy::too_many_arguments)]
     pub fn add_relation(
         &mut self,
         subject: &str,
@@ -109,6 +110,7 @@ impl KnowledgeGraph {
     }
 
     /// 合并或更新关系（如果已存在则增加权重和计数）
+    #[allow(clippy::too_many_arguments)]
     pub fn merge_relation(
         &mut self,
         subject: &str,
@@ -223,7 +225,7 @@ impl KnowledgeGraph {
             }
         }
 
-        nodes.into_iter().zip(pr.into_iter()).collect()
+        nodes.into_iter().zip(pr).collect()
     }
 
     /// 从边权重计算 Personalized PageRank（边权重感知）
@@ -289,7 +291,7 @@ impl KnowledgeGraph {
                 break;
             }
         }
-        nodes.into_iter().zip(pr.into_iter()).collect()
+        nodes.into_iter().zip(pr).collect()
     }
 
     /// 获取实体的出边关系
@@ -347,11 +349,10 @@ impl EntityMatcher {
     pub fn match_entities(&self, text: &str) -> Vec<String> {
         let mut found: Vec<String> = Vec::new();
         for m in self.ac.find_iter(text) {
-            if let Some(name) = self.entities.get(m.pattern().as_usize()) {
-                if !found.contains(name) {
+            if let Some(name) = self.entities.get(m.pattern().as_usize())
+                && !found.contains(name) {
                     found.push(name.clone());
                 }
-            }
         }
         found
     }

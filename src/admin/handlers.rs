@@ -1037,8 +1037,8 @@ pub fn handle_anti_injection(
                 return ok(serde_json::json!({"users": users}));
             }
             // GET /api/anti-injection/:user_id - 获取特定用户状态
-            if let Some(&user_id_str) = segs.first() {
-                if let Ok(user_id) = user_id_str.parse::<u64>() {
+            if let Some(&user_id_str) = segs.first()
+                && let Ok(user_id) = user_id_str.parse::<u64>() {
                     let status = crate::anti_injection::get_user_status(user_id);
                     let reputation = crate::anti_injection::get_reputation(user_id);
                     let violation_count = crate::anti_injection::get_violation_count(user_id);
@@ -1056,7 +1056,6 @@ pub fn handle_anti_injection(
                         "penalty_multiplier": penalty,
                     }));
                 }
-            }
 
             // 返回配置信息
             let cfg = &config::get().anti_injection;
@@ -1139,22 +1138,17 @@ pub fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<V
             };
             // 脱敏：隐藏 api_key
             if let Some(obj) = cfg.as_object_mut() {
-                if let Some(key) = obj.get_mut("api_key") {
-                    if let Some(s) = key.as_str() {
-                        if s.len() > 8 {
+                if let Some(key) = obj.get_mut("api_key")
+                    && let Some(s) = key.as_str()
+                        && s.len() > 8 {
                             *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
                         }
-                    }
-                }
-                if let Some(v) = obj.get_mut("vision").and_then(|v| v.as_object_mut()) {
-                    if let Some(key) = v.get_mut("api_key") {
-                        if let Some(s) = key.as_str() {
-                            if s.len() > 8 {
+                if let Some(v) = obj.get_mut("vision").and_then(|v| v.as_object_mut())
+                    && let Some(key) = v.get_mut("api_key")
+                        && let Some(s) = key.as_str()
+                            && s.len() > 8 {
                                 *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
                             }
-                        }
-                    }
-                }
             }
             ok(cfg)
         }
@@ -1171,26 +1165,21 @@ pub fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<V
             let mut merged = new_cfg.clone();
             if let (Some(new_obj), Some(old_obj)) = (merged.as_object_mut(), existing_cfg.as_object()) {
                 // api_key
-                if let Some(key) = new_obj.get("api_key").and_then(|v| v.as_str()) {
-                    if key.contains("...") {
-                        if let Some(old_key) = old_obj.get("api_key") {
+                if let Some(key) = new_obj.get("api_key").and_then(|v| v.as_str())
+                    && key.contains("...")
+                        && let Some(old_key) = old_obj.get("api_key") {
                             new_obj.insert("api_key".to_string(), old_key.clone());
                         }
-                    }
-                }
                 // vision.api_key
                 if let (Some(new_vis), Some(old_vis)) = (
                     new_obj.get_mut("vision").and_then(|v| v.as_object_mut()),
                     old_obj.get("vision").and_then(|v| v.as_object())
-                ) {
-                    if let Some(key) = new_vis.get("api_key").and_then(|v| v.as_str()) {
-                        if key.contains("...") {
-                            if let Some(old_key) = old_vis.get("api_key") {
+                )
+                    && let Some(key) = new_vis.get("api_key").and_then(|v| v.as_str())
+                        && key.contains("...")
+                            && let Some(old_key) = old_vis.get("api_key") {
                                 new_vis.insert("api_key".to_string(), old_key.clone());
                             }
-                        }
-                    }
-                }
             }
 
             // 使用模板保存：保留注释和格式，只替换值

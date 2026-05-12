@@ -39,7 +39,7 @@ impl ContextCorrelator {
     /// 清理过期消息
     fn cleanup(&mut self) {
         let cutoff = Instant::now() - self.max_age;
-        while self.messages.front().map_or(false, |m| m.timestamp < cutoff) {
+        while self.messages.front().is_some_and(|m| m.timestamp < cutoff) {
             self.messages.pop_front();
         }
     }
@@ -47,6 +47,10 @@ impl ContextCorrelator {
     /// 获取消息数量
     pub fn len(&self) -> usize {
         self.messages.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
     }
 
     /// 模式 A：separator preserved（消息间保留 [SEP] 分隔符）

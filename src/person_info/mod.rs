@@ -25,9 +25,8 @@ pub fn set_name(user_id: u64, name: &str, reason: &str) {
 
 pub fn add_memory_point(user_id: u64, point: &str) {
     let mut s = load_store();
-    if let Some(p) = s.profiles.get_mut(&user_id) {
-        if !p.memory_points.contains(&point.to_string()) { p.memory_points.push(point.into()); if p.memory_points.len() > 20 { p.memory_points.remove(0); } debug!(user_id, point, "person_info: memory point added"); save_store(&s); }
-    }
+    if let Some(p) = s.profiles.get_mut(&user_id)
+        && !p.memory_points.contains(&point.to_string()) { p.memory_points.push(point.into()); if p.memory_points.len() > 20 { p.memory_points.remove(0); } debug!(user_id, point, "person_info: memory point added"); save_store(&s); }
 }
 
 pub fn set_group_nickname(user_id: u64, group_id: u64, nickname: &str) {
@@ -82,20 +81,17 @@ pub fn extract_facts_from_conversation(user_id: u64, user_message: &str, bot_rep
         "（无", "(无",
     ];
 
-    match crate::ai::analyze("", &prompt) {
-        Ok(response) => {
-            for line in response.lines() {
-                let fact = line.trim();
-                if fact.is_empty() || fact.len() <= 2 || fact.len() >= 100 {
-                    continue;
-                }
-                // 过滤无意义回复
-                if meaningless_patterns.iter().any(|p| fact.contains(p)) {
-                    continue;
-                }
-                add_memory_point(user_id, fact);
+    if let Ok(response) = crate::ai::analyze("", &prompt) {
+        for line in response.lines() {
+            let fact = line.trim();
+            if fact.is_empty() || fact.len() <= 2 || fact.len() >= 100 {
+                continue;
             }
+            // 过滤无意义回复
+            if meaningless_patterns.iter().any(|p| fact.contains(p)) {
+                continue;
+            }
+            add_memory_point(user_id, fact);
         }
-        Err(_) => {} // 静默失败
     }
 }

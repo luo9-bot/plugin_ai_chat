@@ -213,13 +213,13 @@ pub extern "C" fn plugin_main() {
     debug!(model = %config::get().model, "plugin loaded");
 
     // 初始化 PromptManager（加载所有 .prompt 模板文件）
-    prompt::PromptManager::init(&config::data_dir());
+    prompt::PromptManager::init(config::data_dir());
 
     // 初始化错别字生成器（加载字频和拼音字典）
-    typo::init(&config::data_dir());
+    typo::init(config::data_dir());
 
     // 初始化记忆系统（JSON 存储）
-    memory::init(&config::data_dir());
+    memory::init(config::data_dir());
 
     // 初始化知识图谱
     memory::graph::init();
@@ -274,11 +274,11 @@ pub extern "C" fn plugin_main() {
     crypto::init();
 
     // 注册到远程注册表 (后台线程，不阻塞启动)
-    thread::spawn(|| crate::self_memory::register_to_registry());
+    thread::spawn(crate::self_memory::register_to_registry);
 
     // 启动管理后台 (后台线程)
     if !config::get().admin.token.is_empty() {
-        thread::spawn(|| admin::start_server());
+        thread::spawn(admin::start_server);
     }
 
     // 表情包维护线程（定期清理 + steal_emoji + do_replace）
@@ -311,8 +311,8 @@ pub extern "C" fn plugin_main() {
     let ver_topic = Bus::topic("luo9_version");
 
     loop {
-        if let Some(json) = msg_topic.pop(msg_sub) {
-            if let Some(BusPayload::Message(msg)) = BusPayload::parse(&json) {
+        if let Some(json) = msg_topic.pop(msg_sub)
+            && let Some(BusPayload::Message(msg)) = BusPayload::parse(&json) {
                 match msg.message_type {
                     MsgType::Group => {
                         conversation::handle_group_msg(msg.group_id.unwrap_or(0), msg.user_id, &msg.message);
@@ -323,7 +323,6 @@ pub extern "C" fn plugin_main() {
                     _ => {}
                 }
             }
-        }
 
         if let Some(json) = task_topic.pop(task_sub) {
             cron::handle_task_event(&json);
@@ -345,11 +344,10 @@ pub extern "C" fn plugin_main() {
         }
 
         // ── 版本查询 ──
-        if let Some(json) = ver_topic.pop(ver_sub) {
-            if luo9_sdk::version::is_version_query(&json) {
+        if let Some(json) = ver_topic.pop(ver_sub)
+            && luo9_sdk::version::is_version_query(&json) {
                 luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             }
-        }
 
         thread::sleep(Duration::from_millis(1));
     }
@@ -389,7 +387,7 @@ fn check_periodic() {
 
     // 也包含当前有活跃批次的用户 (thread_local State)
     with_state(|s| {
-        for (&(gid, uid), _) in &s.batches {
+        for &(gid, uid) in s.batches.keys() {
             if gid > 0 {
                 all_users.push((uid, gid));
             }

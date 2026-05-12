@@ -22,6 +22,7 @@ pub use defects::{DefectType, check_defect, defect_to_instruction};
 // ── 持久化存储 (共享) ──────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct MentalStateStore {
     pub concerns: Vec<concerns::Concern>,
     pub deliberations: Vec<deliberations::Deliberation>,
@@ -30,15 +31,6 @@ pub struct MentalStateStore {
     pub last_defect_ts: u64,
 }
 
-impl Default for MentalStateStore {
-    fn default() -> Self {
-        Self {
-            concerns: Vec::new(),
-            deliberations: Vec::new(),
-            last_defect_ts: 0,
-        }
-    }
-}
 
 fn store_path() -> std::path::PathBuf {
     config::data_dir().join("mental_state.json")

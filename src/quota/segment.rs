@@ -122,16 +122,14 @@ pub fn mark_segment_replied(group_id: u64, user_id: u64, reason: &str) {
     let seg_start = current_segment_start();
     let mut store_guard = STORE.lock().unwrap();
     if let Some(store) = store_guard.as_mut() {
-        if let Some(logs) = store.segment_log.get_mut(&group_id) {
-            if let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start) {
-                if let Some(msg) = entry.messages.iter_mut().rev()
+        if let Some(logs) = store.segment_log.get_mut(&group_id)
+            && let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start)
+                && let Some(msg) = entry.messages.iter_mut().rev()
                     .find(|m| m.user_id == user_id && !m.replied)
                 {
                     msg.replied = true;
                     msg.reason = reason.to_string();
                 }
-            }
-        }
         save_store(store);
     }
 }
@@ -140,15 +138,13 @@ pub fn mark_segment_reason(group_id: u64, user_id: u64, reason: &str) {
     let seg_start = current_segment_start();
     let mut store_guard = STORE.lock().unwrap();
     if let Some(store) = store_guard.as_mut() {
-        if let Some(logs) = store.segment_log.get_mut(&group_id) {
-            if let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start) {
-                if let Some(msg) = entry.messages.iter_mut().rev()
+        if let Some(logs) = store.segment_log.get_mut(&group_id)
+            && let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start)
+                && let Some(msg) = entry.messages.iter_mut().rev()
                     .find(|m| m.user_id == user_id && m.reason.is_empty())
                 {
                     msg.reason = reason.to_string();
                 }
-            }
-        }
         save_store(store);
     }
 }

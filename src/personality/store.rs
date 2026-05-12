@@ -47,19 +47,12 @@ impl Default for Personality {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PersonalityStore {
     pub current: Personality,
     pub snapshots: HashMap<String, Personality>,
 }
 
-impl Default for PersonalityStore {
-    fn default() -> Self {
-        Self {
-            current: Personality::default(),
-            snapshots: HashMap::new(),
-        }
-    }
-}
 
 fn personality_path() -> std::path::PathBuf {
     crate::config::data_dir().join("personality.json")

@@ -57,7 +57,7 @@ impl MemoryStore {
     pub(crate) fn get_user_mut(&mut self, user_id: u64) -> &mut UserMemory {
         self.users
             .entry(user_id.to_string())
-            .or_insert_with(UserMemory::default)
+            .or_default()
     }
 }
 

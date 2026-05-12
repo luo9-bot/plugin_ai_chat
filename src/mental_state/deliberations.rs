@@ -30,8 +30,8 @@ pub fn add_deliberation(content: &str, source: &str) {
     }
 
     let max = config::get().mental_state.deliberations_max;
-    if store.deliberations.len() >= max {
-        if let Some(weakest_idx) = store.deliberations.iter()
+    if store.deliberations.len() >= max
+        && let Some(weakest_idx) = store.deliberations.iter()
             .enumerate()
             .min_by(|a, b| a.1.strength.partial_cmp(&b.1.strength).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
@@ -43,7 +43,6 @@ pub fn add_deliberation(content: &str, source: &str) {
                 return;
             }
         }
-    }
 
     debug!(content, source, "mental_state: added deliberation");
     store.deliberations.push(Deliberation {

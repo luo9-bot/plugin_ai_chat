@@ -6,6 +6,7 @@ use crate::config;
 
 /// 每日计划 (持久化)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DailyPlan {
     /// 日期 (YYYY-MM-DD)
     pub date: String,
@@ -19,17 +20,6 @@ pub struct DailyPlan {
     pub created_at: u64,
 }
 
-impl Default for DailyPlan {
-    fn default() -> Self {
-        Self {
-            date: String::new(),
-            goals: Vec::new(),
-            completed: Vec::new(),
-            mood: String::new(),
-            created_at: 0,
-        }
-    }
-}
 
 fn plan_path() -> std::path::PathBuf {
     config::data_dir().join("daily_plan.json")

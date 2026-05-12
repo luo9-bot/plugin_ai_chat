@@ -155,7 +155,7 @@ pub fn with_behavior_mut<F, R>(user_id: u64, f: F) -> R
 where
     F: FnOnce(&mut UserBehavior) -> R,
 {
-    let mut behavior = USER_BEHAVIORS.entry(user_id).or_insert_with(UserBehavior::default);
+    let mut behavior = USER_BEHAVIORS.entry(user_id).or_default();
     f(&mut behavior)
 }
 

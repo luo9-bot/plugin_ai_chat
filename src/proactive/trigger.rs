@@ -28,7 +28,7 @@ fn extract_topic(msg: &str) -> String {
             return m.to_string();
         }
     }
-    let first_word = msg.splitn(3, |c: char| c == ' ' || c == '~' || c == '?' || c == '？' || c == '\n')
+    let first_word = msg.split([' ', '~', '?', '？', '\n'])
         .next().unwrap_or("");
     if first_word.len() > 2 {
         first_word.to_string()
@@ -43,15 +43,14 @@ fn is_topic_on_cooldown(user_id: u64, topic: &str) -> bool {
         return false;
     }
     let guard = RECENT_TOPICS.lock().unwrap();
-    if let Some(ref map) = *guard {
-        if let Some(topics) = map.get(&user_id) {
+    if let Some(ref map) = *guard
+        && let Some(topics) = map.get(&user_id) {
             for recent in topics {
                 if recent == topic {
                     return true;
                 }
             }
         }
-    }
     false
 }
 
@@ -62,7 +61,7 @@ fn record_topic(user_id: u64, topic: &str) {
     }
     let mut guard = RECENT_TOPICS.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
-    let topics = map.entry(user_id).or_insert_with(Vec::new);
+    let topics = map.entry(user_id).or_default();
     topics.push(topic.to_string());
     if topics.len() > 10 {
         topics.remove(0);
@@ -72,14 +71,13 @@ fn record_topic(user_id: u64, topic: &str) {
 /// 检查同群是否 recently 发过相同消息
 fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     let guard = RECENT_GROUP_MESSAGES.lock().unwrap();
-    if let Some(ref map) = *guard {
-        if let Some((recent_msg, recent_time)) = map.get(&group_id) {
+    if let Some(ref map) = *guard
+        && let Some((recent_msg, recent_time)) = map.get(&group_id) {
             let now = crate::util::now_secs();
             if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && recent_msg == msg {
                 return true;
             }
         }
-    }
     false
 }
 
@@ -224,12 +222,11 @@ pub fn check_group_atmosphere(group_id: u64) {
     let now = crate::util::now_secs();
 
     let self_qq = crate::config::get().self_qq;
-    if self_qq > 0 {
-        if let Some(activity) = crate::activity::get_active_activity(self_qq) {
+    if self_qq > 0
+        && let Some(activity) = crate::activity::get_active_activity(self_qq) {
             debug!(group_id, activity = ?activity.activity, "proactive: bot is busy, skipping");
             return;
         }
-    }
 
     let last_conversation = crate::with_shared_state(|s| {
         s.last_conversation_times.get(&group_id).copied().unwrap_or(0)

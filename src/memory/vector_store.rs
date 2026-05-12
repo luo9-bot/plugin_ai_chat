@@ -262,6 +262,7 @@ impl VectorStore {
     }
 
     /// 查询是否包含某 content
+    #[allow(dead_code)]
     fn contains(&self, content: &str) -> bool {
         self.raw_vectors.contains_key(content)
     }
@@ -496,7 +497,7 @@ pub fn add_vector(content: &str, embedding: Vec<f32>) {
     let store = guard.as_mut().expect("vector_store not initialized");
     store.add(content, embedding);
     // 每 BUFFER_SIZE 次写入刷新磁盘
-    if store.write_buffer.len() >= BUFFER_SIZE || store.total_added % 10 == 0 {
+    if store.write_buffer.len() >= BUFFER_SIZE || store.total_added.is_multiple_of(10) {
         save_to_disk(store);
         store.write_buffer.clear();
     }
@@ -544,7 +545,7 @@ pub fn count() -> usize {
 /// 是否已训练 SQ8
 pub fn is_trained() -> bool {
     let guard = STORE.lock().unwrap();
-    guard.as_ref().map_or(false, |s| s.trained)
+    guard.as_ref().is_some_and(|s| s.trained)
 }
 
 /// 强制刷新到磁盘

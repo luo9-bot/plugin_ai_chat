@@ -77,11 +77,10 @@ pub fn add(content: &str, category: ThoughtCategory) {
     store.save();
 
     // 远程同步 (fire-and-forget)
-    if crate::config::get().sync.enabled {
-        if let Some(thought) = store.thoughts.last() {
+    if crate::config::get().sync.enabled
+        && let Some(thought) = store.thoughts.last() {
             super::sync::sync_to_remote(thought);
         }
-    }
 }
 
 /// 标准化想法文本用于比较

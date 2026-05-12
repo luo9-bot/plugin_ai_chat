@@ -27,6 +27,12 @@ pub struct State {
     pub last_review_times: HashMap<u64, u64>,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl State {
     pub fn new() -> Self {
         Self {
@@ -71,7 +77,7 @@ impl State {
 
     pub fn take_expired_batch(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<MessageBatch> {
         let key: CtxKey = (group_id, user_id);
-        let should_take = self.batches.get(&key).map_or(false, |batch| {
+        let should_take = self.batches.get(&key).is_some_and(|batch| {
             batch.last_update.elapsed().as_millis() >= timeout_ms as u128
         });
         if should_take {
@@ -88,7 +94,7 @@ impl State {
 
     pub fn take_new_messages(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<String> {
         let key: CtxKey = (group_id, user_id);
-        let should_take = self.batches.get(&key).map_or(false, |batch| {
+        let should_take = self.batches.get(&key).is_some_and(|batch| {
             batch.last_update.elapsed().as_millis() >= timeout_ms as u128
         });
         if should_take {

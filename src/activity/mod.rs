@@ -133,11 +133,10 @@ pub fn check_bot_message(user_id: u64, message: &str) {
         };
 
         // 如果匹配每日计划任务，标记为已完成
-        if let ActivityType::Custom(ref desc) = activity {
-            if let Some(task) = desc.strip_prefix("执行计划：") {
+        if let ActivityType::Custom(ref desc) = activity
+            && let Some(task) = desc.strip_prefix("执行计划：") {
                 crate::schedule::complete_task(task);
             }
-        }
 
         let mut guard = ACTIVITY_STATE.lock().unwrap();
         let map = guard.get_or_insert_with(HashMap::new);
@@ -151,14 +150,14 @@ pub fn check_bot_message(user_id: u64, message: &str) {
 /// darling_qq 的活动持续时间会大幅缩短（更容易被"打断"）
 pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
     let guard = ACTIVITY_STATE.lock().unwrap();
-    if let Some(ref map) = *guard {
-        if let Some(state) = map.get(&user_id) {
+    if let Some(ref map) = *guard
+        && let Some(state) = map.get(&user_id) {
             let now = crate::util::now_secs();
             // darling_qq 的活动持续时间缩短
             let effective_expires = if is_darling(user_id) {
-                let shortened = state.started_at
-                    + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO) as u64;
-                shortened
+                
+                state.started_at
+                    + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO) as u64
             } else {
                 state.expires_at
             };
@@ -166,7 +165,6 @@ pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
                 return Some(state.clone());
             }
         }
-    }
     None
 }
 
@@ -178,11 +176,10 @@ fn is_darling(user_id: u64) -> bool {
 /// 清除用户的活动状态（当用户主动对话时）
 pub fn clear_activity(user_id: u64) {
     let mut guard = ACTIVITY_STATE.lock().unwrap();
-    if let Some(ref mut map) = *guard {
-        if map.remove(&user_id).is_some() {
+    if let Some(ref mut map) = *guard
+        && map.remove(&user_id).is_some() {
             debug!(user_id, "activity: cleared");
         }
-    }
 }
 
 /// 获取活动状态的 prompt 上下文

@@ -28,7 +28,7 @@ pub fn keyword_screen(
     let trimmed = user_message.trim();
 
     // 检查是否是简短确认
-    let is_short_confirm = SHORT_CONFIRM.iter().any(|&p| trimmed == p);
+    let is_short_confirm = SHORT_CONFIRM.contains(&trimmed);
     if !is_short_confirm {
         return false;
     }
@@ -37,7 +37,7 @@ pub fn keyword_screen(
     let bot_said_farewell = FAREWELL_PATTERNS.iter().any(|p| bot_last_message.contains(p));
 
     // 深夜时间
-    let is_late_night = current_hour >= 23 || current_hour < 6;
+    let is_late_night = !(6..23).contains(&current_hour);
 
     // 条件：bot 说了告别 + 用户确认，或者深夜 + 用户确认
     bot_said_farewell || is_late_night
@@ -60,5 +60,5 @@ pub fn get_context(bot_last_message: &str, user_message: &str) -> String {
 /// 检查用户消息是否是简短确认（用于其他模块）
 pub fn is_short_confirm(message: &str) -> bool {
     let trimmed = message.trim();
-    SHORT_CONFIRM.iter().any(|&p| trimmed == p)
+    SHORT_CONFIRM.contains(&trimmed)
 }

@@ -107,7 +107,7 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
 fn scan_yaml_value(value: &serde_yaml::Value, result: &mut StructureScanResult) {
     match value {
         serde_yaml::Value::Mapping(map) => {
-            if let Some(role) = map.get(&serde_yaml::Value::String("role".to_string())).and_then(|v| v.as_str()) {
+            if let Some(role) = map.get(serde_yaml::Value::String("role".to_string())).and_then(|v| v.as_str()) {
                 match role {
                     "system" | "assistant" | "developer" | "instruction" | "prompt" | "policy" | "override" => {
                         result.score = (result.score + 0.85).min(1.0);

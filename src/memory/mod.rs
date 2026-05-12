@@ -52,8 +52,8 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
 
     // 如果没有存储的 embeddings，实时生成并存入向量文件
     let mut final_embeddings = embeddings;
-    if final_embeddings.is_empty() && crate::config::get().embedding.enabled() {
-        if let Some(_qe) = embedding::embed_text(query) {
+    if final_embeddings.is_empty() && crate::config::get().embedding.enabled()
+        && let Some(_qe) = embedding::embed_text(query) {
             let doc_texts: Vec<String> = documents.iter().map(|(_, c)| c.clone()).collect();
             let doc_embeddings = embedding::embed_batch(&doc_texts);
             for (i, emb_opt) in doc_embeddings.into_iter().enumerate() {
@@ -63,7 +63,6 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
                 }
             }
         }
-    }
 
     // 配置完整检索 pipeline
     let config = retrieval::RetrievalConfig {

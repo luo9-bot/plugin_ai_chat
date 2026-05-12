@@ -44,7 +44,7 @@ fn prune(dir: &Path, max_count: usize) {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(_) => return,
     };
-    entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
     for entry in entries.into_iter().skip(max_count) {
         std::fs::remove_file(entry.path()).ok();
     }

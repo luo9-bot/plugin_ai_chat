@@ -29,7 +29,7 @@ pub fn current_hour_cst() -> u32 {
 
 /// 判断闰年
 pub fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 /// 从 epoch 天数计算 (年, 月, 日)，UTC+8

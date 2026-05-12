@@ -35,7 +35,7 @@ fn clean_raw(input: &str) -> String {
 /// 生成 confusable skeleton
 fn make_skeleton(input: &str) -> String {
     let nfkc: String = input.nfkc().collect();
-    nfkc.chars().map(|c| unicode::confusable_skeleton(c)).collect()
+    nfkc.chars().map(unicode::confusable_skeleton).collect()
 }
 
 /// 生成紧凑视图
@@ -69,7 +69,7 @@ fn make_compact(input: &str) -> String {
 fn apply_homo_replacements(text: &str) -> String {
     let sorted = {
         let mut v: Vec<&&str> = unicode::HOMO_MAP.iter().map(|(k, _)| k).collect();
-        v.sort_by(|a, b| b.len().cmp(&a.len()));
+        v.sort_by_key(|b| std::cmp::Reverse(b.len()));
         v
     };
     let mut result = String::with_capacity(text.len());
@@ -82,14 +82,13 @@ fn apply_homo_replacements(text: &str) -> String {
             let plen = pat_chars.len();
             if i + plen <= chars.len() {
                 let slice: String = chars[i..i + plen].iter().collect();
-                if slice == **pattern {
-                    if let Some((_, replacement)) = unicode::HOMO_MAP.iter().find(|(k, _)| *k == **pattern) {
+                if slice == **pattern
+                    && let Some((_, replacement)) = unicode::HOMO_MAP.iter().find(|(k, _)| *k == **pattern) {
                         result.push_str(replacement);
                         i += plen;
                         matched = true;
                         break;
                     }
-                }
             }
         }
         if !matched {

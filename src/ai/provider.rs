@@ -21,11 +21,10 @@ pub fn extract_json(raw: &str) -> Option<String> {
     };
 
     // 尝试直接提取 { ... }
-    if let Some(start) = cleaned.find('{') {
-        if let Some(end) = cleaned[start..].rfind('}') {
+    if let Some(start) = cleaned.find('{')
+        && let Some(end) = cleaned[start..].rfind('}') {
             return Some(cleaned[start..start + end + 1].to_string());
         }
-    }
 
     // 尝试从 markdown 代码块提取
     if let Some(start) = cleaned.find("```json") {
@@ -45,11 +44,10 @@ pub fn extract_json(raw: &str) -> Option<String> {
     }
 
     // 尝试提取 [ ... ] 数组
-    if let Some(start) = cleaned.find('[') {
-        if let Some(end) = cleaned[start..].rfind(']') {
+    if let Some(start) = cleaned.find('[')
+        && let Some(end) = cleaned[start..].rfind(']') {
             return Some(cleaned[start..start + end + 1].to_string());
         }
-    }
 
     None
 }
@@ -359,19 +357,18 @@ pub fn analyze_with_tools(
             .ok_or("API returned empty choices")?;
 
         // 优先从 message.tool_calls 中提取结果
-        let has_tool_calls = choice.message.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
-        let has_content = choice.message.content.as_ref().map_or(false, |c| !c.is_empty());
+        let has_tool_calls = choice.message.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
+        let has_content = choice.message.content.as_ref().is_some_and(|c| !c.is_empty());
         debug!(has_tool_calls, has_content, "analyze_with_tools: response analysis");
 
-        if let Some(tool_calls) = &choice.message.tool_calls {
-            if let Some(first_call) = tool_calls.first() {
+        if let Some(tool_calls) = &choice.message.tool_calls
+            && let Some(first_call) = tool_calls.first() {
                 debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
                     "analyze_with_tools: got tool call");
                 let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
                     .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
                 return Ok(args);
             }
-        }
 
         // Fallback: 从文本内容中提取 JSON (兼容旧行为)
         let mut reply = choice.message.content.unwrap_or_default();
@@ -466,18 +463,17 @@ pub fn analyze_with_tools_named(
             .next()
             .ok_or("API returned empty choices")?;
 
-        let _has_tool_calls = choice.message.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
-        let has_content = choice.message.content.as_ref().map_or(false, |c| !c.is_empty());
+        let _has_tool_calls = choice.message.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
+        let has_content = choice.message.content.as_ref().is_some_and(|c| !c.is_empty());
 
-        if let Some(tool_calls) = &choice.message.tool_calls {
-            if let Some(first_call) = tool_calls.first() {
+        if let Some(tool_calls) = &choice.message.tool_calls
+            && let Some(first_call) = tool_calls.first() {
                 let name = first_call.function.name.clone();
                 let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
                     .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
                 debug!(name = %name, "analyze_with_tools_named: got tool call");
                 return Ok((name, args));
             }
-        }
 
         // Fallback: 从文本中提取
         let mut reply = choice.message.content.unwrap_or_default();

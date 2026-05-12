@@ -1,6 +1,7 @@
 //! Prompt 管理器：从 .prompt 文件加载模板，支持 {placeholder} 替换
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing::{debug, warn};
@@ -10,13 +11,12 @@ static PROMPTS: OnceLock<PromptManager> = OnceLock::new();
 
 pub struct PromptManager {
     templates: HashMap<String, String>,
-    
     data_dir: PathBuf,
 }
 
 impl PromptManager {
     /// 初始化：扫描 prompts/ 目录，加载所有 .prompt 和 .txt 文件
-    pub fn init(data_dir: &PathBuf) {
+    pub fn init(data_dir: &Path) {
         let prompts_dir = data_dir.join("prompts");
         std::fs::create_dir_all(&prompts_dir).ok();
 
@@ -46,7 +46,7 @@ impl PromptManager {
 
         let _ = PROMPTS.set(PromptManager {
             templates,
-            data_dir: data_dir.clone(),
+            data_dir: data_dir.to_path_buf(),
         });
         debug!(count = PROMPTS.get().unwrap().templates.len(), "prompt: manager initialized");
     }

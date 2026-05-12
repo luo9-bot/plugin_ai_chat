@@ -31,8 +31,8 @@ pub fn ai_extract(user_id: u64, user_message: &str, ai_reply: &str, history: &[(
                 "[]"
             };
 
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                if let Some(arr) = parsed.as_array() {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
+                && let Some(arr) = parsed.as_array() {
                     for item in arr {
                         let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
                         let importance_str = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
@@ -47,7 +47,6 @@ pub fn ai_extract(user_id: u64, user_message: &str, ai_reply: &str, history: &[(
                         add(user_id, content, importance);
                     }
                 }
-            }
         }
         Err(e) => {
             debug!(user_id, error = %e, "memory: AI extraction failed, falling back to keyword");

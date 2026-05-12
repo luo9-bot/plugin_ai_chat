@@ -5,15 +5,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PersonProfile {
     pub user_id: u64, pub person_name: String, pub name_reason: String,
     pub know_times: u32, pub know_since: u64, pub last_know: u64,
     pub memory_points: Vec<String>, pub group_nicknames: HashMap<u64, String>,
 }
 
-impl Default for PersonProfile {
-    fn default() -> Self { Self { user_id: 0, person_name: String::new(), name_reason: String::new(), know_times: 0, know_since: 0, last_know: 0, memory_points: Vec::new(), group_nicknames: HashMap::new() } }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersonStore { pub profiles: HashMap<u64, PersonProfile> }

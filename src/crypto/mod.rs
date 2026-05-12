@@ -25,11 +25,10 @@ fn load_or_generate() -> SigningKey {
     let path = key_path();
     if let Ok(hex_str) = std::fs::read_to_string(&path) {
         let hex_str = hex_str.trim();
-        if let Ok(bytes) = hex::decode(hex_str) {
-            if let Ok(key) = SigningKey::from_bytes(bytes.as_slice().into()) {
+        if let Ok(bytes) = hex::decode(hex_str)
+            && let Ok(key) = SigningKey::from_bytes(bytes.as_slice().into()) {
                 return key;
             }
-        }
     }
     let key = SigningKey::random(&mut OsRng);
     let hex_str = hex::encode(key.to_bytes());

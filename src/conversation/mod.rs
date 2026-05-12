@@ -276,12 +276,11 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
     }
 
     // 通用管理员命令
-    if is_admin(user_id) {
-        if let Some(reply) = handle_admin_command(trimmed, 0, user_id) {
+    if is_admin(user_id)
+        && let Some(reply) = handle_admin_command(trimmed, 0, user_id) {
             crate::sender::send_msg(0, user_id, &reply);
             return;
         }
-    }
 
     if let Some(reply) = crate::memory::check_forget_command(user_id, trimmed) {
         crate::sender::send_msg(0, user_id, &reply);
@@ -386,11 +385,10 @@ pub fn handle_personality_command(msg: &str) -> Option<String> {
 
     if let Some(rest) = msg.strip_prefix("调整特质:") {
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-        if parts.len() == 2 {
-            if let Ok(value) = parts[1].parse::<f32>() {
+        if parts.len() == 2
+            && let Ok(value) = parts[1].parse::<f32>() {
                 return Some(crate::personality::adjust_trait(parts[0], value).unwrap_or_else(|e| e));
             }
-        }
         return Some("格式: 调整特质:特质名 数值 (0.0~1.0)".into());
     }
 
@@ -430,12 +428,11 @@ pub fn handle_proactive_command(msg: &str) -> Option<String> {
 
     if let Some(rest) = msg.strip_prefix("设置免打扰:") {
         let parts: Vec<&str> = rest.splitn(2, '-').collect();
-        if parts.len() == 2 {
-            if let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+        if parts.len() == 2
+            && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                 crate::proactive::set_quiet_hours(start, end);
                 return Some(format!("已设置免打扰: {}时 - {}时", start, end));
             }
-        }
         return Some("格式: 设置免打扰:23-7".into());
     }
 

@@ -34,12 +34,11 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
     info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
 
     // 生成 embedding 并写入 vectors.bin（可选）
-    if crate::config::get().embedding.enabled() {
-        if let Some(embedding) = crate::memory::embedding::embed_text(content) {
+    if crate::config::get().embedding.enabled()
+        && let Some(embedding) = crate::memory::embedding::embed_text(content) {
             crate::memory::vector_store::add_vector(content, embedding);
             debug!(user_id, "memory: embedding saved to vectors.bin");
         }
-    }
 
     // 更新知识图谱
     crate::memory::graph::update_graph_from_memory(user_id, content);
@@ -124,15 +123,14 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
 
 pub fn forget_all(user_id: u64) {
     let mut store = MemoryStore::load();
-    if let Some(user) = store.users.remove(&user_id.to_string()) {
-        if !user.entries.is_empty() {
+    if let Some(user) = store.users.remove(&user_id.to_string())
+        && !user.entries.is_empty() {
             // 从向量存储中删除
             for entry in &user.entries {
                 crate::memory::vector_store::remove_vector(&entry.content);
             }
             crate::archive::archive_long_term_memory(user_id, user.entries);
         }
-    }
     store.save();
 }
 
@@ -145,11 +143,10 @@ const INJECTION_COOLDOWN_SECS: u64 = 1800; // 30 分钟内不重复注入
 fn is_recently_injected(user_id: u64, content: &str) -> bool {
     let key = format!("{}:{}", user_id, content);
     let guard = RECENTLY_INJECTED.lock().unwrap();
-    if let Some(ref map) = *guard {
-        if let Some(ts) = map.get(&key) {
+    if let Some(ref map) = *guard
+        && let Some(ts) = map.get(&key) {
             return crate::util::now_secs().saturating_sub(*ts) < INJECTION_COOLDOWN_SECS;
         }
-    }
     false
 }
 

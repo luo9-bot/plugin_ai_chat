@@ -93,11 +93,10 @@ fn tool_wait() -> crate::ai::Tool {
 /// 检查是否在冷却期内
 pub fn is_in_cooldown(group_id: u64) -> bool {
     let guard = COOLDOWN_STATE.lock().unwrap();
-    if let Some(ref map) = *guard {
-        if let Some(&last) = map.get(&group_id) {
+    if let Some(ref map) = *guard
+        && let Some(&last) = map.get(&group_id) {
             return crate::util::now_secs().saturating_sub(last) < NO_REPLY_COOLDOWN_SECS;
         }
-    }
     false
 }
 
