@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::store::{Importance, MemoryEntry, MemoryStore};
 
@@ -14,12 +14,15 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
         if importance == Importance::Permanent {
             entry.importance = Importance::Permanent;
         }
-        debug!(user_id, content, "memory: updated existing entry");
+        let content_preview: String = content.chars().take(40).collect();
+        debug!(user_id, content = %content_preview, "memory: updated existing entry");
         store.save();
+        info!(user_id, content = %content_preview, "memory: saved to JSON (update)");
         return;
     }
 
-    debug!(user_id, content, ?importance, "memory: added new entry");
+    let content_preview: String = content.chars().take(40).collect();
+    debug!(user_id, content = %content_preview, ?importance, "memory: added new entry");
     user.entries.push(MemoryEntry {
         content: content.to_string(),
         importance,
@@ -28,6 +31,7 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
         access_count: 1,
     });
     store.save();
+    info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
 }
 
 pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {

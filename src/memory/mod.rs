@@ -8,6 +8,7 @@ pub mod graph;
 pub mod embedding;
 
 use std::collections::HashMap;
+use tracing::{debug, info, warn};
 
 pub use store::*;
 pub use operations::*;
@@ -122,18 +123,25 @@ pub fn store_memory_with_embedding(user_id: u64, content: &str, importance: stor
         access_count: 0,
     };
 
+    let content_preview: String = content.chars().take(40).collect();
+
     // 存储到 SQLite
     if sqlite::is_available() {
+        debug!(user_id, content = %content_preview, "store_memory: writing to SQLite");
         sqlite::save_memory(user_id, &entry);
 
-        // 异步生成 embedding
+        // 生成 embedding
         if let Some(embedding) = embedding::embed_text(content) {
+            debug!(user_id, content = %content_preview, dim = embedding.len(), "store_memory: saving embedding");
             sqlite::save_embedding(user_id, content, &embedding);
         }
+    } else {
+        warn!(user_id, content = %content_preview, "store_memory: SQLite not available, skipping");
     }
 
     // 同时存储到 JSON（兼容）
     let mut store = store::MemoryStore::load();
     store.get_user_mut(user_id).entries.push(entry);
     store.save();
+    info!(user_id, content = %content_preview, "store_memory: saved to both SQLite and JSON");
 }

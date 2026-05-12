@@ -97,7 +97,7 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         }
     }
 
-    // 工作记忆 (群聊最近消息流)
+    // 工作记忆 (群聊最近消息流，含时间戳帮助 AI 区分新旧消息)
     if group_id > 0 {
         let wm_ctx = working_memory::get_context(group_id, 3600);
         if !wm_ctx.is_empty() {

@@ -75,13 +75,25 @@ pub fn extract_facts_from_conversation(user_id: u64, user_message: &str, bot_rep
         user_message, bot_reply
     );
 
+    // 无意义回复的过滤模式
+    let meaningless_patterns = [
+        "无明确事实", "没有可提取", "无法提取", "没有事实", "暂无",
+        "无相关信息", "无法确定", "没有足够", "无法判断", "无明确",
+        "（无", "(无",
+    ];
+
     match crate::ai::analyze("", &prompt) {
         Ok(response) => {
             for line in response.lines() {
                 let fact = line.trim();
-                if !fact.is_empty() && fact.len() > 2 && fact.len() < 100 {
-                    add_memory_point(user_id, fact);
+                if fact.is_empty() || fact.len() <= 2 || fact.len() >= 100 {
+                    continue;
                 }
+                // 过滤无意义回复
+                if meaningless_patterns.iter().any(|p| fact.contains(p)) {
+                    continue;
+                }
+                add_memory_point(user_id, fact);
             }
         }
         Err(_) => {} // 静默失败

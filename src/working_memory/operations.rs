@@ -82,6 +82,7 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
 ///
 /// 保留 base_count * 2 条消息，但只将后半部分标记为"新消息"。
 /// 旧消息逐步退出而不是突然消失，减少上下文抖动。
+/// 每条消息附带相对时间戳，帮助 AI 理解时间关系。
 pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usize) -> String {
     let expanded_count = base_count * 2; // 2x 缓存稳定性放大
     let entries = get_recent(group_id, max_age_secs, expanded_count);
@@ -89,6 +90,7 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
         return String::new();
     }
 
+    let now = crate::util::now_secs();
     // 标记哪些是"新消息"（后半部分）
     let new_start = entries.len().saturating_sub(base_count);
 
@@ -108,10 +110,27 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
                 break;
             }
         }
+        // 时间标记：帮助 AI 理解消息的时间关系
+        let time_ago = format_time_ago(now.saturating_sub(first.timestamp));
         let new_tag = if is_new { "" } else { "[旧] " };
-        lines.push(format!("[user_id:{}]{} {}{}", first.user_id, tag, new_tag, block));
+        lines.push(format!("[user_id:{}]{}{} ({})", first.user_id, tag, new_tag, time_ago));
+        // 实际内容追加在下一行，避免行过长
+        lines.push(format!("  {}", block));
     }
     format!("# 群聊工作记忆 (最近消息)\n{}", lines.join("\n"))
+}
+
+/// 格式化相对时间
+fn format_time_ago(seconds_ago: u64) -> String {
+    if seconds_ago < 60 {
+        "刚刚".to_string()
+    } else if seconds_ago < 3600 {
+        format!("{}分钟前", seconds_ago / 60)
+    } else if seconds_ago < 86400 {
+        format!("{}小时前", seconds_ago / 3600)
+    } else {
+        format!("{}天前", seconds_ago / 86400)
+    }
 }
 
 /// 清理过期的工作记忆 (归档后删除)

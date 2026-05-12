@@ -14,10 +14,9 @@ pub fn init(data_dir: &std::path::Path) {
     let db_path = data_dir.join("memory.db");
     match Connection::open(&db_path) {
         Ok(conn) => {
-            // 性能优化
+            // DELETE 模式：数据直接写入 .db 文件，避免 WAL 文件残留导致数据丢失
             conn.execute_batch("
-                PRAGMA journal_mode=WAL;
-                PRAGMA synchronous=NORMAL;
+                PRAGMA journal_mode=DELETE;
                 PRAGMA temp_store=MEMORY;
                 PRAGMA cache_size=65536;
             ").ok();
