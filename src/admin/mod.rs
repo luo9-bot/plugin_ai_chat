@@ -166,6 +166,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
             }
         }
         Some(&"dashboard") => handlers::handle_dashboard(),
+        Some(&"version") => ok(serde_json::json!({"version": env!("CARGO_PKG_VERSION")})),
         _ => err(404, "not found"),
     }
 }

@@ -14,7 +14,10 @@
         <span></span>
         <span></span>
       </button>
-      <h1>AI Chat Admin</h1>
+      <div class="header-left">
+        <h1>AI Chat Admin</h1>
+        <span class="version-badge" v-if="appVersion">v{{ appVersion }} {{ buildTime }}</span>
+      </div>
       <button class="logout-btn" @click="doLogout">退出</button>
     </header>
     <div class="container">
@@ -33,7 +36,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getToken, clearToken, tryLogin } from './api.js'
+import { getToken, clearToken, tryLogin, api } from './api.js'
 import SelfThoughts from './views/SelfThoughts.vue'
 import UserMemory from './views/UserMemory.vue'
 import WorkingMemory from './views/WorkingMemory.vue'
@@ -57,6 +60,8 @@ const tokenInput = ref('')
 const loginErr = ref('')
 const currentTab = ref('dashboard')
 const sidebarOpen = ref(false)
+const appVersion = ref('')
+const buildTime = ref('')
 
 const tabs = [
   { id: 'dashboard', name: '仪表盘', comp: DashboardView },
@@ -102,6 +107,11 @@ onMounted(async () => {
       loggedIn.value = true }
     catch { clearToken() }
   }
+  try {
+    const v = await api('/api/version')
+    appVersion.value = v.version || ''
+    buildTime.value = v.build_time || ''
+  } catch {}
 })
 </script>
 
@@ -132,6 +142,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .app-layout { display: flex; flex-direction: column; height: 100vh; }
 header { background: linear-gradient(90deg, #fdf2f8 0%, #fff 100%); border-bottom: 2px solid #f9a8d4; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 header h1 { font-size: 18px; color: var(--accent); font-weight: 700; }
+.header-left { display: flex; align-items: baseline; gap: 12px; }
+.version-badge { font-size: 11px; color: var(--text-dim); background: var(--accent-light); padding: 2px 8px; border-radius: 10px; }
 
 /* Menu button (hamburger) */
 .menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; flex-direction: column; gap: 4px; }

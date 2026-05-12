@@ -37,7 +37,7 @@ fn sources_changed_since(stamp: SystemTime) -> bool {
 
 fn main() {
     let dist = Path::new("frontend/dist/index.html");
-    let out = Path::new("src/admin_ui.rs");
+    let out = Path::new("src/admin/ui.rs");
     let stamp = Path::new("frontend/.last-build");
 
     // ── 1. 检测前端源文件是否变化，自动编译前端 ──
@@ -94,10 +94,10 @@ fn main() {
         println!("cargo:warning=admin_ui.rs regenerated from dist ({:.1} KB)", size as f64 / 1024.0);
     }
 
-    // 如果 admin_ui.rs 不存在且 dist 也不存在，创建占位
+    // 如果 admin/ui.rs 不存在且 dist 也不存在，创建占位
     if !out.exists() {
         let fallback = "pub const HTML: &str = r##\"<!DOCTYPE html><html><body><h1>Frontend not built. Run: cd frontend && npm run build</h1></body></html>\"##;\n";
-        std::fs::write(out, fallback).expect("failed to write placeholder admin_ui.rs");
+        std::fs::write(out, fallback).expect("failed to write placeholder admin/ui.rs");
     }
 
     // ── 3. 告诉 cargo 监视哪些文件 ──
@@ -105,6 +105,8 @@ fn main() {
     println!("cargo:rerun-if-changed=frontend/src");
     // dist 产物
     println!("cargo:rerun-if-changed=frontend/dist/index.html");
+    // 输出文件
+    println!("cargo:rerun-if-changed=src/admin/ui.rs");
     // build.rs 自身
     println!("cargo:rerun-if-changed=build.rs");
 }
