@@ -394,7 +394,11 @@ pub fn extract_entities_from_text(text: &str) -> Vec<(String, String, String)> {
             if !subject.is_empty() && !object.is_empty() {
                 triples.push((subject, predicate.to_string(), object));
             }
-            start = abs_pos + 1;
+            // 推进到下一个 char 边界，避免多字节 UTF-8 字符中间切片
+            start = abs_pos + keyword.len();
+            while start < text.len() && !text.is_char_boundary(start) {
+                start += 1;
+            }
         }
     }
 
