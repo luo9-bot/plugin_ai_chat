@@ -38,10 +38,36 @@
           </div>
         </div>
         <div class="actions">
+          <button class="btn btn-edit" @click="openTagEditor(s)">🏷️ 标签</button>
           <button class="btn" :class="s.is_banned ? 'btn-ok' : 'btn-warn'" @click="toggleBan(s.hash)">
             {{ s.is_banned ? '解封' : '封禁' }}
           </button>
           <button class="btn btn-del" @click="remove(s.hash)">删除</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签编辑弹窗 -->
+    <div v-if="editingSticker" class="modal-overlay" @click.self="closeTagEditor">
+      <div class="modal">
+        <h3>🏷️ 编辑标签</h3>
+        <div class="modal-body">
+          <img :src="`/api/sticker/image/${editingSticker.hash}`" class="preview" />
+          <div class="tag-editor">
+            <div class="current-tags">
+              <span v-for="(tag, i) in editTags" :key="i" class="edit-tag">
+                <input v-model="editTags[i]" class="tag-input" @blur="saveTags" @keydown.enter="focusNext($event, i)" />
+                <button class="tag-del" @click="removeTag(i)" title="删除标签">✕</button>
+              </span>
+            </div>
+            <div class="add-tag-row">
+              <input v-model="newTag" placeholder="输入新标签，回车添加" class="add-tag-input" @keydown.enter="addTag" />
+              <button class="btn btn-primary btn-sm" @click="addTag">＋</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" @click="closeTagEditor">完成</button>
         </div>
       </div>
     </div>
@@ -55,6 +81,9 @@ import { api } from '../api.js'
 const data = ref({})
 const filter = ref('all')
 const search = ref('')
+const editingSticker = ref(null)
+const editTags = ref([])
+const newTag = ref('')
 
 const stats = computed(() => data.value)
 const allStickers = computed(() => data.value.stickers || [])
@@ -81,6 +110,41 @@ async function load() { data.value = await api('/api/sticker') }
 async function toggleBan(hash) { await api('/api/sticker/' + hash, { method: 'POST' }); load() }
 async function remove(hash) { if (!confirm('确定删除此表情包？')) return; await api('/api/sticker/' + hash, { method: 'DELETE' }); load() }
 function onImgError(e) { e.target.style.display = 'none' }
+
+function openTagEditor(s) {
+  editingSticker.value = s
+  editTags.value = [...(s.emotions || [])]
+  newTag.value = ''
+}
+function closeTagEditor() {
+  editingSticker.value = null
+  editTags.value = []
+  newTag.value = ''
+}
+async function saveTags() {
+  if (!editingSticker.value) return
+  const tags = editTags.value.map(t => t.trim()).filter(Boolean)
+  await api('/api/sticker/' + editingSticker.value.hash + '/tags', {
+    method: 'PUT',
+    body: JSON.stringify({ tags })
+  })
+  editingSticker.value.emotions = tags
+  editingSticker.value.description = tags.join(',')
+}
+function addTag() {
+  const t = newTag.value.trim()
+  if (!t || editTags.value.includes(t)) return
+  editTags.value.push(t)
+  newTag.value = ''
+  saveTags()
+}
+function removeTag(i) {
+  editTags.value.splice(i, 1)
+  saveTags()
+}
+function focusNext(e, i) {
+  if (e.target.value.trim()) saveTags()
+}
 
 onMounted(load)
 </script>
@@ -125,13 +189,40 @@ h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
 .meta { font-size: 11px; color: var(--text-dim); }
 
 .actions { display: flex; gap: 6px; padding: 6px 12px 10px; }
-.btn { flex: 1; border: none; padding: 6px 0; border-radius: var(--radius); cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; }
+.btn { flex: 1; border: none; padding: 6px 0; border-radius: var(--radius); cursor: pointer; font-size: 11px; font-weight: 500; transition: all .15s; }
 .btn-warn { background: var(--warning-light); color: var(--warning); }
 .btn-warn:hover { background: var(--warning); color: #fff; }
 .btn-ok { background: var(--success-light); color: var(--success); }
 .btn-ok:hover { background: var(--success); color: #fff; }
 .btn-del { background: var(--danger-light); color: var(--danger); }
 .btn-del:hover { background: var(--danger); color: #fff; }
+.btn-edit { background: var(--purple-light); color: var(--purple); }
+.btn-edit:hover { background: var(--purple); color: #fff; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
+.btn-primary:hover { transform: translateY(-1px); }
+.btn-outline { background: var(--surface); border: 1.5px solid var(--border); color: var(--accent); }
+.btn-outline:hover { background: var(--accent-light); }
+.btn-sm { padding: 5px 12px; font-size: 11px; }
 
 .empty { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 15px; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(74,53,72,.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: var(--surface); border: 2px solid var(--border); border-radius: 16px; padding: 24px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(236,72,153,.15); }
+.modal h3 { margin: 0 0 16px; font-size: 16px; color: var(--accent); }
+.modal-body { display: flex; gap: 16px; }
+.preview { width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius); border: 1.5px solid var(--border); flex-shrink: 0; }
+.tag-editor { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.current-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.edit-tag { display: inline-flex; align-items: center; gap: 2px; background: var(--accent-light); border-radius: 6px; padding: 2px 4px 2px 8px; }
+.tag-input { border: none; background: none; color: var(--accent); font-size: 12px; width: 60px; outline: none; padding: 0; font-family: inherit; }
+.tag-input:focus { border-bottom: 1px solid var(--accent); }
+.tag-del { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 11px; padding: 0 2px; opacity: .5; }
+.tag-del:hover { opacity: 1; }
+.add-tag-row { display: flex; gap: 6px; }
+.add-tag-input { flex: 1; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: var(--radius); font-size: 12px; outline: none; }
+.add-tag-input:focus { border-color: var(--accent); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+:root { --purple: #8b5cf6; --purple-light: #f3e8ff; }
 </style>

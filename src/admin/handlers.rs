@@ -256,6 +256,27 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     err(404, "image not found")
 }
 
+/// 更新表情包标签
+pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    let val: serde_json::Value = match super::parse_json(body) {
+        Ok(v) => v,
+        Err(e) => return super::err(400, &e),
+    };
+    let new_tags: Vec<String> = match val.get("tags").and_then(|v| v.as_array()) {
+        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect(),
+        None => return super::err(400, "tags array required"),
+    };
+
+    let mut store = crate::sticker::store::load_store();
+    if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
+        entry.emotions = new_tags.clone();
+        entry.description = new_tags.join(",");
+        crate::sticker::store::save_store(&store);
+        return super::ok(serde_json::json!({"ok": true, "tags": new_tags}));
+    }
+    super::err(404, "sticker not found")
+}
+
 // ── 仪表盘统计 ────────────────────────────────────────────────
 
 pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {

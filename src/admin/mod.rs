@@ -111,6 +111,15 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         return err(403, "invalid token");
     }
 
+    // 静态图片不需要 auth（img 标签无法带 Authorization header）
+    if method == Method::Get && url.starts_with("/api/sticker/image/") {
+        let segs_local = path_segments(&url.split('?').next().unwrap_or(&url));
+        if let Some(hash) = segs_local.get(3).copied() {
+            return handlers::handle_sticker_image(hash);
+        }
+        return err(400, "hash required");
+    }
+
     // 认证检查
     if !check_auth(request) {
         return err(401, "unauthorized");
@@ -166,6 +175,9 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
                     } else {
                         err(400, "hash required")
                     }
+                }
+                Some(hash) if api_segs.get(2).copied() == Some("tags") && method == Method::Put => {
+                    handlers::handle_sticker_tags(hash, &body)
                 }
                 Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
                 Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
