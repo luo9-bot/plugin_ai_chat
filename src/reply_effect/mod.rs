@@ -33,9 +33,26 @@ pub fn observe_message(group_id: u64, user_id: u64, message: &str) {
             changed = true;
             if should_finalize(rec) {
                 rec.status = EffectStatus::Finalized;
-                let score = calculate_asi(rec);
-                rec.asi_score = Some(score);
-                info!(group_id, target_user = user_id, asi_score = score, followups = rec.followups.len(), "reply_effect: finalized");
+                let rule_score = calculate_asi(rec);
+
+                // 当规则评分偏低时，使用 LLM Judge 获得更精确的评估
+                let final_score = if rule_score < 50.0 {
+                    if let Some(llm_scores) = scoring::judge_with_llm(rec) {
+                        let relational = scoring::calculate_relational_from_llm(&llm_scores);
+                        let friction = scoring::calculate_friction_from_llm(rec, llm_scores.uncanny_risk);
+                        let behavior = scoring::calculate_behavior_score(rec);
+                        let llm_asi = ((0.45 * behavior + 0.35 * relational + 0.20 * (1.0 - friction)) * 100.0).round();
+                        debug!(group_id, rule_score, llm_asi, "reply_effect: LLM judge adjusted");
+                        llm_asi
+                    } else {
+                        rule_score
+                    }
+                } else {
+                    rule_score
+                };
+
+                rec.asi_score = Some(final_score);
+                info!(group_id, target_user = user_id, asi_score = final_score, followups = rec.followups.len(), "reply_effect: finalized");
             }
         }
     }

@@ -36,7 +36,7 @@ pub fn calculate_asi(record: &ReplyEffectRecord) -> f64 {
 
 // ── 行为分 ──────────────────────────────────────────────────────
 
-fn calculate_behavior_score(record: &ReplyEffectRecord) -> f64 {
+pub fn calculate_behavior_score(record: &ReplyEffectRecord) -> f64 {
     let target: Vec<&FollowupMessage> = record.followups.iter()
         .filter(|f| f.user_id == record.target_user)
         .collect();

@@ -314,7 +314,10 @@ pub fn analyze_with_tools(
 
 
         // 打印tools 和 tool_choice 用于调试
-        debug!(tools = ?tools_summary, tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(), "analyze_with_tools: tools 和 tool_choice");
+        debug!(
+            tools = ?tools_summary, 
+            tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+            "analyze_with_tools: tools 和 tool_choice");
 
         if attempt == 0 {
             debug!(
