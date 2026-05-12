@@ -13,8 +13,7 @@ pub struct Bm25Result {
     pub id: String,
     pub score: f64,
     /// 匹配到的 token 数量（预留用于调试和分析）
-    #[allow(dead_code)]
-    pub matched_tokens: usize,
+    pub _matched_tokens: usize,
 }
 
 /// BM25 搜索
@@ -84,7 +83,7 @@ pub fn search(
             Bm25Result {
                 id: id.clone(),
                 score,
-                matched_tokens: matched,
+                _matched_tokens: matched,
             }
         })
         .filter(|r| r.score > 0.0)

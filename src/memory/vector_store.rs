@@ -270,7 +270,6 @@ impl VectorStore {
     }
 
     /// 查询是否包含某 content
-    #[allow(dead_code)]
     fn contains(&self, content: &str) -> bool {
         self.raw_vectors.contains_key(content)
     }

@@ -202,7 +202,7 @@ pub fn should_finalize(record: &ReplyEffectRecord) -> bool {
 
 /// LLM 评判结果
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 pub struct LlmJudgeScores {
     pub social_presence: f64,
     pub warmth: f64,
@@ -214,7 +214,7 @@ pub struct LlmJudgeScores {
 /// 使用 LLM 评判回复质量（5 维度，1-5 分）
 ///
 /// 可选增强：当 API 预算允许时调用，规则匹配作为 fallback。
-#[allow(dead_code)]
+
 pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
     let prompt = crate::prompt::PromptManager::get().raw("reply_effect_judge");
     if prompt.is_empty() {
@@ -255,7 +255,7 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
 }
 
 /// 计算 LLM Judge 的关系分
-#[allow(dead_code)]
+
 pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
     // 归一化到 0-1：(score - 1) / 4
     let sp = (scores.social_presence - 1.0) / 4.0;
@@ -266,7 +266,7 @@ pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
 }
 
 /// 计算 LLM Judge 的摩擦分（含 uncanny_risk）
-#[allow(dead_code)]
+
 pub fn calculate_friction_from_llm(record: &ReplyEffectRecord, uncanny_risk: f64) -> f64 {
     let neg = NEGATIVE_PATTERNS.iter()
         .any(|p| record.followups.iter().any(|f| f.content.contains(p)));

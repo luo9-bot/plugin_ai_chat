@@ -66,7 +66,6 @@ pub fn weighted_rrf_fusion(
 }
 
 /// Min-Max 归一化
-#[allow(dead_code)]
 pub fn normalize_scores_minmax(results: &mut [RetrievalResult]) {
     if results.is_empty() {
         return;

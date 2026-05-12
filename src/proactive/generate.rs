@@ -90,15 +90,14 @@ pub fn generate_greeting(user_id: u64, group_id: u64) -> String {
     ai_generate_message("greeting", user_id, group_id, &emo).unwrap_or_default()
 }
 
-/// 从自我记忆文本中随机挑一条想法（排除 [反思] 类）
-#[allow(dead_code)]
-pub fn pick_random_thought(context: &str, rand: f64) -> String {
-    let lines: Vec<&str> = context.lines()
-        .filter(|l| l.starts_with("- ") && l.len() > 4 && !l.contains("[反思]"))
-        .collect();
-    if lines.is_empty() {
-        return String::new();
-    }
-    let idx = (rand * lines.len() as f64) as usize % lines.len();
-    lines[idx].trim_start_matches("- ").to_string()
-}
+// /// 从自我记忆文本中随机挑一条想法（排除 [反思] 类）
+// pub fn pick_random_thought(context: &str, rand: f64) -> String {
+//     let lines: Vec<&str> = context.lines()
+//         .filter(|l| l.starts_with("- ") && l.len() > 4 && !l.contains("[反思]"))
+//         .collect();
+//     if lines.is_empty() {
+//         return String::new();
+//     }
+//     let idx = (rand * lines.len() as f64) as usize % lines.len();
+//     lines[idx].trim_start_matches("- ").to_string()
+// }

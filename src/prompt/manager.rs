@@ -10,7 +10,7 @@ static PROMPTS: OnceLock<PromptManager> = OnceLock::new();
 
 pub struct PromptManager {
     templates: HashMap<String, String>,
-    #[allow(dead_code)]
+    
     data_dir: PathBuf,
 }
 
