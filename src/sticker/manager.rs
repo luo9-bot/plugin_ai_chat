@@ -231,13 +231,23 @@ fn generate_description_with_vlm(path: &std::path::Path) -> (String, Vec<String>
     let prompt = concat!(
         "这是一个表情包图片。请提取该表情主要表达的情绪、语气、神态、动作状态或网络用语梗，最多5个，用逗号分隔。",
         "标签可以选择性的覆盖以下维度：",
-        "1. 基础情绪：开心、生气、悲伤、惊讶、恐惧、厌恶；",
-        "2. 情绪细分变体：得瑟、暗爽、愠怒、炸毛、破防、emo、窃喜、憨笑、暴怒、咬牙切齿、无能狂怒、血压飙升、欲哭无泪、心态炸裂；",
-        "3. 神态表情：呆滞、瞳孔地震、一脸懵、白眼、偷笑、坏笑、嫌弃、鄙夷、阴阳怪气、难以置信、傻眼、蒙圈、愣住；",
-        "4. 身体反应/状态：脸红、脚趾扣地、当场去世、我人没了、吓尿、抓狂、生无可恋；",
-        "5. 网络流行梗/语气：可把我牛逼坏了、毁灭吧、社死、又好笑又好哭、暖到了、扎心、泪目、傲娇、贱萌、暗中观察；",
-        "6. 行为姿态：摆烂、躺平、葛优躺、叉腰、敷衍、慵懒；",
-        "7. 复合情绪：委屈、崩溃、心累、无奈、窘迫、慌乱、难为情、紧张、烦躁、感动、满足、得意。",
+        "1. 惊讶类：惊讶、震惊、惊恐、傻眼、呆滞、蒙圈、愣住、一脸懵、难以置信、瞳孔地震、错愕、茫然、疑惑、不解、恍惚、大脑宕机、怀疑人生、三观震碎；",
+        "2. 开心类：兴奋、元气、激动、开心、欢喜、得意、偷笑、坏笑、满足、窃喜、暗爽、憨笑、得瑟、大笑、狂笑、笑死、笑不活了、俏皮、调皮、搞怪、滑稽、叉腰、可把我牛逼坏了、爽、狂喜；",
+        "3. 生气类：生气、红温、愠怒、暴怒、炸毛、咬牙切齿、无能狂怒、血压飙升、火大、怒极反笑、气抖冷、不服、哼、切；",
+        "4. 嫌弃类：嫌弃、鄙夷、白眼、不屑、嘲讽、阴阳怪气、就这、你在教我做事、呵呵、冷漠、高冷、敷衍；",
+        "5. 害羞类：害羞、窘迫、慌乱、难为情、紧张、脸红、社死、脚趾扣地、脚趾抠出三室一厅、腼腆、扭捏、娇羞、娇嗔、尴尬、汗、流汗、心虚；",
+        "6. 伤心类：伤心、委屈、破防、崩溃、emo、心累、欲哭无泪、低落、沮丧、难过、想哭、无助、扎心、破大防、绷不住了、破防了家人们、心碎、泪崩；",
+        "7. 无奈类：无奈、无语、勉强、不情愿、生无可恋、毁灭吧、累了、心好累、躺平、摆烂、佛了、随缘、啊对对对、顺从、你说的都对；",
+        "8. 恐惧类：恐惧、害怕、吓尿、心态炸裂、当场去世、我人没了、灵魂出窍、瑟瑟发抖、你不要过来啊、救命；",
+        "9. 萌系/撒娇类：可爱、萌、卖萌、撒娇、软萌、呆萌、亲昵、元气、迷糊、犯困、犯懒、蹭蹭、贴贴、要贴贴、傲娇、哼、人家才没有；",
+        "10. 姿态/动作类：葛优躺、瘫、叉腰、暗中观察、竖大拇指、点赞、比心、捂脸、捂嘴、捂头、扶额、捶桌、掀桌、拍桌、递茶、吃瓜、前排吃瓜、记笔记、学习、打call、退退退；",
+        "11. 敷衍/摆烂类：敷衍、糊弄、啊对对对、你说得对、划水、摸鱼、摆烂、躺平、开摆、佛系、随缘、无所谓、毁灭吧、累了、倦了、倦怠、慵懒；",
+        "12. 正能量类：感动、泪目、暖到了、破防了、治愈、被暖到、磕到了、嗑死我了、大爱、点赞；",
+        "13. 负能量类：emo、破防、崩溃、绷不住了、破大防、破防了家人们、裂开、玉玉、心态崩了、自闭、麻了、麻了麻了、毁灭吧赶紧的；",
+        "14. 复合/矛盾类：又好笑又好哭、笑中带泪、哭笑不得、悲喜交加、酸了、慕了、羡慕嫉妒恨、嘴上说不要身体很诚实、真香；",
+        "15. 倔强/不服类：不服、倔强、嘴硬、死鸭子嘴硬、打死不认、哼、切、就这、你算老几；",
+        "16. 期待/渴求类：期待、望眼欲穿、星星眼、眼巴巴、求求了、求带、求翻牌、想被翻牌、渴求、讨饭、要饭；",
+        "17. 社畜/生活类：不想上班、周一综合征、累成狗、穷、爆肝、肝、秃头、我太难了、中年危机、发际线保卫战、下班、放假。",
         "标签应精准且富有表现力。只返回标签，不要解释。"
     );
 
@@ -823,15 +833,14 @@ pub fn init_ne_stickers() {
     let known: std::collections::HashSet<String> = store.stickers.iter()
         .filter(|e| e.is_builtin)
         .filter_map(|e| {
-            // path 格式为 "ne_sticker/{filename}"
             e.path.strip_prefix("ne_sticker/").map(|s| s.to_string())
         })
         .collect();
     drop(store);
 
-    let mut registered = 0;
+    // 收集待处理的文件列表
+    let mut pending: Vec<std::path::PathBuf> = Vec::new();
     let mut skipped = 0;
-
     for entry in std::fs::read_dir(&dir).ok().into_iter().flatten() {
         let entry = match entry {
             Ok(e) => e,
@@ -841,21 +850,35 @@ pub fn init_ne_stickers() {
         if !path.is_file() {
             continue;
         }
-
         let filename = match path.file_name().and_then(|n| n.to_str()) {
             Some(f) => f.to_string(),
             None => continue,
         };
-
-        // 已注册的跳过，不读文件不算哈希
-        if known.contains(&filename) {
+        if !known.contains(&filename) {
+            pending.push(path);
+        } else {
             skipped += 1;
-            continue;
         }
+    }
 
-        let bytes = match std::fs::read(&path) {
+    if pending.is_empty() {
+        debug!(skipped, "ne_sticker: all skipped, nothing to do");
+        return;
+    }
+
+    let total = pending.len();
+    info!(total, skipped, "ne_sticker: processing");
+
+    let start = std::time::Instant::now();
+
+    for (i, path) in pending.iter().enumerate() {
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+        let bytes = match std::fs::read(path) {
             Ok(b) => b,
-            Err(_) => continue,
+            Err(_) => {
+                warn!(%filename, "ne_sticker: failed to read");
+                continue;
+            }
         };
 
         let ext = path.extension()
@@ -863,14 +886,14 @@ pub fn init_ne_stickers() {
             .unwrap_or("png")
             .to_lowercase();
 
-        if register_builtin_sticker(&bytes, &ext).is_some() {
-            registered += 1;
-        }
+        // 每张图都报告进度
+        info!(i = i + 1, total, %filename, "ne_sticker: [{}/{}] {}", i + 1, total, filename);
+
+        register_builtin_sticker(&bytes, &ext);
     }
 
-    if registered > 0 || skipped > 0 {
-        info!(registered, skipped, "ne_sticker: initialization complete");
-    }
+    let elapsed = start.elapsed();
+    info!(total, skipped, elapsed = %format!("{:.1}s", elapsed.as_secs_f64()), "ne_sticker: all done");
 }
 
 // ── Steal Emoji 自动收集 ────────────────────────────────────────
