@@ -797,9 +797,10 @@ pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<Stri
     Some(hash)
 }
 
-/// 初始化内置表情包：扫描 ne_sticker/ 目录，注册尚未入库的图片
+/// 初始化内置表情包：只处理 ne_sticker/ 目录中新增的文件
 ///
-/// 在插件启动时自动调用，保证用户手工放置的表情全部入库。
+/// 已注册过的文件通过路径比对跳过，不读文件、不计算哈希。
+/// 在插件启动时自动调用。
 pub fn init_ne_stickers() {
     let dir = super::store::builtin_sticker_dir();
     if !dir.exists() {
@@ -807,6 +808,17 @@ pub fn init_ne_stickers() {
         debug!("ne_sticker: created directory {:?}", dir);
         return;
     }
+
+    // 从注册表中收集已记录的内置表情文件名
+    let store = load_store();
+    let known: std::collections::HashSet<String> = store.stickers.iter()
+        .filter(|e| e.is_builtin)
+        .filter_map(|e| {
+            // path 格式为 "ne_sticker/{filename}"
+            e.path.strip_prefix("ne_sticker/").map(|s| s.to_string())
+        })
+        .collect();
+    drop(store);
 
     let mut registered = 0;
     let mut skipped = 0;
@@ -818,6 +830,17 @@ pub fn init_ne_stickers() {
         };
         let path = entry.path();
         if !path.is_file() {
+            continue;
+        }
+
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(f) => f.to_string(),
+            None => continue,
+        };
+
+        // 已注册的跳过，不读文件不算哈希
+        if known.contains(&filename) {
+            skipped += 1;
             continue;
         }
 
@@ -833,12 +856,12 @@ pub fn init_ne_stickers() {
 
         if register_builtin_sticker(&bytes, &ext).is_some() {
             registered += 1;
-        } else {
-            skipped += 1;
         }
     }
 
-    info!(registered, skipped, "ne_sticker: initialization complete");
+    if registered > 0 || skipped > 0 {
+        info!(registered, skipped, "ne_sticker: initialization complete");
+    }
 }
 
 // ── Steal Emoji 自动收集 ────────────────────────────────────────
