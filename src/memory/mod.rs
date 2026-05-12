@@ -8,7 +8,7 @@ pub mod embedding;
 pub mod vector_store;
 
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub use store::*;
 pub use operations::*;
@@ -87,36 +87,4 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
     }
 
     results
-}
-
-/// 存储记忆时自动生成 embedding（原子写入 JSON + 向量文件 + 知识图谱）
-pub fn store_memory_with_embedding(user_id: u64, content: &str, importance: store::Importance) {
-    let now = crate::util::now_secs();
-
-    // 生成 embedding 并写入 vectors.bin
-    if crate::config::get().embedding.enabled() {
-        if let Some(embedding) = embedding::embed_text(content) {
-            vector_store::add_vector(content, embedding);
-            debug!(user_id, "store_memory: embedding saved to vectors.bin");
-        }
-    }
-
-    // 更新知识图谱
-    graph::update_graph_from_memory(user_id, content);
-
-    let entry = store::MemoryEntry {
-        content: content.to_string(),
-        importance,
-        created: now,
-        last_accessed: now,
-        access_count: 0,
-    };
-
-    let content_preview: String = content.chars().take(40).collect();
-
-    // 原子写入 JSON（持锁）
-    let mut store = store::MemoryStore::load();
-    store.get_user_mut(user_id).entries.push(entry);
-    store.save();
-    info!(user_id, content = %content_preview, "store_memory: saved to JSON + vectors + graph");
 }

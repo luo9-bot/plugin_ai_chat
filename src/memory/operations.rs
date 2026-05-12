@@ -32,6 +32,17 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
     });
     store.save();
     info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
+
+    // 生成 embedding 并写入 vectors.bin（可选）
+    if crate::config::get().embedding.enabled() {
+        if let Some(embedding) = crate::memory::embedding::embed_text(content) {
+            crate::memory::vector_store::add_vector(content, embedding);
+            debug!(user_id, "memory: embedding saved to vectors.bin");
+        }
+    }
+
+    // 更新知识图谱
+    crate::memory::graph::update_graph_from_memory(user_id, content);
 }
 
 pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
@@ -49,6 +60,10 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
     user.entries = remaining;
     let removed = archived.len();
     if removed > 0 {
+        // 从向量存储中删除被遗忘的记忆
+        for entry in &archived {
+            crate::memory::vector_store::remove_vector(&entry.content);
+        }
         crate::archive::archive_long_term_memory(user_id, archived);
     }
     store.save();
@@ -81,12 +96,18 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
         }
         user.entries = remaining;
         if !archived.is_empty() {
+            // 从向量存储中删除
+            for entry in &archived {
+                crate::memory::vector_store::remove_vector(&entry.content);
+            }
             crate::archive::archive_long_term_memory(user_id, archived);
         }
     } else {
         // 更新匹配的记忆
         for entry in &mut user.entries {
             if entry.content.contains(old) {
+                // 从向量存储中删除旧的
+                crate::memory::vector_store::remove_vector(&entry.content);
                 entry.content = new.to_string();
                 entry.last_accessed = now;
                 count += 1;
@@ -105,6 +126,10 @@ pub fn forget_all(user_id: u64) {
     let mut store = MemoryStore::load();
     if let Some(user) = store.users.remove(&user_id.to_string()) {
         if !user.entries.is_empty() {
+            // 从向量存储中删除
+            for entry in &user.entries {
+                crate::memory::vector_store::remove_vector(&entry.content);
+            }
             crate::archive::archive_long_term_memory(user_id, user.entries);
         }
     }
@@ -265,6 +290,10 @@ pub fn check_forget_command(user_id: u64, message: &str) -> Option<String> {
                 }
                 user.entries = remaining;
                 if !archived.is_empty() {
+                    // 从向量存储中删除
+                    for entry in &archived {
+                        crate::memory::vector_store::remove_vector(&entry.content);
+                    }
                     crate::archive::archive_long_term_memory(user_id, archived);
                 }
                 store.save();
