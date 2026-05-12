@@ -292,14 +292,21 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     // 活动状态检测：bot 的回复是否声明了某个活动
                     activity::check_bot_message(user_id, &final_reply);
 
-                    // 人物事实自动回写：从对话中提取用户事实
-                    crate::person_info::extract_facts_from_conversation(user_id, &ai_message, &final_reply);
+                    // 以下后处理任务不阻塞队列，放入后台线程
+                    let bg_ai_msg = ai_message.clone();
+                    let bg_final = final_reply.clone();
+                    let bg_history = history.clone();
+                    let bg_uid = user_id;
+                    std::thread::spawn(move || {
+                        // 人物事实自动回写：从对话中提取用户事实
+                        crate::person_info::extract_facts_from_conversation(bg_uid, &bg_ai_msg, &bg_final);
 
-                    // 记忆提取：分析对话内容，提取值得记忆的信息
-                    crate::memory::ai_extract(user_id, &ai_message, &final_reply, &history);
+                        // 记忆提取：分析对话内容，提取值得记忆的信息
+                        crate::memory::ai_extract(bg_uid, &bg_ai_msg, &bg_final, &bg_history);
 
-                    // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
-                    crate::memory::auto_summarize(user_id, &history);
+                        // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
+                        crate::memory::auto_summarize(bg_uid, &bg_history);
+                    });
                 }
                 Err(e) => {
                     info!(user_id, group_id, error = %e, "replyer: 生成回复失败");
