@@ -64,22 +64,3 @@ pub fn weighted_rrf_fusion(
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     results
 }
-
-/// Min-Max 归一化
-pub fn normalize_scores_minmax(results: &mut [RetrievalResult]) {
-    if results.is_empty() {
-        return;
-    }
-    let min = results.iter().map(|r| r.score).fold(f64::INFINITY, f64::min);
-    let max = results.iter().map(|r| r.score).fold(f64::NEG_INFINITY, f64::max);
-
-    if (max - min).abs() < 1e-12 {
-        for r in results.iter_mut() {
-            r.score = 1.0;
-        }
-    } else {
-        for r in results.iter_mut() {
-            r.score = (r.score - min) / (max - min);
-        }
-    }
-}

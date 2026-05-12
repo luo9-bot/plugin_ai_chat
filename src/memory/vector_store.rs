@@ -16,6 +16,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tracing::{debug, warn};
 
+use sha1::Digest;
+use super::embedding::l2_normalize;
+
 // ── 文件格式 ────────────────────────────────────────────────────
 // [magic: u32 = 0x56435452] ("VCTR")
 // [version: u32 = 1]
@@ -130,7 +133,6 @@ impl VectorStore {
 
     /// 从 content 生成稳定的 int64 ID (SHA1 截断)
     fn generate_id(content: &str) -> i64 {
-        use sha1::Digest;
         let mut hasher = sha1::Sha1::new();
         hasher.update(content.as_bytes());
         let bytes = hasher.finalize();
@@ -138,16 +140,6 @@ impl VectorStore {
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ]);
         val & 0x7FFFFFFFFFFFFFFF
-    }
-
-    /// L2 归一化向量（原地）
-    fn l2_normalize(v: &mut [f32]) {
-        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 1e-10 {
-            for x in v.iter_mut() {
-                *x /= norm;
-            }
-        }
     }
 
     /// 添加向量（以 content 为唯一键）
@@ -159,7 +151,7 @@ impl VectorStore {
 
         let id = Self::generate_id(content);
         let mut vec = vector;
-        Self::l2_normalize(&mut vec);
+        l2_normalize(&mut vec);
 
         let exists = self.raw_vectors.contains_key(content);
         self.raw_vectors.insert(content.to_string(), vec.clone());
