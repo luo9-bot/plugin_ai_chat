@@ -31,6 +31,7 @@ pub mod self_memory;
 #[cfg(feature = "plugin")]
 pub mod sender;
 pub mod state;
+pub mod storage;
 pub mod timing_gate;
 pub mod typo;
 pub mod vision;
@@ -217,6 +218,12 @@ pub extern "C" fn plugin_main() {
 
     // 初始化错别字生成器（加载字频和拼音字典）
     typo::init(&config::data_dir());
+
+    // 初始化统一存储层（SQLite）
+    storage::init(&config::data_dir());
+
+    // 迁移 JSON 数据到 SQLite（首次运行时执行，后续可废弃）
+    storage::sqlite::migrate_json_to_sqlite(&config::data_dir());
 
     // 初始化记忆系统（SQLite + JSON 迁移）
     memory::init(&config::data_dir());

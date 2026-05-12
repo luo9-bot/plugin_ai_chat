@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tracing::debug;
 
 use super::store::{Importance, MemoryEntry, MemoryStore};
@@ -106,6 +107,30 @@ pub fn forget_all(user_id: u64) {
     store.save();
 }
 
+/// 最近注入的记忆缓存 (user_id_content_hash -> timestamp)
+///
+/// 避免同一记忆在短时间内反复注入上下文
+static RECENTLY_INJECTED: std::sync::Mutex<Option<HashMap<String, u64>>> = std::sync::Mutex::new(None);
+const INJECTION_COOLDOWN_SECS: u64 = 1800; // 30 分钟内不重复注入
+
+fn is_recently_injected(user_id: u64, content: &str) -> bool {
+    let key = format!("{}:{}", user_id, content);
+    let guard = RECENTLY_INJECTED.lock().unwrap();
+    if let Some(ref map) = *guard {
+        if let Some(ts) = map.get(&key) {
+            return crate::util::now_secs().saturating_sub(*ts) < INJECTION_COOLDOWN_SECS;
+        }
+    }
+    false
+}
+
+fn mark_injected(user_id: u64, content: &str) {
+    let key = format!("{}:{}", user_id, content);
+    let mut guard = RECENTLY_INJECTED.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(key, crate::util::now_secs());
+}
+
 pub fn get_context(user_id: u64) -> String {
     let store = MemoryStore::load();
     let user = match store.users.get(&user_id.to_string()) {
@@ -128,6 +153,10 @@ pub fn get_context(user_id: u64) -> String {
         {
             continue;
         }
+        // 跳过最近已注入的记忆（一次性参考机制）
+        if is_recently_injected(user_id, &entry.content) {
+            continue;
+        }
         let tag = match entry.importance {
             Importance::Permanent => "[永久]",
             Importance::Important => "[重要]",
@@ -145,6 +174,12 @@ pub fn get_context(user_id: u64) -> String {
     if lines.is_empty() {
         return String::new();
     }
+
+    // 标记已注入的记忆（一次性参考机制）
+    for entry in &user.entries {
+        mark_injected(user_id, &entry.content);
+    }
+
     format!("# 关于用户的记忆\n{}", lines.join("\n"))
 }
 

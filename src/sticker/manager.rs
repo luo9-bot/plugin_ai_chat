@@ -73,10 +73,10 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
     }
 
     let urls = crate::vision::extract_image_urls(cq_message);
-    for url in urls {
+    for url in &urls {
         debug!("图片url: {:?} ", url);
         // 下载图片
-        if let Ok(mut resp) = ureq::get(&url).call() {
+        if let Ok(mut resp) = ureq::get(url).call() {
             if let Ok(bytes) = resp.body_mut().read_to_vec() {
                 let format = detect_format(&bytes);
 
@@ -86,7 +86,16 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
                     return None;
                 }
 
-                return register_sticker(&bytes, &format);
+                if let Some(hash) = register_sticker(&bytes, &format) {
+                    // 获取注册的表情包描述并缓存到 URL
+                    let store = load_store();
+                    if let Some(entry) = store.stickers.iter().find(|e| e.hash == hash) {
+                        let desc = entry.description.clone();
+                        super::store::cache_url_description(url, &desc);
+                        debug!(url = %url, desc = %desc, "sticker: cached URL description");
+                    }
+                    return Some(hash);
+                }
             }
         }
     }

@@ -75,17 +75,31 @@ pub fn get_since(group_id: u64, since_timestamp: u64, max_count: usize) -> Vec<E
 
 /// 获取格式化的群聊工作记忆上下文 (用于 AI 决策)
 pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
-    let entries = get_recent(group_id, max_age_secs, 30);
+    get_context_with_window(group_id, max_age_secs, 15)
+}
+
+/// 带缓存稳定性放大的上下文获取
+///
+/// 保留 base_count * 2 条消息，但只将后半部分标记为"新消息"。
+/// 旧消息逐步退出而不是突然消失，减少上下文抖动。
+pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usize) -> String {
+    let expanded_count = base_count * 2; // 2x 缓存稳定性放大
+    let entries = get_recent(group_id, max_age_secs, expanded_count);
     if entries.is_empty() {
         return String::new();
     }
+
+    // 标记哪些是"新消息"（后半部分）
+    let new_start = entries.len().saturating_sub(base_count);
+
     // 合并同一用户的连续消息
     let mut lines: Vec<String> = Vec::new();
-    let mut iter = entries.iter().peekable();
-    while let Some(first) = iter.next() {
+    let mut iter = entries.iter().enumerate().peekable();
+    while let Some((idx, first)) = iter.next() {
+        let is_new = idx >= new_start;
         let tag = if first.bot_replied { "[已回复]" } else { "" };
         let mut block = first.content.clone();
-        while let Some(next) = iter.peek() {
+        while let Some((_, next)) = iter.peek() {
             if next.user_id == first.user_id && next.bot_replied == first.bot_replied {
                 block.push('\n');
                 block.push_str(&next.content);
@@ -94,7 +108,8 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
                 break;
             }
         }
-        lines.push(format!("[user_id:{}]{} {}", first.user_id, tag, block));
+        let new_tag = if is_new { "" } else { "[旧] " };
+        lines.push(format!("[user_id:{}]{} {}{}", first.user_id, tag, new_tag, block));
     }
     format!("# 群聊工作记忆 (最近消息)\n{}", lines.join("\n"))
 }

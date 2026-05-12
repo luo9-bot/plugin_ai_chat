@@ -69,9 +69,18 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     let penalty_multiplier = anti_injection::get_penalty_multiplier(user_id);
 
     // ── 图片识别 (仅 vision 已配置时，检查用户识图禁用状态) ──
+    // 优先使用 sticker 缓存的描述，避免重复 VLM 调用
     let image_descriptions: Vec<String> = if cfg.vision.enabled() {
         let urls = vision::extract_image_urls(message);
-        urls.iter().filter_map(|url| vision::recognize_for_user(url, user_id)).collect()
+        urls.iter().map(|url| {
+            // 先检查 sticker 缓存
+            if let Some(cached) = crate::sticker::store::get_cached_description(url) {
+                debug!(url = %url, desc = %cached, "vision: using cached sticker description");
+                return Some(cached);
+            }
+            // 缓存未命中，调用 vision API
+            vision::recognize_for_user(url, user_id)
+        }).filter_map(|x| x).collect()
     } else {
         Vec::new()
     };
@@ -112,6 +121,14 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     // 活动状态注入：bot 正在做某事时，注入活动上下文
     let extra_context = if let Some(act_ctx) = activity::get_activity_context(user_id) {
         format!("{}\n\n{}", extra_context, act_ctx)
+    } else {
+        extra_context
+    };
+
+    // ASI 评分反馈：当回复效果持续不佳时，注入调整建议
+    let extra_context = if let Some(feedback) = crate::reply_effect::get_asi_feedback_hint() {
+        debug!(user_id, feedback = %feedback, "asi: injecting feedback hint");
+        format!("{}\n\n# 回复效果反馈\n{}", extra_context, feedback)
     } else {
         extra_context
     };

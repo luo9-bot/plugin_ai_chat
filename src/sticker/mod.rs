@@ -3,7 +3,7 @@
 //! 管理表情包的注册、选择和发送。
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
-mod store;
+pub mod store;
 mod manager;
 
 use luo9_sdk::Msg;

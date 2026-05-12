@@ -11,7 +11,7 @@ mod tools;
 pub use types::*;
 use tools::*;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info, warn};
 
@@ -56,14 +56,14 @@ fn get_deferred_tools() -> Vec<DeferredTool> {
 }
 
 /// 搜索延迟工具
-fn search_deferred_tools(query: &str, discovered: &HashSet<String>) -> Vec<String> {
+fn search_deferred_tools(query: &str, discovered: &HashMap<String, usize>) -> Vec<String> {
     let query_lower = query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split(|c: char| c == '_' || c == '-' || c == ' ').collect();
 
     let mut scored: Vec<(&str, i32)> = Vec::new();
 
     for dt in get_deferred_tools() {
-        if discovered.contains(dt.name) {
+        if discovered.contains_key(dt.name) {
             continue; // 已发现，跳过
         }
 
@@ -101,11 +101,11 @@ fn search_deferred_tools(query: &str, discovered: &HashSet<String>) -> Vec<Strin
 }
 
 /// 构建延迟工具的系统提醒文本
-fn build_deferred_tools_reminder(discovered: &HashSet<String>) -> String {
+fn build_deferred_tools_reminder(discovered: &HashMap<String, usize>) -> String {
     let all = get_deferred_tools();
     let not_discovered: Vec<&DeferredTool> = all
         .iter()
-        .filter(|dt| !discovered.contains(dt.name))
+        .filter(|dt| !discovered.contains_key(dt.name))
         .collect();
 
     if not_discovered.is_empty() {
@@ -121,7 +121,7 @@ fn build_deferred_tools_reminder(discovered: &HashSet<String>) -> String {
     lines.join("\n")
 }
 
-fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, discovered: &mut HashSet<String>) -> String {
+fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, discovered: &mut HashMap<String, usize>, current_round: usize) -> String {
     match name {
         "query_memory" => {
             let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -161,7 +161,7 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, disc
             } else {
                 let mut result_lines = vec!["已发现以下工具，后续轮次可直接使用：".to_string()];
                 for name in &found {
-                    discovered.insert(name.clone());
+                    discovered.insert(name.clone(), current_round);
                     result_lines.push(format!("- {}", name));
                 }
                 result_lines.join("\n")
@@ -171,8 +171,13 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, disc
     }
 }
 
+/// Deferred Tool 有效轮数（超过此轮数自动回退）
+const DISCOVERY_TTL_ROUNDS: usize = 3;
+
 /// 构建当前可见的工具列表
-fn build_visible_tools(discovered: &HashSet<String>) -> Vec<crate::ai::Tool> {
+///
+/// 只包含在 DISCOVERY_TTL_ROUNDS 范围内发现的延迟工具
+fn build_visible_tools(discovered: &HashMap<String, usize>, current_round: usize) -> Vec<crate::ai::Tool> {
     let mut tools = vec![
         tool_reply(),
         tool_query_memory(),
@@ -181,9 +186,11 @@ fn build_visible_tools(discovered: &HashSet<String>) -> Vec<crate::ai::Tool> {
         tool_finish(),
     ];
 
-    // 已发现的延迟工具加入可见列表
-    if discovered.contains("send_sticker") {
-        tools.push(tool_send_sticker());
+    // 只有在有效期内的已发现工具才加入可见列表
+    if let Some(&discovered_round) = discovered.get("send_sticker") {
+        if current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
+            tools.push(tool_send_sticker());
+        }
     }
 
     tools
@@ -193,8 +200,8 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     let max_rounds = 10;
     let prompt = crate::prompt::PromptManager::get().raw("planner");
 
-    // 已发现的延迟工具集合
-    let mut discovered: HashSet<String> = HashSet::new();
+    // 已发现的延迟工具 (tool_name -> 发现时的轮次)
+    let mut discovered: HashMap<String, usize> = HashMap::new();
 
     // 注入表情包上下文
     let sticker_ctx = crate::sticker::get_sticker_context();
@@ -210,8 +217,8 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     for round in 0..max_rounds {
         debug!(round, group_id = ctx.group_id, user_id = ctx.user_id, "planner: round");
 
-        // 构建当前可见工具列表
-        let tools = build_visible_tools(&discovered);
+        // 构建当前可见工具列表（自动回退过期的延迟工具）
+        let tools = build_visible_tools(&discovered, round);
 
         // 注入延迟工具提醒（如果有未发现的工具）
         let reminder = build_deferred_tools_reminder(&discovered);
@@ -233,7 +240,7 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
                     return PlannerAction::Silent;
                 }
                 tool_name => {
-                    let result = execute_tool(tool_name, &args, ctx, &mut discovered);
+                    let result = execute_tool(tool_name, &args, ctx, &mut discovered, round);
                     if !result.is_empty() {
                         user_content.push_str(&format!("\n\n[工具结果: {}]\n{}", tool_name, result));
                     }
