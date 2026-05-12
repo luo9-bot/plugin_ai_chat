@@ -43,7 +43,7 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
 
         // 如果没有存储的 embeddings，尝试实时生成查询向量
         if embeddings.is_empty() {
-            if let Some(query_embedding) = embedding::embed_text(query) {
+            if let Some(_query_embedding) = embedding::embed_text(query) {
                 // 为文档生成 embeddings
                 let doc_texts: Vec<String> = documents.iter().map(|(_, c)| c.clone()).collect();
                 let doc_embeddings = embedding::embed_batch(&doc_texts);

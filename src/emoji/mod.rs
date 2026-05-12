@@ -11,7 +11,6 @@
 /// - 交通符号 (U+1F680-U+1F6FF)
 /// - 补充符号 (U+1F900-U+1F9FF)
 /// - 装饰符号 (U+2702-U+27B0)
-/// - 肤色修饰符 (U+1F3FB-U+1F3FF)
 /// - 零宽连接符 (U+200D)
 /// - 变体选择符 (U+FE0F)
 pub fn strip_emoji(text: &str) -> String {
@@ -32,7 +31,6 @@ pub fn is_emoji_char(c: char) -> bool {
         0xFE00..=0xFE0F |    // Variation Selectors
         0x200D |              // Zero Width Joiner
         0x20E3 |              // Combining Enclosing Keycap
-        0x1F3FB..=0x1F3FF |  // Skin tone modifiers
         0xE0020..=0xE007F |  // Tags
         0x2600..=0x26FF |     // Misc symbols
         0x2700..=0x27BF       // Dingbats

@@ -9,7 +9,7 @@ mod fusion;
 
 pub use fusion::RetrievalResult;
 
-use tracing::{debug, info};
+
 
 /// 双路检索配置
 pub struct RetrievalConfig {

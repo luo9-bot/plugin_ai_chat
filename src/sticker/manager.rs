@@ -20,15 +20,17 @@ pub struct StickerSelection {
 
 /// 注册表情包（从用户发送的图片）
 ///
-/// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 注册
+/// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 原子注册
 pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
-    let mut store = load_store();
 
-    // 去重检查
-    if store.stickers.iter().any(|e| e.hash == hash) {
-        debug!(hash = %hash[..16.min(hash.len())], "sticker: already registered");
-        return None;
+    // 去重检查（持锁）
+    {
+        let store = load_store();
+        if store.stickers.iter().any(|e| e.hash == hash) {
+            debug!(hash = %hash[..16.min(hash.len())], "sticker: already registered");
+            return None;
+        }
     }
 
     // 保存文件
@@ -55,8 +57,9 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     };
 
     info!(hash = %hash[..16.min(hash.len())], description = %description, "sticker: registered");
-    store.stickers.push(entry);
-    save_store(&store);
+
+    // 原子性添加到存储（防止并发竞态）
+    add_entry_and_save(entry);
     Some(hash)
 }
 
@@ -74,7 +77,6 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
-        debug!("图片url: {:?} ", url);
         // 下载图片
         if let Ok(mut resp) = ureq::get(url).call() {
             if let Ok(bytes) = resp.body_mut().read_to_vec() {

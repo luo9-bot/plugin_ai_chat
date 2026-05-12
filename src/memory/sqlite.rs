@@ -4,9 +4,9 @@
 
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
-use super::store::{Importance, MemoryEntry, UserMemory};
+use super::store::{Importance, MemoryEntry};
 
 /// SQLite 连接池
 static DB: Mutex<Option<Connection>> = Mutex::new(None);

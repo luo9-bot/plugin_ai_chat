@@ -91,6 +91,7 @@ pub fn generate_greeting(user_id: u64, group_id: u64) -> String {
 }
 
 /// 从自我记忆文本中随机挑一条想法（排除 [反思] 类）
+#[allow(dead_code)]
 pub fn pick_random_thought(context: &str, rand: f64) -> String {
     let lines: Vec<&str> = context.lines()
         .filter(|l| l.starts_with("- ") && l.len() > 4 && !l.contains("[反思]"))

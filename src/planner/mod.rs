@@ -215,6 +215,12 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     let mut user_content = format!("# 当前消息\n[user_id:{}] {}", ctx.user_id, ctx.user_message);
 
     for round in 0..max_rounds {
+        // 检查中断标志（新消息到达时由外部设置）
+        if check_interrupt() {
+            info!(user_id = ctx.user_id, group_id = ctx.group_id, "planner: interrupted by new message");
+            return PlannerAction::Silent;
+        }
+
         debug!(round, group_id = ctx.group_id, user_id = ctx.user_id, "planner: round");
 
         // 构建当前可见工具列表（自动回退过期的延迟工具）

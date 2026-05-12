@@ -4,7 +4,7 @@
 
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// 全局数据库连接
 static DB: Mutex<Option<Connection>> = Mutex::new(None);

@@ -56,6 +56,14 @@ pub(crate) fn store_path() -> std::path::PathBuf {
     crate::config::data_dir().join("stickers.json")
 }
 
+/// 原子性地添加条目到存储（加载→修改→保存，持锁防止竞态）
+pub(crate) fn add_entry_and_save(entry: StickerEntry) {
+    let mut guard = STORE.lock().unwrap();
+    let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
+    store.stickers.push(entry);
+    crate::util::save_json(&store_path(), store);
+}
+
 pub(crate) fn sticker_dir() -> std::path::PathBuf {
     crate::config::data_dir().join("sticker")
 }

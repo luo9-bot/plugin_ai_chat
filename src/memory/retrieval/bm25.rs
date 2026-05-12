@@ -12,6 +12,8 @@ const B: f64 = 0.75;
 pub struct Bm25Result {
     pub id: String,
     pub score: f64,
+    /// 匹配到的 token 数量（预留用于调试和分析）
+    #[allow(dead_code)]
     pub matched_tokens: usize,
 }
 

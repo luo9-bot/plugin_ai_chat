@@ -5,6 +5,7 @@
 use tracing::{debug, warn};
 
 /// Embedding 向量维度（Doubao 模型输出 2560 维）
+#[allow(dead_code)]
 const EMBEDDING_DIMENSION: usize = 2560;
 
 /// 调用 Embedding API 生成单个文本的向量

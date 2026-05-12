@@ -4,7 +4,6 @@
 //! 1. 关键词预筛选（快速，无 AI 调用）
 //! 2. Tool 判断（AI 调用，综合上下文）
 
-use tracing::debug;
 
 /// 告别词
 const FAREWELL_PATTERNS: &[&str] = &[
