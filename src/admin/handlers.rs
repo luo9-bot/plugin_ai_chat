@@ -191,6 +191,71 @@ pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     err(404, "sticker not found")
 }
 
+/// 服务表情包图片文件
+///
+/// 1. 优先从注册表中查找哈希对应的路径
+/// 2. 注册表未命中时，直接扫描 sticker/ 和 ne_sticker/ 目录查找文件
+pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let data_dir = crate::config::data_dir();
+    let mut full_path = None;
+
+    // 1. 从注册表查找
+    let store = crate::sticker::store::load_store();
+    if let Some(entry) = store.stickers.iter().find(|e| e.hash == hash) {
+        let candidate = data_dir.join(&entry.path);
+        if candidate.exists() {
+            full_path = Some(candidate);
+        }
+    }
+
+    // 2. 注册表未命中，直接扫描目录
+    if full_path.is_none() {
+        for dir in &["sticker", "ne_sticker"] {
+            let dir_path = data_dir.join(dir);
+            if !dir_path.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(&dir_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            // hash 可能形如 "hash" 或 "hash.ext"，取 file_stem 比对
+                            if stem == hash || stem.starts_with(hash) {
+                                full_path = Some(path);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if full_path.is_some() {
+                break;
+            }
+        }
+    }
+
+    if let Some(ref fp) = full_path {
+        let data = match std::fs::read(fp) {
+            Ok(d) => d,
+            Err(_) => return err(500, "failed to read file"),
+        };
+        let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => "image/png",
+        };
+        return Response::from_data(data)
+            .with_header(Header::from_bytes("Content-Type", mime).unwrap())
+            .with_header(Header::from_bytes("Cache-Control", "public, max-age=86400").unwrap());
+    }
+
+    err(404, "image not found")
+}
+
 // ── 仪表盘统计 ────────────────────────────────────────────────
 
 pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {

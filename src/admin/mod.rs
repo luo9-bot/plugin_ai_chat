@@ -160,6 +160,13 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
         Some(&"sticker") => {
             match api_segs.get(1).copied() {
+                Some("image") => {
+                    if let Some(hash) = api_segs.get(2).copied() {
+                        handlers::handle_sticker_image(hash)
+                    } else {
+                        err(400, "hash required")
+                    }
+                }
                 Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
                 Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
                 _ => handlers::handle_sticker(),
