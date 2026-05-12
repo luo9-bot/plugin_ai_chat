@@ -8,7 +8,7 @@ mod manager;
 
 use luo9_sdk::Msg;
 pub use store::StickerEntry;
-pub use manager::{StickerSelection, register_sticker, register_from_cq, select_sticker_vlm, update_usage, get_sticker_path, get_stats, maintenance};
+pub use manager::{StickerSelection, register_sticker, register_from_cq, select_sticker_vlm, update_usage, get_sticker_path, get_stats, maintenance, init_ne_stickers, steal_emoji_scan, do_replace_eviction};
 
 use tracing::info;
 

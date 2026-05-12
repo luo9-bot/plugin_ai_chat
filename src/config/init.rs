@@ -76,6 +76,7 @@ pub fn init() {
                 admin: AdminConfig::default(),
                 anti_injection: AntiInjectionConfig::default(),
                 quota: QuotaConfig::default(),
+                sticker: StickerConfig::default(),
                 whitelist: Vec::new(),
                 blacklist: Vec::new(),
                 auto_start_users: Vec::new(),

@@ -224,6 +224,9 @@ pub extern "C" fn plugin_main() {
     // 初始化知识图谱
     memory::graph::init();
 
+    // 初始化内置表情包（NeSticker）
+    sticker::init_ne_stickers();
+
     // 初始化防注入模块
     anti_injection::init();
 
@@ -277,6 +280,22 @@ pub extern "C" fn plugin_main() {
     if !config::get().admin.token.is_empty() {
         thread::spawn(|| admin::start_server());
     }
+
+    // 表情包维护线程（定期清理 + steal_emoji + do_replace）
+    thread::spawn(|| {
+        use std::time::Duration;
+        loop {
+            thread::sleep(Duration::from_secs(3600)); // 每小时执行
+            sticker::maintenance();
+            let cfg = crate::config::get();
+            if cfg.sticker.steal_emoji {
+                sticker::steal_emoji_scan();
+            }
+            if cfg.sticker.do_replace {
+                sticker::do_replace_eviction(cfg.sticker.max_reg_num);
+            }
+        }
+    });
 
     // 初始化定时器，避免启动时立即触发
     let now = util::now_secs();

@@ -48,6 +48,8 @@ pub struct Config {
     pub anti_injection: AntiInjectionConfig,
     #[serde(default)]
     pub quota: QuotaConfig,
+    #[serde(default)]
+    pub sticker: StickerConfig,
     /// 白名单：只允许这些用户使用私聊（为空则不限制）
     #[serde(default)]
     pub whitelist: Vec<u64>,
@@ -671,3 +673,30 @@ fn default_max_messages_per_minute() -> u32 { 20 }
 fn default_max_messages_per_hour() -> u32 { 200 }
 fn default_reputation_threshold() -> f32 { 0.3 }
 fn default_auto_ban_threshold() -> u32 { 10 }
+fn default_steal_emoji() -> bool { true }
+fn default_max_reg_num() -> usize { 64 }
+fn default_do_replace() -> bool { true }
+
+/// 表情包配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct StickerConfig {
+    /// 是否开启自动收集表情包（steal_emoji）
+    #[serde(default = "default_steal_emoji")]
+    pub steal_emoji: bool,
+    /// 非内置表情包最大注册数量
+    #[serde(default = "default_max_reg_num")]
+    pub max_reg_num: usize,
+    /// 超过最大数量时是否自动替换（淘汰最不常用的）
+    #[serde(default = "default_do_replace")]
+    pub do_replace: bool,
+}
+
+impl Default for StickerConfig {
+    fn default() -> Self {
+        Self {
+            steal_emoji: default_steal_emoji(),
+            max_reg_num: default_max_reg_num(),
+            do_replace: default_do_replace(),
+        }
+    }
+}

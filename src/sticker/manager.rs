@@ -52,6 +52,7 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
         query_count: 0,
         is_registered: true,
         is_banned: false,
+        is_builtin: false,
         registered_at: now,
         last_used_at: now,
     };
@@ -749,4 +750,250 @@ fn detect_format(bytes: &[u8]) -> String {
         if bytes[0] == 0x52 && bytes[1] == 0x49 { return "webp".to_string(); }
     }
     "png".to_string()
+}
+
+// ── NeSticker 内置表情注册 ──────────────────────────────────────
+
+/// 注册内置表情包（ne_sticker），跳过内容审查
+///
+/// 内置表情已经过用户人工筛选，不经过 VLM 内容过滤。
+pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
+    let hash = compute_hash(image_bytes);
+
+    // 去重检查
+    {
+        let store = load_store();
+        if store.stickers.iter().any(|e| e.hash == hash) {
+            debug!(hash = %hash[..16.min(hash.len())], "builtin: already registered");
+            return None;
+        }
+    }
+
+    // 保存到内置目录
+    let dir = super::store::builtin_sticker_dir();
+    std::fs::create_dir_all(&dir).ok();
+    let filename = format!("{}.{}", hash, format);
+    let path = dir.join(&filename);
+    std::fs::write(&path, image_bytes).ok();
+
+    let (description, emotions) = generate_description_with_vlm(&path);
+
+    let now = crate::util::now_secs();
+    let entry = StickerEntry {
+        hash: hash.clone(),
+        path: format!("ne_sticker/{}", filename),
+        description: description.clone(),
+        emotions,
+        query_count: 0,
+        is_registered: true,
+        is_banned: false,
+        is_builtin: true,
+        registered_at: now,
+        last_used_at: now,
+    };
+
+    info!(hash = %hash[..16.min(hash.len())], description = %description, "builtin: registered");
+    add_entry_and_save(entry);
+    Some(hash)
+}
+
+/// 初始化内置表情包：扫描 ne_sticker/ 目录，注册尚未入库的图片
+///
+/// 在插件启动时自动调用，保证用户手工放置的表情全部入库。
+pub fn init_ne_stickers() {
+    let dir = super::store::builtin_sticker_dir();
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).ok();
+        debug!("ne_sticker: created directory {:?}", dir);
+        return;
+    }
+
+    let mut registered = 0;
+    let mut skipped = 0;
+
+    for entry in std::fs::read_dir(&dir).ok().into_iter().flatten() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_lowercase();
+
+        if register_builtin_sticker(&bytes, &ext).is_some() {
+            registered += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+
+    info!(registered, skipped, "ne_sticker: initialization complete");
+}
+
+// ── Steal Emoji 自动收集 ────────────────────────────────────────
+
+/// 扫描 sticker/ 目录，自动注册未入库的表情包（steal_emoji）
+///
+/// 只处理那些文件存在但尚未注册的表情包图片。
+pub fn steal_emoji_scan() -> usize {
+    let dir = super::store::sticker_dir();
+    if !dir.exists() {
+        return 0;
+    }
+
+    let store = load_store();
+    let known_paths: std::collections::HashSet<String> = store.stickers.iter()
+        .map(|e| crate::config::data_dir().join(&e.path).to_string_lossy().to_string())
+        .collect();
+
+    let mut registered = 0;
+
+    for entry in std::fs::read_dir(&dir).ok().into_iter().flatten() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        if known_paths.contains(&path_str) {
+            continue;
+        }
+
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_lowercase();
+
+        // 走标准注册流程（含内容审查）
+        let hash = compute_hash(&bytes);
+        let store = load_store();
+        if store.stickers.iter().any(|e| e.hash == hash) {
+            continue;
+        }
+
+        if !content_filtration(&bytes, &ext) {
+            warn!("steal_emoji: content filtration rejected {:?}", path);
+            continue;
+        }
+
+        if register_sticker_from_path(&path, &ext, &bytes).is_some() {
+            registered += 1;
+        }
+    }
+
+    if registered > 0 {
+        info!(registered, "steal_emoji: auto-registered");
+    }
+    registered
+}
+
+/// 从文件路径注册表情包（steal_emoji 内部使用）
+fn register_sticker_from_path(path: &std::path::Path, format: &str, bytes: &[u8]) -> Option<String> {
+    let hash = compute_hash(bytes);
+    let (description, emotions) = generate_description_with_vlm(path);
+
+    let now = crate::util::now_secs();
+    let filename = format!("{}.{}", hash, format);
+    let relative = format!("sticker/{}", filename);
+
+    // 如果文件已经在 sticker/ 目录下则不动，否则复制过去
+    let dir = super::store::sticker_dir();
+    let target = dir.join(&filename);
+    if !target.exists() {
+        std::fs::create_dir_all(&dir).ok();
+        std::fs::write(&target, bytes).ok();
+    }
+
+    let entry = StickerEntry {
+        hash: hash.clone(),
+        path: relative,
+        description: description.clone(),
+        emotions,
+        query_count: 0,
+        is_registered: true,
+        is_banned: false,
+        is_builtin: false,
+        registered_at: now,
+        last_used_at: now,
+    };
+
+    add_entry_and_save(entry);
+    info!(hash = %hash[..16.min(hash.len())], "steal_emoji: registered");
+    Some(hash)
+}
+
+/// 淘汰最不常用的非内置表情包（do_replace）
+///
+/// 当注册的非内置表情包超过 max_reg_num 时，
+/// 按使用次数升序 + 最后使用时间升序排序，淘汰超额的条目。
+pub fn do_replace_eviction(max_reg_num: usize) -> usize {
+    let mut store = load_store();
+    let data_dir = crate::config::data_dir();
+
+    let non_builtin_count = store.stickers.iter().filter(|e| !e.is_builtin).count();
+    if non_builtin_count <= max_reg_num {
+        return 0;
+    }
+
+    let excess = non_builtin_count - max_reg_num;
+
+    // 收集非内置表情索引，按 (query_count, last_used_at) 升序排序
+    let mut candidates: Vec<usize> = store.stickers.iter()
+        .enumerate()
+        .filter(|(_, e)| !e.is_builtin)
+        .map(|(i, _)| i)
+        .collect();
+
+    candidates.sort_by(|&a, &b| {
+        let entry_a = &store.stickers[a];
+        let entry_b = &store.stickers[b];
+        entry_a.query_count.cmp(&entry_b.query_count)
+            .then(entry_a.last_used_at.cmp(&entry_b.last_used_at))
+    });
+
+    // 收集待移除的哈希
+    let to_remove: std::collections::HashSet<String> = candidates.iter()
+        .take(excess)
+        .map(|&i| store.stickers[i].hash.clone())
+        .collect();
+
+    let mut evicted = 0;
+    store.stickers.retain(|e| {
+        if to_remove.contains(&e.hash) {
+            let full_path = data_dir.join(&e.path);
+            if full_path.exists() {
+                std::fs::remove_file(&full_path).ok();
+            }
+            evicted += 1;
+            false
+        } else {
+            true
+        }
+    });
+
+    if evicted > 0 {
+        info!(evicted, max_reg_num, "do_replace: eviction completed");
+        save_store(&store);
+    }
+    evicted
 }

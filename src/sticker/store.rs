@@ -21,6 +21,8 @@ pub struct StickerEntry {
     pub is_registered: bool,
     /// 是否被封禁
     pub is_banned: bool,
+    /// 是否为内置表情（ne_sticker），永不被动替换
+    pub is_builtin: bool,
     /// 注册时间
     pub registered_at: u64,
     /// 最后使用时间
@@ -66,6 +68,11 @@ pub(crate) fn add_entry_and_save(entry: StickerEntry) {
 
 pub(crate) fn sticker_dir() -> std::path::PathBuf {
     crate::config::data_dir().join("sticker")
+}
+
+/// 内置表情包（NeSticker）目录
+pub(crate) fn builtin_sticker_dir() -> std::path::PathBuf {
+    crate::config::data_dir().join("ne_sticker")
 }
 
 pub(crate) fn load_store() -> StickerStore {
