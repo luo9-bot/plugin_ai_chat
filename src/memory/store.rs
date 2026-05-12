@@ -18,9 +18,6 @@ pub struct MemoryEntry {
     pub created: u64,
     pub last_accessed: u64,
     pub access_count: u32,
-    /// 可选的 embedding 向量
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding: Option<Vec<f32>>,
 }
 
 /// 用户记忆集合

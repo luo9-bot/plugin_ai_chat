@@ -29,7 +29,6 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
         created: now,
         last_accessed: now,
         access_count: 1,
-        embedding: None,
     });
     store.save();
     info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
