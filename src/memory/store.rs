@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
+use std::sync::Mutex;
 
-
+/// 记忆重要性
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Importance {
     Permanent,
@@ -10,6 +10,7 @@ pub enum Importance {
     Normal,
 }
 
+/// 记忆条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub content: String,
@@ -17,38 +18,45 @@ pub struct MemoryEntry {
     pub created: u64,
     pub last_accessed: u64,
     pub access_count: u32,
+    /// 可选的 embedding 向量
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<Vec<f32>>,
 }
 
+/// 用户记忆集合
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserMemory {
     pub entries: Vec<MemoryEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+/// 记忆存储
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemoryStore {
     pub users: HashMap<String, UserMemory>,
 }
+
+/// 全局缓存，持锁防竞态
+static STORE: Mutex<Option<MemoryStore>> = Mutex::new(None);
 
 fn memory_path() -> std::path::PathBuf {
     crate::config::data_dir().join("memory.json")
 }
 
 impl MemoryStore {
+    /// 加载记忆（使用缓存，持锁）
     pub(crate) fn load() -> Self {
-        let path = memory_path();
-        match fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
-        }
+        let mut guard = STORE.lock().unwrap();
+        guard.get_or_insert_with(|| crate::util::load_json(&memory_path())).clone()
     }
 
+    /// 保存记忆（更新缓存并写盘，持锁）
     pub(crate) fn save(&self) {
-        let path = memory_path();
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            fs::write(path, json).ok();
-        }
+        let mut guard = STORE.lock().unwrap();
+        *guard = Some(self.clone());
+        crate::util::save_json(&memory_path(), self);
     }
 
+    /// 获取或创建用户记忆
     pub(crate) fn get_user_mut(&mut self, user_id: u64) -> &mut UserMemory {
         self.users
             .entry(user_id.to_string())

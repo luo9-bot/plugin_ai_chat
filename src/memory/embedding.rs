@@ -15,7 +15,7 @@ pub fn embed_text(text: &str) -> Option<Vec<f32>> {
     if !cfg.embedding.enabled() {
         return None;
     }
-
+    
     embed_single(text)
 }
 
@@ -102,7 +102,8 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
         return None;
     }
 
-    debug!("embedding: completed");
+    debug!(model = %cfg.embedding.model, len = vec.len(), "embedding: completed");
+    
     Some(vec)
 }
 

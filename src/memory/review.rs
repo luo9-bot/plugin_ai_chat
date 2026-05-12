@@ -150,6 +150,7 @@ pub fn ai_review_all() {
                                 created: now,
                                 last_accessed: now,
                                 access_count: 1,
+                                embedding: None,
                             });
                         }
                     }
