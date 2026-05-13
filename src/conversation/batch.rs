@@ -75,13 +75,13 @@ pub fn process_expired_batches() {
 
     // 处理群聊批次: 通过消息队列串行化处理，避免并发混乱
     for (group_id, user_msgs) in group_msgs {
-        if let Some(queue) = MESSAGE_QUEUE.get() {
-            if queue.tx.send(ProcessingTask {
+        if let Some(queue) = MESSAGE_QUEUE.get()
+            && queue.tx.send(ProcessingTask {
                 group_id,
                 user_msgs,
-            }).is_err() {
-                warn!(group_id, "queue: 发送失败");
-            }
+            }).is_err()
+        {
+            warn!(group_id, "queue: 发送失败");
         }
     }
 }

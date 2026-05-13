@@ -219,13 +219,12 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
             if let Ok(entries) = std::fs::read_dir(&dir_path) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            // hash 可能形如 "hash" 或 "hash.ext"，取 file_stem 比对
-                            if stem == hash || stem.starts_with(hash) {
-                                full_path = Some(path);
-                                break;
-                            }
+                    if path.is_file()
+                        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    {
+                        if stem == hash || stem.starts_with(hash) {
+                            full_path = Some(path);
+                            break;
                         }
                     }
                 }

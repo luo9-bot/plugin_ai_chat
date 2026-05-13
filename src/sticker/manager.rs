@@ -128,11 +128,11 @@ pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
         let hash = compute_hash(&bytes);
 
         // 2. 查持久化存储（按哈希）
-        if let Some(entry) = super::store::find_entry_by_hash(&hash) {
-            if let Some(ref desc) = entry.vlm_description {
-                debug!(hash = %hash[..16.min(hash.len())], "sticker: using stored VLM description");
-                return Some(desc.clone());
-            }
+        if let Some(entry) = super::store::find_entry_by_hash(&hash)
+            && let Some(ref desc) = entry.vlm_description
+        {
+            debug!(hash = %hash[..16.min(hash.len())], "sticker: using stored VLM description");
+            return Some(desc.clone());
         }
 
         // 3. 调用 VLM 获取自然语言描述

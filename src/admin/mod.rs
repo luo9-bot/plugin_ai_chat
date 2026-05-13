@@ -113,7 +113,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
 
     // 静态图片不需要 auth（img 标签无法带 Authorization header）
     if method == Method::Get && url.starts_with("/api/sticker/image/") {
-        let segs_local = path_segments(&url.split('?').next().unwrap_or(&url));
+        let segs_local = path_segments(url.split('?').next().unwrap_or(&url));
         if let Some(hash) = segs_local.get(3).copied() {
             return handlers::handle_sticker_image(hash);
         }
