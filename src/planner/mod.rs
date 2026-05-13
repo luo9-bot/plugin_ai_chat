@@ -172,7 +172,7 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, disc
 }
 
 /// Deferred Tool 有效轮数（超过此轮数自动回退）
-const DISCOVERY_TTL_ROUNDS: usize = 3;
+const DISCOVERY_TTL_ROUNDS: usize = 1;
 
 /// 构建当前可见的工具列表
 ///
@@ -186,17 +186,21 @@ fn build_visible_tools(discovered: &HashMap<String, usize>, current_round: usize
         tool_finish(),
     ];
 
-    // 只有在有效期内的已发现工具才加入可见列表
-    if let Some(&discovered_round) = discovered.get("send_sticker")
-        && current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
-            tools.push(tool_send_sticker());
+    for (tool_name, &discovered_round) in discovered.iter() {
+        // 只有在有效期内的已发现工具才加入可见列表，工具从被发现起，最多维持 DISCOVERY_TTL_ROUNDS 轮可见
+        if current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
+            match tool_name.as_str() {
+                "send_sticker" => tools.push(tool_send_sticker()),
+                // TODO: 可以考虑添加更多延迟工具
+                _ => {}
+            }
         }
-
+    }
     tools
 }
 
 pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
-    let max_rounds = 10;
+    let max_rounds = 8;
     let prompt = crate::prompt::PromptManager::get().raw("planner");
 
     // 已发现的延迟工具 (tool_name -> 发现时的轮次)
