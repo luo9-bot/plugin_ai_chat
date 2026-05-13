@@ -388,6 +388,17 @@ pub fn analyze_with_tools(
             continue;
         }
 
+        // 两次重试后仍无 tool_calls → 尝试将纯文本包裹为 { "message": "..." }
+        // 兼容模型直接输出消息文本而不调用 tool_calls 的情况（如 proactive_message）
+        if has_content {
+            let reply_trimmed = reply.trim();
+            if !reply_trimmed.is_empty() && tools.iter().any(|t| t.function.name == "proactive_message") {
+                let wrapped = serde_json::json!({"message": reply_trimmed});
+                debug!(message = %reply_trimmed, "analyze_with_tools: wrapping plain text as proactive_message");
+                return Ok(wrapped);
+            }
+        }
+
         return Err("No tool_calls and no JSON found in response".to_string());
     }
 

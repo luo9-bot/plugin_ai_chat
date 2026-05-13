@@ -221,11 +221,10 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
                     let path = entry.path();
                     if path.is_file()
                         && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                        && (stem == hash || stem.starts_with(hash))
                     {
-                        if stem == hash || stem.starts_with(hash) {
-                            full_path = Some(path);
-                            break;
-                        }
+                        full_path = Some(path);
+                        break;
                     }
                 }
             }

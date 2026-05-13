@@ -29,11 +29,32 @@ pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> 
 pub fn mark_replied(group_id: u64, user_id: u64) {
     if group_id == 0 { return; }
     let mut store = WorkingMemoryStore::load();
-    if let Some(group) = store.groups.get_mut(&group_id.to_string()) {
-        // 标记该用户最近一条未回复的消息
-        if let Some(entry) = group.entries.iter_mut().rev().find(|e| e.user_id == user_id && !e.bot_replied) {
-            entry.bot_replied = true;
-        }
+    if let Some(group) = store.groups.get_mut(&group_id.to_string())
+        && let Some(entry) = group.entries.iter_mut().rev().find(|e| e.user_id == user_id && !e.bot_replied)
+    {
+        entry.bot_replied = true;
+    }
+    store.save();
+}
+
+/// 记录机器人自己的回复到工作记忆（让 AI 知道之前说过什么）
+pub fn record_bot_reply(group_id: u64, content: &str) {
+    if group_id == 0 { return; }
+    let self_qq = crate::config::get().self_qq;
+    if self_qq == 0 { return; }
+    let mut store = WorkingMemoryStore::load();
+    let ts = crate::util::now_secs();
+    let group = store.groups.entry(group_id.to_string()).or_default();
+    let cleaned = crate::emoji::strip_emoji(content);
+    group.entries.push(Entry {
+        user_id: self_qq,
+        content: cleaned,
+        timestamp: ts,
+        bot_replied: true,
+    });
+    if group.entries.len() > 200 {
+        let drain_count = group.entries.len() - 200;
+        group.entries.drain(0..drain_count);
     }
     store.save();
 }
@@ -91,6 +112,7 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
     }
 
     let now = crate::util::now_secs();
+    let self_qq = crate::config::get().self_qq;
     // 标记哪些是"新消息"（后半部分）
     let new_start = entries.len().saturating_sub(base_count);
 
@@ -99,6 +121,8 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
     let mut iter = entries.iter().enumerate().peekable();
     while let Some((idx, first)) = iter.next() {
         let is_new = idx >= new_start;
+        let is_self = self_qq > 0 && first.user_id == self_qq;
+        let who = if is_self { "bot".to_string() } else { format!("user_id:{}", first.user_id) };
         let tag = if first.bot_replied { "[已回复]" } else { "" };
         let mut block = first.content.clone();
         while let Some((_, next)) = iter.peek() {
@@ -110,10 +134,9 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
                 break;
             }
         }
-        // 时间标记：帮助 AI 理解消息的时间关系
         let time_ago = format_time_ago(now.saturating_sub(first.timestamp));
         let new_tag = if is_new { "" } else { "[旧] " };
-        lines.push(format!("[user_id:{}]{}{} ({})", first.user_id, tag, new_tag, time_ago));
+        lines.push(format!("[{}{} {} ({})", who, tag, new_tag, time_ago));
         // 实际内容追加在下一行，避免行过长
         lines.push(format!("  {}", block));
     }

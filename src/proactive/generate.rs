@@ -27,23 +27,23 @@ pub fn ai_generate_message(
     // 情绪
     ctx.push(format!("# 情绪状态\n{}, intensity: {}", emo.current.as_str(), emo.intensity));
 
-    // 自我记忆
-    let self_thoughts = self_memory::get_context(5);
+    // 主动消息的自我记忆（更长时间窗口）
+    let self_thoughts = self_memory::get_context(10);
     if !self_thoughts.is_empty() {
         ctx.push(self_thoughts);
     }
 
-    // 用户记忆
+    // 关于用户的记忆
     let mem = memory::get_context(user_id);
     if !mem.is_empty() {
         ctx.push(format!("# 关于用户 user_id:{}\n{}", user_id, mem));
     }
 
-    // 群聊工作记忆
+    // 包含 bot 自己的历史回复（因为 raw_send_msg 中会 record_bot_reply）
     if group_id > 0 {
-        let wm = working_memory::get_context(group_id, 3600);
+        let wm = working_memory::get_context(group_id, 7200);
         if !wm.is_empty() {
-            ctx.push(wm);
+            ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
         }
     }
 

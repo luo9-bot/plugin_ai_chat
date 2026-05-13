@@ -16,6 +16,7 @@ fn raw_send_msg(group_id: u64, user_id: u64, text: &str) {
         info!(group_id, user_id, content = text, "send: group msg");
         let msg = CString::new(text).unwrap();
         Bot::send_group_msg(group_id, msg);
+        crate::working_memory::record_bot_reply(group_id, text);
     } else {
         info!(user_id, content = text, "send: private msg");
         let msg = CString::new(text).unwrap();
