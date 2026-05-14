@@ -172,6 +172,9 @@ fn execute_tool(name: &str, args: &serde_json::Value, ctx: &PlannerContext, disc
 }
 
 /// Deferred Tool 有效轮数（超过此轮数自动回退）
+///
+/// 工具在 tool_search 发现时记录 discovered_round = N，
+/// 下一轮 (N+1) 起可见，持续 DISCOVERY_TTL_ROUNDS 轮后过期。
 const DISCOVERY_TTL_ROUNDS: usize = 1;
 
 /// 构建当前可见的工具列表
@@ -187,13 +190,16 @@ fn build_visible_tools(discovered: &HashMap<String, usize>, current_round: usize
     ];
 
     for (tool_name, &discovered_round) in discovered.iter() {
-        // 只有在有效期内的已发现工具才加入可见列表，工具从被发现起，最多维持 DISCOVERY_TTL_ROUNDS 轮可见
-        if current_round - discovered_round < DISCOVERY_TTL_ROUNDS {
+        if current_round - discovered_round <= DISCOVERY_TTL_ROUNDS {
+            debug!("planner: tool {} discovered at round {} (expires at round {}), current {} -> visible",
+                tool_name, discovered_round, discovered_round + DISCOVERY_TTL_ROUNDS, current_round);
             match tool_name.as_str() {
                 "send_sticker" => tools.push(tool_send_sticker()),
-                // TODO: 可以考虑添加更多延迟工具
                 _ => {}
             }
+        } else {
+            debug!("planner: tool {} expired (discovered round {}, current {})",
+                tool_name, discovered_round, current_round);
         }
     }
     tools
@@ -251,7 +257,13 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
                 tool_name => {
                     let result = execute_tool(tool_name, &args, ctx, &mut discovered, round);
                     if !result.is_empty() {
-                        user_content.push_str(&format!("\n\n[工具结果: {}]\n{}", tool_name, result));
+                        // 非搜索工具执行后，追加结果并提示下一轮应 reply/finish
+                        if tool_name == "tool_search" {
+                            user_content.push_str(&format!("\n\n[工具结果: {}]\n{}", tool_name, result));
+                        } else {
+                            // 动作工具执行完毕，直接进入 reply 轮次以生成文字回复
+                            user_content.push_str(&format!("\n\n[工具执行完毕: {}]\n{}\n\n请根据以上结果决定是回复还是结束对话。", tool_name, result));
+                        }
                     }
                 }
             },
