@@ -5,6 +5,7 @@ use crate::emotion;
 use crate::memory;
 use crate::self_memory;
 use crate::working_memory;
+use crate::read_shared_state;
 
 /// 用 AI 生成主动消息，失败返回 None
 pub fn ai_generate_message(
@@ -44,6 +45,19 @@ pub fn ai_generate_message(
         let wm = working_memory::get_context(group_id, 7200);
         if !wm.is_empty() {
             ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
+        }
+    } else if group_id == 0 {
+        // 私聊：从对话历史中获取最近几轮对话，让 AI 知道聊到哪了
+        let history = read_shared_state(|s| s.get_history_clone(0, user_id));
+        if !history.is_empty() {
+            let recent: Vec<String> = history.iter().rev().take(8).map(|(role, content)| {
+                format!("[{}] {}", role, content)
+            }).collect();
+            debug!("proactive: user {} has recent private history: {}", user_id, recent.join("\n"));
+
+            ctx.push(format!("# 最近的私聊对话\n{}", recent.join("\n")));
+        }else{
+            debug!("proactive: user {} has no private history", user_id);
         }
     }
 
