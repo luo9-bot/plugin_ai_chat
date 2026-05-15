@@ -1,9 +1,9 @@
 <template>
   <div>
-    <h2>😊 表情包管理</h2>
+    <h3>表情包管理</h3>
     <div class="toolbar">
       <div class="filter-tabs">
-        <button :class="['tab', { active: filter === 'all' }]" @click="filter = 'all'">全部 <span class="count">{{ stats.total }}</span></button>
+        <button class="tab" :class="{ active: filter === 'all' }" @click="filter = 'all'">全部 <span class="count">{{ stats.total }}</span></button>
         <button :class="['tab', { active: filter === 'builtin' }]" @click="filter = 'builtin'">内置 <span class="count">{{ builtinCount }}</span></button>
         <button :class="['tab', { active: filter === 'collected' }]" @click="filter = 'collected'">收集 <span class="count">{{ collectedCount }}</span></button>
         <button :class="['tab', { active: filter === 'banned' }]" @click="filter = 'banned'" v-if="bannedCount">封禁 <span class="count">{{ bannedCount }}</span></button>

@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>🔄 数据同步</h2>
+    <h3>数据同步</h3>
     <div class="stat-grid">
       <div class="stat-card"><div class="label">远程同步</div><div class="value" :style="{ color: status.enabled ? 'var(--success)' : 'var(--text-dim)' }">{{ status.enabled ? '✅ 已启用' : '❌ 未启用' }}</div></div>
       <div class="stat-card"><div class="label">API 地址</div><div class="value" style="font-size:11px;word-break:break-all">{{ status.api_url || '-' }}</div></div>

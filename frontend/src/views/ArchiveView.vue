@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>📦 归档数据</h2>
+    <h3>归档数据</h3>
     <div class="stat-grid">
       <div class="stat-card"><div class="label">归档工作记忆</div><div class="value">{{ wm.length }}</div></div>
       <div class="stat-card"><div class="label">归档长期记忆</div><div class="value">{{ lt.length }}</div></div>

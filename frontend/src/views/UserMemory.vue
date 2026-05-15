@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>📦 用户记忆</h2>
+    <h3>用户记忆</h3>
     <div class="toolbar">
       <select v-model="selectedUser" @change="loadEntries">
         <option value="">全部用户 ({{ Object.keys(users).length }})</option>

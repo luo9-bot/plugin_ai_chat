@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>💬 工作记忆</h2>
+    <h3>工作记忆</h3>
     <div class="toolbar">
       <select v-model="selectedGroup" @change="loadEntries">
         <option value="">全部群组 ({{ Object.keys(groups).length }})</option>

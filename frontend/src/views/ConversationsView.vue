@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>💬 对话管理</h2>
+    <h3>对话管理</h3>
 
     <!-- 统计卡片 -->
     <div class="stats-row">
@@ -18,11 +18,11 @@
     <div class="section">
       <div class="section-header">
         <h3>👥 群聊</h3>
-        <button class="btn btn-sm btn-outline" @click="load">🔄 刷新</button>
+        <button class="btn btn-sm btn-outline" @click="load">刷新</button>
       </div>
       <div class="toolbar">
         <input v-model="newGroupId" placeholder="输入群号" @keydown.enter="addGroup" />
-        <button class="btn btn-primary" @click="addGroup" :disabled="!newGroupId">➕ 开启群聊</button>
+        <button class="btn btn-primary" @click="addGroup" :disabled="!newGroupId">开启群聊</button>
       </div>
       <div v-if="groups.length === 0" class="empty">
         <span>暂无活跃群聊</span>
@@ -46,7 +46,7 @@
       </div>
       <div class="toolbar">
         <input v-model="newUserId" placeholder="输入 QQ 号" @keydown.enter="addUser" />
-        <button class="btn btn-primary" @click="addUser" :disabled="!newUserId">➕ 开启私聊</button>
+        <button class="btn btn-primary" @click="addUser" :disabled="!newUserId">开启私聊</button>
       </div>
       <div v-if="users.length === 0" class="empty">
         <span>暂无活跃私聊</span>

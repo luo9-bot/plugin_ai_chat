@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>😊 情绪状态</h2>
+    <h3>情绪状态</h3>
     <div class="toolbar">
       <select v-model="selectedUser" @change="loadDetail">
         <option value="">全部用户 ({{ Object.keys(states).length }})</option>

@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>🎭 人格设定</h2>
+    <h3>人格设定</h3>
 
     <div class="grid">
       <!-- 左：当前人格 -->
@@ -28,7 +28,7 @@
         <h3>📋 快照管理</h3>
         <p class="desc">保存当前人格配置为快照，可随时切换</p>
         <button class="btn btn-primary btn-sm" @click="showSaveSnap = true" style="margin-bottom:12px">
-          💾 保存当前为快照
+          保存当前为快照
         </button>
 
         <div v-if="!snapNames.length" class="empty">暂无快照</div>

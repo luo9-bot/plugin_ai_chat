@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>🧠 自我记忆 <span class="count">({{ thoughts.length }})</span></h2>
+    <h3>自我记忆 <span class="count">({{ thoughts.length }})</span></h3>
     <div class="toolbar">
       <input v-model="search" placeholder="搜索记忆内容..." class="search-input" />
       <input type="date" v-model="dateFrom" class="date-input" />

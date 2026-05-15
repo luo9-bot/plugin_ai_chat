@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>🚫 黑名单</h2>
+    <h3>黑名单</h3>
     <div class="toolbar">
       <input v-model="newUid" placeholder="输入 QQ 号" style="width:160px" @keydown.enter="addBlock" />
       <button class="btn btn-danger" @click="addBlock">🚫 拉黑</button>

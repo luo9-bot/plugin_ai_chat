@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>🛡️ 防注入安全系统</h2>
+    <h3>防注入安全系统</h3>
 
     <!-- 配置信息 -->
     <div class="section">

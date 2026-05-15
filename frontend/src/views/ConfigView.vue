@@ -1,19 +1,19 @@
 <template>
   <div>
     <div class="top-bar">
-      <h2>⚙️ 配置管理</h2>
+      <h3>配置管理</h3>
       <div class="top-actions">
         <span v-if="saveMsg" :class="saveOk ? 'save-ok' : 'save-err'">{{ saveMsg }}</span>
-        <button class="btn btn-outline" @click="load" :disabled="loading">🔄 重新加载</button>
+        <button class="btn btn-outline" @click="load" :disabled="loading">重新加载</button>
         <button class="btn btn-primary" @click="save" :disabled="saving">
-          {{ saving ? '⏳ 保存中...' : '💾 保存配置' }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
       </div>
     </div>
 
     <!-- 关键配置（始终显示） -->
     <div class="section highlight">
-      <h3>🔑 基础配置</h3>
+      <h3>基础配置</h3>
       <div class="field-grid">
         <div class="field">
           <label title="OpenAI 兼容接口的 API Key，支持 DeepSeek / OpenAI / 通义千问 / 硅基流动等">API Key</label>
@@ -57,7 +57,7 @@
 
     <!-- 白名单/黑名单（始终显示） -->
     <div class="section highlight">
-      <h3>🔒 用户访问控制</h3>
+      <h3>用户访问控制</h3>
       <p class="desc">白名单优先：配置白名单后只允许白名单用户使用私聊，黑名单无效。两个都为空则全体可用。</p>
       <div class="field-grid cols-2">
         <div class="field">
@@ -390,112 +390,43 @@ onMounted(load)
 <style scoped>
 .top-bar {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 16px; position: sticky; top: 0; z-index: 10;
-  background: var(--bg); padding: 8px 0; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 16px; flex-wrap: wrap; gap: 8px;
 }
-
-.top-bar h2 { font-size: 18px; font-weight: 600; margin: 0; }
-
 .top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-
 .save-ok { color: var(--success); font-size: 13px; font-weight: 500; }
 .save-err { color: var(--danger); font-size: 13px; font-weight: 500; }
-
-.section {
-  background: #fff; border-radius: var(--radius); padding: 16px;
-  margin-bottom: 10px; box-shadow: var(--shadow);
-  border: 1.5px solid #fce7f3;
-}
-
-.section.highlight { border-left: 4px solid var(--accent); }
-
-h3 { font-size: 14px; margin: 0 0 12px; font-weight: 600; color: var(--text); }
-h3.collapsible { cursor: pointer; user-select: none; margin: 0; padding: 2px 0; transition: color .15s; }
-h3.collapsible:hover { color: var(--accent); }
-
-.desc { font-size: 12px; color: var(--text-dim); margin: -6px 0 12px; line-height: 1.5; }
-.section-body { padding-top: 4px; }
-
+.section.highlight { border-left: 3px solid var(--primary); }
+.collapsible { cursor: pointer; user-select: none; }
+.collapsible:hover { color: var(--primary); }
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 14px;
 }
-
-.field-grid.cols-3 {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
-
-.field {
-  display: flex; flex-direction: column; gap: 4px;
-}
-
-.field label {
-  font-size: 12px; font-weight: 500; color: var(--text-dim);
-  cursor: help;
-}
-
-.range-val {
-  font-family: 'SFMono-Regular', Consolas, monospace;
-  color: var(--accent); font-weight: 600; font-size: 12px;
-}
-
-.field input[type="text"],
-.field input[type="password"],
-.field input[type="number"],
-.field select,
-.field textarea {
-  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text);
-  padding: 8px 10px; border-radius: var(--radius); font-size: 13px;
-  outline: none; transition: all .15s; width: 100%;
-}
-
-.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(236,72,153,.15); }
-.field input[type="range"] { accent-color: var(--accent); }
-.field textarea { font-family: 'SFMono-Regular', Consolas, monospace; resize: vertical; font-size: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12px; font-weight: 500; color: var(--text-2); cursor: help; }
+.range-val { font-family: 'SFMono-Regular', Consolas, monospace; color: var(--primary); font-weight: 600; font-size: 12px; }
 .password-field { display: flex; gap: 4px; }
 .password-field input { flex: 1; }
 .btn-toggle-vis {
-  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text-dim);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3);
   padding: 8px; border-radius: var(--radius); cursor: pointer; font-size: 14px;
-  transition: all .15s; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
 }
-.btn-toggle-vis:hover { border-color: var(--accent); color: var(--accent); background: #fce7f3; }
-.hint { font-size: 11px; color: var(--text-dim); }
-
-.btn {
-  border: none; padding: 10px 20px; border-radius: var(--radius);
-  cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
-}
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%); color: #fff; box-shadow: 0 4px 12px rgba(236,72,153,.3); }
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(236,72,153,.4); }
-.btn-outline { background: transparent; border: 1.5px solid #f9a8d4; color: var(--accent); }
-.btn-outline:hover { background: #fce7f3; }
-
-/* Mobile */
-@media (max-width: 768px) {
-  .top-bar { flex-direction: column; align-items: flex-start; }
-  .top-actions { width: 100%; justify-content: space-between; }
-  .field-grid { grid-template-columns: 1fr; }
-  .field-grid.cols-3 { grid-template-columns: 1fr; }
-}
+.btn-toggle-vis:hover { border-color: var(--primary); color: var(--primary); }
 
 /* Quota table */
 .quota-table { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .quota-row { display: grid; grid-template-columns: 80px 80px 100px 32px; gap: 8px; align-items: center; }
-.quota-row.quota-header { font-size: 12px; font-weight: 500; color: var(--text-dim); }
-.quota-row input {
-  background: #fdf2f8; border: 1.5px solid #f9a8d4; color: var(--text);
-  padding: 6px 8px; border-radius: var(--radius); font-size: 13px;
-  outline: none; transition: all .15s; width: 100%;
+.quota-row.quota-header { font-size: 12px; font-weight: 500; color: var(--text-3); }
+.quota-row input { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: var(--radius); font-size: 13px; outline: none; width: 100%; }
+.quota-row input:focus { border-color: var(--primary); }
+.btn-icon { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 14px; padding: 4px; border-radius: 4px; }
+.btn-icon:hover { color: var(--danger); background: var(--danger-bg); }
+
+@media (max-width: 768px) {
+  .top-bar { flex-direction: column; align-items: flex-start; }
+  .top-actions { width: 100%; }
+  .field-grid { grid-template-columns: 1fr; }
 }
-.quota-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(236,72,153,.15); }
-.btn-icon {
-  background: none; border: none; color: var(--text-dim); cursor: pointer;
-  font-size: 14px; padding: 4px; border-radius: 4px; transition: all .15s;
-}
-.btn-icon:hover { color: var(--danger); background: var(--danger-light); }
-.btn-sm { padding: 6px 14px; font-size: 12px; margin-top: 4px; }
-.field-label { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; display: block; }
 </style>
