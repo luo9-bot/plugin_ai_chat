@@ -7,6 +7,8 @@ pub struct Config {
     pub api_key: String,
     pub base_url: String,
     pub model: String,
+    #[serde(default = "default_bot_name")]
+    pub bot_name: String,
     #[serde(default = "default_prompts")]
     pub prompts: String,
     #[serde(default)]
@@ -594,6 +596,7 @@ impl Default for QuotaConfig {
 // ── 默认值 ──────────────────────────────────────────────────────
 
 pub(super) fn default_prompts() -> String { "default.txt".into() }
+pub(super) fn default_bot_name() -> String { "洛玖".into() }
 fn default_frequency_penalty() -> f64 { 2.0 }
 fn default_presence_penalty() -> f64 { 1.0 }
 fn default_temperature() -> f64 { 1.3 }

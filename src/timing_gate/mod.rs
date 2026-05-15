@@ -114,7 +114,16 @@ pub fn run_timing_gate(
     messages: &[&(u64, String, Vec<u64>)],
     context: &GateContext,
 ) -> GateDecision {
-    let prompt = crate::prompt::PromptManager::get().raw("timing_gate");
+    let cfg = crate::config::get();
+    let bot_name = &cfg.bot_name;
+
+    // 使用 luo9_timing_gate.prompt 作为主模板，渲染 bot_name + identity
+    let mut prompt_vars: HashMap<&str, &str> = HashMap::new();
+    prompt_vars.insert("bot_name", bot_name);
+    prompt_vars.insert("identity", &context.identity);
+    prompt_vars.insert("timing_gate_wait_rule", "");
+    prompt_vars.insert("group_chat_attention_block", "");
+    let prompt = crate::prompt::PromptManager::get().render("luo9_timing_gate", &prompt_vars);
 
     // 截断上下文：只保留最近的消息（降低 token 消耗）
     let keep = ((messages.len() as f64 * CONTEXT_KEEP_RATIO) as usize).max(3);

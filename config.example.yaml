@@ -10,6 +10,10 @@ api_key: "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 base_url: "https://api.deepseek.com"
 model: "deepseek-chat"
 
+# 机器人名称 (可选，默认 "洛玖")
+# 用于模板中的 {bot_name} 占位符
+bot_name: "洛玖"
+
 # 机器人自身 QQ 号 (必填)
 # 用于判断群消息是否 @了机器人，0 = 未配置（回复所有消息）
 self_qq: 123456789

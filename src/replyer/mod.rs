@@ -19,6 +19,7 @@ pub struct ReplyContext {
 /// 生成回复文本
 pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
     let cfg = crate::config::get();
+    let bot_name = &cfg.bot_name;
     let prompt = crate::prompt::PromptManager::get().raw("replyer");
 
     // 选择回复风格（支持随机化）
@@ -46,6 +47,7 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
     }
 
     let system_prompt = system_parts.join("\n\n")
+        .replace("{bot_name}", bot_name)
         .replace("{identity}", &identity_block)
         .replace("{reply_style}", &reply_style)
         .replace("{expression_block}", &expression_block)

@@ -56,6 +56,7 @@ pub fn init() {
                 api_key: String::new(),
                 base_url: "https://api.deepseek.com".into(),
                 model: "deepseek-chat".into(),
+                bot_name: default_bot_name(),
                 prompts: default_prompts(),
                 self_qq: 0,
                 admin_qq: 0,

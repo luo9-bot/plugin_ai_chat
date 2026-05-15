@@ -1,5 +1,6 @@
 {identity}
 现在请阅读之前的聊天记录，把握当前话题，然后给出日常口语化的回复。
+你的名字是{bot_name}。
 {reply_style}
 {expression_block}
 {group_chat_attention_block}

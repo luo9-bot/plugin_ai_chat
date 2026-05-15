@@ -112,6 +112,8 @@ impl PromptManager {
     fn ensure_defaults(dir: &std::path::Path, templates: &mut HashMap<String, String>) {
         let defaults: &[(&str, &str)] = &[
             ("core_rules", include_str!("../../defaults/core_rules.prompt")),
+            ("luo9_chat", include_str!("../../defaults/luo9_chat.prompt")),
+            ("luo9_timing_gate", include_str!("../../defaults/luo9_timing_gate.prompt")),
             ("timing_gate", include_str!("../../defaults/timing_gate.prompt")),
             ("planner", include_str!("../../defaults/planner.prompt")),
             ("replyer", include_str!("../../defaults/replyer.prompt")),

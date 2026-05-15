@@ -73,6 +73,7 @@ pub fn chat(
     user_message: &str,
 ) -> Result<(String, String), String> {
     let cfg = config::get();
+    let bot_name = &cfg.bot_name;
     let now = crate::util::now_formatted_cst();
     let time_prompt = format!("\n你的时间为：{}\n", now);
 
@@ -86,10 +87,18 @@ pub fn chat(
         "formal" => "- 使用正常的标点符号，句末加句号，问句加问号",
         _ => "- 日常发言不加句号，用换行或竖线代替停顿。问句偶尔加问号但也可以不加",
     };
-    let resolved_rules = crate::prompt::PromptManager::get().raw("core_rules")
-        .replace("{max_reply_chars}", &cfg.style.max_reply_chars.to_string())
-        .replace("{omit_subject_rule}", omit_rule)
-        .replace("{punctuation_rule}", punct_rule);
+
+    // 使用 PromptRenderer 渲染 core_rules
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("bot_name", bot_name.as_str());
+    let max_chars_str = &cfg.style.max_reply_chars.to_string();
+    vars.insert("max_reply_chars", max_chars_str.as_str());
+    vars.insert("omit_subject_rule", omit_rule);
+    vars.insert("punctuation_rule", punct_rule);
+    let resolved_rules = crate::prompt::PromptRenderer::render_simple(
+        crate::prompt::PromptManager::get().raw("core_rules"),
+        &vars,
+    );
 
     // 组装 system prompt: 核心规则 + 用户 prompt + 记忆/人格/情绪 + 时间
     let mut full_system = format!(

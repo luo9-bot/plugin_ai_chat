@@ -210,7 +210,17 @@ thread_local! {
 /// 保持原有签名不变以兼容外部调用方。
 pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     let max_rounds = 8;
-    let prompt = crate::prompt::PromptManager::get().raw("planner");
+    let cfg = crate::config::get();
+    let bot_name = &cfg.bot_name;
+
+    // 使用 luo9_chat.prompt 作为主模板，渲染 bot_name + identity
+    use std::collections::HashMap;
+    let mut prompt_vars: HashMap<&str, &str> = HashMap::new();
+    prompt_vars.insert("bot_name", bot_name);
+    prompt_vars.insert("identity", &ctx.identity);
+    prompt_vars.insert("time_block", "当前时间会在每次请求末尾以用户消息形式提供。");
+    prompt_vars.insert("group_chat_attention_block", "");
+    let prompt = crate::prompt::PromptManager::get().render("luo9_chat", &prompt_vars);
 
     // 注入表情包上下文
     let sticker_ctx = crate::sticker::get_sticker_context();
