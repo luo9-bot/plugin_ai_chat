@@ -49,6 +49,13 @@ pub fn send_sticker(
     // 更新使用次数
     manager::update_usage(&selection.hash);
 
+    // 记录到去重追踪器（防重复）
+    use crate::runtime::reply_dedup::ReplyDedupTracker;
+    thread_local! {
+        static STICKER_DEDUP: std::cell::RefCell<ReplyDedupTracker> = std::cell::RefCell::new(ReplyDedupTracker::new());
+    }
+    STICKER_DEDUP.with(|d| d.borrow_mut().record_sticker(group_id, &selection.hash));
+
     info!(
         hash = %selection.hash[..16.min(selection.hash.len())],
         emotion = target_emotion,

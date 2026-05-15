@@ -143,7 +143,7 @@ impl PlannerLoopEngine {
     }
 
     /// 执行工具（保持原有逻辑）
-    fn execute_tool(&mut self, name: &str, args: &serde_json::Value, ctx: &PlannerContext) -> String {
+    fn execute_tool(&mut self, name: &str, args: &serde_json::Value, ctx: &PlannerContext, recent_hashes: &[String]) -> String {
         match name {
             "query_memory" => {
                 let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -169,7 +169,7 @@ impl PlannerLoopEngine {
             "send_sticker" => {
                 let emotion = args.get("emotion").and_then(|v| v.as_str()).unwrap_or("开心");
                 let context = format!("用户消息: {}", ctx.user_message);
-                match crate::sticker::send_sticker(ctx.group_id, ctx.user_id, emotion, &context, &[]) {
+                match crate::sticker::send_sticker(ctx.group_id, ctx.user_id, emotion, &context, recent_hashes) {
                     Ok(desc) => format!("已发送表情包: {}", desc),
                     Err(e) => format!("发送表情包失败: {}", e),
                 }
@@ -238,6 +238,13 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
         // 同步 deferred state（先重置已发现工具，本轮从头累计）
         engine.deferred_state.discovered_tool_names.clear();
 
+        // 获取去重跟踪器中的最近表情哈希
+        use crate::runtime::reply_dedup::ReplyDedupTracker;
+        thread_local! {
+            static DEDUP: std::cell::RefCell<ReplyDedupTracker> = std::cell::RefCell::new(ReplyDedupTracker::new());
+        }
+        let recent_hashes = DEDUP.with(|d| d.borrow().get_recent_sticker_hashes(ctx.group_id, 300));
+
         // TTL 兼容映射：已被新 DeferredToolState 发现的工具保持可见
         let mut discovered: HashMap<String, usize> = HashMap::new();
 
@@ -279,7 +286,7 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
                         return PlannerAction::Silent;
                     }
                     tool_name => {
-                        let result = engine.execute_tool(tool_name, &args, ctx);
+                        let result = engine.execute_tool(tool_name, &args, ctx, &recent_hashes);
                         if !result.is_empty() {
                             // 记录 TTL 兼容的发现
                             if tool_name == "tool_search" {

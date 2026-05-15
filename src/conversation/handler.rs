@@ -294,6 +294,15 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     // 回复效果追踪：记录发送的回复
                     crate::reply_effect::record_reply(group_id, user_id, &final_reply);
 
+                    // 去重追踪：记录最近回复内容用于防重复
+                    if group_id > 0 {
+                        use crate::runtime::reply_dedup::ReplyDedupTracker;
+                        thread_local! {
+                            static REPLY_DEDUP: std::cell::RefCell<ReplyDedupTracker> = std::cell::RefCell::new(ReplyDedupTracker::new());
+                        }
+                        REPLY_DEDUP.with(|d| d.borrow_mut().record_reply(group_id, user_id, &final_reply));
+                    }
+
                     // 活动状态检测：bot 的回复是否声明了某个活动
                     activity::check_bot_message(user_id, &final_reply);
 
