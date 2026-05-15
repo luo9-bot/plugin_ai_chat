@@ -125,7 +125,7 @@ pub fn chat(
         reasoning_content: None,
     });
 
-    debug!(model = %cfg.model, messages_count = messages.len(), "chat: sending API request");
+    // debug!(model = %cfg.model, messages_count = messages.len(), "chat: sending API request");
     let req = ChatRequest {
         model: cfg.model.clone(),
         messages,
@@ -215,7 +215,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
-    debug!(model = %cfg.model, "analyze: sending API request");
+    // debug!(model = %cfg.model, "analyze: sending API request");
     let agent = no_error_agent();
     let mut resp = agent.post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
@@ -243,7 +243,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
         .ok_or("API returned empty choices")?;
 
     let mut reply = choice.message.content.unwrap_or_default();
-    debug!(reply_len = reply.len(), "analyze: received response");
+    // debug!(reply_len = reply.len(), "analyze: received response");
 
     // 去除 <think> 标签
     if let Some(pos) = reply.find("</think>") {

@@ -1,4 +1,8 @@
-//! Planner 工具定义
+//! Planner 工具定义（旧版函数式定义，The new ToolSpec system is in PlannerLoopEngine）
+//!
+//! 这些函数保留供外部兼容引用，新代码请使用 PlannerLoopEngine。
+
+#![allow(dead_code)]
 
 use crate::ai::{Tool, FunctionDef};
 

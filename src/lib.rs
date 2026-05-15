@@ -26,6 +26,7 @@ pub mod proactive;
 pub mod quota;
 pub mod reply_effect;
 pub mod replyer;
+pub mod runtime;
 pub mod schedule;
 pub mod self_memory;
 #[cfg(feature = "plugin")]
