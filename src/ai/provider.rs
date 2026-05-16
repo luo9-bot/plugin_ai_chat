@@ -397,14 +397,13 @@ pub fn analyze_with_tools(
             continue;
         }
 
-        // 两次重试后仍无 tool_calls → 尝试将纯文本包裹为 { "message": "..." }
-        // 兼容模型直接输出消息文本而不调用 tool_calls 的情况（如 proactive_message）
+        // 两次重试后仍无 tool_calls → 尝试按工具格式包裹纯文本
         if has_content {
             let reply_trimmed = reply.trim();
-            if !reply_trimmed.is_empty() && tools.iter().any(|t| t.function.name == "proactive_message") {
-                let wrapped = serde_json::json!({"message": reply_trimmed});
-                debug!(message = %reply_trimmed, "analyze_with_tools: wrapping plain text as proactive_message");
-                return Ok(wrapped);
+            if !reply_trimmed.is_empty() {
+                if let Ok(wrapped) = try_wrap_text_for_tools(reply_trimmed, tools) {
+                    return Ok(wrapped);
+                }
             }
         }
 
@@ -412,6 +411,55 @@ pub fn analyze_with_tools(
     }
 
     unreachable!()
+}
+
+/// 尝试将纯文本包装为工具的 JSON 参数
+///
+/// 兼容模型直接输出消息文本而不调用 tool_calls 的情况，
+/// 适用于 proactive_message、mental_state_generate、memory_review 等场景。
+fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Value, ()> {
+    for tool in tools {
+        let params = &tool.function.parameters;
+        let required = params.get("required").and_then(|r| r.as_array());
+        let props = params.get("properties").and_then(|p| p.as_object());
+
+        let Some(required) = required else { continue };
+        let Some(props) = props else { continue };
+
+        // 情况 1: 只有一个 required 参数且为 string → { param_name: text }
+        if required.len() == 1 {
+            let key = required[0].as_str().unwrap_or("");
+            if let Some(schema) = props.get(key) {
+                if schema.get("type").and_then(|t| t.as_str()) == Some("string") {
+                    let mut map = serde_json::Map::new();
+                    map.insert(key.to_string(), serde_json::Value::String(text.to_string()));
+                    debug!(tool = %tool.function.name, key, "try_wrap_text_for_tools: wrapped as single param");
+                    return Ok(serde_json::Value::Object(map));
+                }
+            }
+        }
+
+        // 情况 2: mental_state_generate — { concerns: [], deliberations: [{content: text}] }
+        if tool.function.name == "mental_state_generate" {
+            let wrapped = serde_json::json!({
+                "concerns": [],
+                "deliberations": [{"content": text}]
+            });
+            debug!("try_wrap_text_for_tools: wrapped as mental_state_generate deliberation");
+            return Ok(wrapped);
+        }
+
+        // 情况 3: memory_review — { action: "keep", reason: text }
+        if tool.function.name == "memory_review" || tool.function.name == "review_conversation" {
+            let wrapped = serde_json::json!({
+                "action": "keep",
+                "reason": text
+            });
+            debug!("try_wrap_text_for_tools: wrapped as memory_review");
+            return Ok(wrapped);
+        }
+    }
+    Err(())
 }
 
 /// 带工具名称的 analyze_with_tools（返回 (tool_name, arguments)）
@@ -503,6 +551,21 @@ pub fn analyze_with_tools_named(
 
         if has_content && attempt == 0 {
             continue;
+        }
+
+        // 两次重试后仍无工具调用 → 尝试按工具格式包裹纯文本
+        if has_content {
+            let reply_trimmed = reply.trim();
+            if !reply_trimmed.is_empty() {
+                // 对每个工具依次尝试包裹
+                for (i, tool) in tools.iter().enumerate() {
+                    let single = &tools[i..=i];
+                    if let Ok(args) = try_wrap_text_for_tools(reply_trimmed, single) {
+                        debug!(name = %tool.function.name, "analyze_with_tools_named: wrapped plain text fallback");
+                        return Ok((tool.function.name.clone(), args));
+                    }
+                }
+            }
         }
 
         return Err("No tool_calls found in response".to_string());

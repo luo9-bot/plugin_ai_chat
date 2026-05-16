@@ -1,7 +1,48 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 use tracing::{debug, info};
 
 use super::store::{Importance, MemoryEntry, MemoryStore};
+
+/// Embedding 批量队列：积累一定数量后再一次批量调 API
+static EMBED_QUEUE: Mutex<Option<Vec<String>>> = Mutex::new(None);
+const EMBED_BATCH_SIZE: usize = 10;
+
+/// 刷新 embedding 批量队列
+fn flush_embed_queue() {
+    let batch = {
+        let mut guard = EMBED_QUEUE.lock().unwrap();
+        guard.as_mut().and_then(|q| {
+            if q.is_empty() {
+                None
+            } else {
+                Some(std::mem::take(q))
+            }
+        })
+    };
+    if let Some(texts) = batch {
+        let embeddings = crate::memory::embedding::embed_batch(&texts);
+        for (text, emb_opt) in texts.into_iter().zip(embeddings.into_iter()) {
+            if let Some(emb) = emb_opt {
+                crate::memory::vector_store::add_vector(&text, emb);
+            }
+        }
+    }
+}
+
+/// 入队一条 embedding 任务
+fn queue_embedding(content: &str) {
+    if !crate::config::get().embedding.enabled() {
+        return;
+    }
+    let mut guard = EMBED_QUEUE.lock().unwrap();
+    let queue = guard.get_or_insert_with(Vec::new);
+    queue.push(content.to_string());
+    if queue.len() >= EMBED_BATCH_SIZE {
+        drop(guard);
+        flush_embed_queue();
+    }
+}
 
 pub fn add(user_id: u64, content: &str, importance: Importance) {
     let mut store = MemoryStore::load();
@@ -33,15 +74,16 @@ pub fn add(user_id: u64, content: &str, importance: Importance) {
     store.save();
     info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
 
-    // 生成 embedding 并写入 vectors.bin（可选）
-    if crate::config::get().embedding.enabled()
-        && let Some(embedding) = crate::memory::embedding::embed_text(content) {
-            crate::memory::vector_store::add_vector(content, embedding);
-            debug!(user_id, "memory: embedding saved to vectors.bin");
-        }
+    // 生成 embedding 并写入 vectors.bin（批量排队，减少 API 调用次数）
+    queue_embedding(content);
 
     // 更新知识图谱
     crate::memory::graph::update_graph_from_memory(user_id, content);
+}
+
+/// 确保所有挂起的 embedding 被写入（启动/关闭时调）
+pub fn flush_pending_embeddings() {
+    flush_embed_queue();
 }
 
 pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {

@@ -425,6 +425,9 @@ fn check_periodic() {
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
 
+    // 刷新挂起的 embedding 批量写入
+    memory::flush_pending_embeddings();
+
     // 心理状态衰减 (担忧 + 要考量)
     let ms_cfg = &config::get().mental_state;
     mental_state::decay_concerns(ms_cfg.concern_decay_rate);
