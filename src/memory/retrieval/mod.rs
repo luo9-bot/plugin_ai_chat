@@ -4,7 +4,7 @@
 //! 使用 Weighted RRF 融合两路结果
 //! 支持后置图门控、自适应阈值、智能回退
 
-mod bm25;
+pub mod bm25;
 mod vector;
 mod fusion;
 pub mod threshold;

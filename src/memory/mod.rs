@@ -38,31 +38,42 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         .map(|(i, entry)| (format!("{}_{}", user_id, i), entry.content.clone()))
         .collect();
 
-    // 从向量存储中按 content 匹配提取 embeddings
-    let vector_map = vector_store::all_vectors();
-    let embeddings: Vec<(String, Vec<f32>)> = user_mem
-        .entries
-        .iter()
-        .enumerate()
-        .filter_map(|(i, entry)| {
-            let id = format!("{}_{}", user_id, i);
-            vector_map.get(&entry.content).map(|emb| (id, emb.clone()))
-        })
-        .collect();
+    if documents.is_empty() {
+        return Vec::new();
+    }
 
-    // 如果没有存储的 embeddings，实时生成并存入向量文件
-    let mut final_embeddings = embeddings;
-    if final_embeddings.is_empty() && crate::config::get().embedding.enabled()
-        && let Some(_qe) = embedding::embed_text(query) {
-            let doc_texts: Vec<String> = documents.iter().map(|(_, c)| c.clone()).collect();
-            let doc_embeddings = embedding::embed_batch(&doc_texts);
-            for (i, emb_opt) in doc_embeddings.into_iter().enumerate() {
-                if let Some(emb) = emb_opt {
-                    vector_store::add_vector(&documents[i].1, emb.clone());
-                    final_embeddings.push((documents[i].0.clone(), emb));
-                }
+    // 从向量存储中按 content 匹配提取已有 embeddings
+    let vector_map = vector_store::all_vectors();
+    let mut embeddings: Vec<(String, Vec<f32>)> = Vec::with_capacity(documents.len());
+    let mut missing_indices: Vec<usize> = Vec::new();
+
+    for (i, (id, content)) in documents.iter().enumerate() {
+        if let Some(emb) = vector_map.get(content) {
+            embeddings.push((id.clone(), emb.clone()));
+        } else {
+            missing_indices.push(i);
+        }
+    }
+
+    // 只对缺失的文档生成 embedding，而非全量重做
+    if !missing_indices.is_empty() && crate::config::get().embedding.enabled() {
+        let missing_texts: Vec<String> = missing_indices.iter()
+            .map(|&i| documents[i].1.clone())
+            .collect();
+        let doc_embeddings = embedding::embed_batch(&missing_texts);
+        for (offset, emb_opt) in doc_embeddings.into_iter().enumerate() {
+            if let Some(emb) = emb_opt {
+                let idx = missing_indices[offset];
+                vector_store::add_vector(&documents[idx].1, emb.clone());
+                embeddings.push((documents[idx].0.clone(), emb));
             }
         }
+    }
+
+    // 没有可用向量时，降级为纯 BM25
+    if embeddings.is_empty() {
+        return dual_path_bm25_only(query, &documents, top_k);
+    }
 
     // 配置完整检索 pipeline
     let config = retrieval::RetrievalConfig {
@@ -76,7 +87,7 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         enable_fallback: true,
     };
 
-    let mut results = retrieval::dual_path_retrieve(query, &documents, &final_embeddings, &config);
+    let mut results = retrieval::dual_path_retrieve(query, &documents, &embeddings, &config);
 
     let doc_map: HashMap<String, String> = documents.into_iter().collect();
     for result in &mut results {
@@ -86,4 +97,20 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
     }
 
     results
+}
+
+/// 纯 BM25 降级检索（当无可用向量时）
+fn dual_path_bm25_only(query: &str, documents: &[(String, String)], top_k: usize) -> Vec<retrieval::RetrievalResult> {
+    let results = retrieval::bm25::search(query, documents, top_k * 2);
+    results.into_iter().take(top_k).map(|r| {
+        retrieval::RetrievalResult {
+            id: r.id.clone(),
+            content: documents.iter()
+                .find(|(id, _)| id == &r.id)
+                .map(|(_, c)| c.clone())
+                .unwrap_or_default(),
+            score: r.score,
+            source: "bm25",
+        }
+    }).collect()
 }

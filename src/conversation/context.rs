@@ -5,6 +5,12 @@ use crate::{
     working_memory, read_shared_state,
 };
 
+/// 向量检索记忆的冷却缓存：每轮对话最多检索一次
+static LAST_SEMANTIC_SEARCH: std::sync::Mutex<Option<std::collections::HashMap<u64, u64>>> =
+    std::sync::Mutex::new(None);
+
+const SEMANTIC_SEARCH_COOLDOWN: u64 = 120; // 同用户 2 分钟内不重复检索
+
 /// 构建注入到 system prompt 的额外上下文
 pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
@@ -38,14 +44,24 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(self_mem);
     }
 
-    // 向量检索相关记忆：用最近一条用户消息查询最相关的记忆
+    // 向量检索相关记忆：用最近一条用户消息查询最相关的记忆（2 分钟冷却）
     if let Some((_, last_user_msg)) = history.iter().rev().find(|(role, _)| role == "user") {
-        let relevant = crate::memory::search_memories(user_id, last_user_msg, 5);
-        if !relevant.is_empty() {
-            let rel_lines: Vec<String> = relevant.iter().map(|r| {
-                format!("- {}", r.content)
-            }).collect();
-            parts.push(format!("# 相关记忆（与当前对话相关）\n{}", rel_lines.join("\n")));
+        let now = crate::util::now_secs();
+        let should_search = {
+            let guard = LAST_SEMANTIC_SEARCH.lock().unwrap();
+            guard.as_ref().and_then(|m| m.get(&user_id))
+                .map_or(true, |&last| now.saturating_sub(last) >= SEMANTIC_SEARCH_COOLDOWN)
+        };
+        if should_search {
+            let relevant = crate::memory::search_memories(user_id, last_user_msg, 5);
+            if !relevant.is_empty() {
+                let rel_lines: Vec<String> = relevant.iter().map(|r| {
+                    format!("- {}", r.content)
+                }).collect();
+                parts.push(format!("# 相关记忆（与当前对话相关）\n{}", rel_lines.join("\n")));
+            }
+            let mut guard = LAST_SEMANTIC_SEARCH.lock().unwrap();
+            guard.get_or_insert_with(std::collections::HashMap::new).insert(user_id, now);
         }
     }
 
