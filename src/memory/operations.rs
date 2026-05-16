@@ -171,7 +171,9 @@ pub fn get_context(user_id: u64) -> String {
     let now = crate::util::now_secs();
     let normal_expire = cfg.normal_expire_days * 86400;
     let important_fade = cfg.important_fade_days * 86400;
-    let mut lines = Vec::new();
+    let mut permanent_lines = Vec::new();
+    let mut important_lines = Vec::new();
+    let mut normal_lines = Vec::new();
 
     for entry in &user.entries {
         if entry.importance == Importance::Normal
@@ -179,8 +181,10 @@ pub fn get_context(user_id: u64) -> String {
         {
             continue;
         }
-        // 跳过最近已注入的记忆（一次性参考机制）
-        if is_recently_injected(user_id, &entry.content) {
+        // 对普通记忆应用冷却，重要/永久记忆每次都注入
+        if entry.importance != Importance::Permanent
+            && is_recently_injected(user_id, &entry.content)
+        {
             continue;
         }
         let tag = match entry.importance {
@@ -194,16 +198,24 @@ pub fn get_context(user_id: u64) -> String {
                 }
             }
         };
-        lines.push(format!("- {}{}", tag, entry.content));
+        match entry.importance {
+            Importance::Permanent => permanent_lines.push(format!("- {}{}", tag, entry.content)),
+            Importance::Important => important_lines.push(format!("- {}{}", tag, entry.content)),
+            Importance::Normal => normal_lines.push(format!("- {}{}", tag, entry.content)),
+        }
+        // 只标记非永久记忆为已注入（永久记忆每次都展示）
+        if entry.importance != Importance::Permanent {
+            mark_injected(user_id, &entry.content);
+        }
     }
+
+    // 按优先级拼接：永久 > 重要 > 普通，普通记忆最多 5 条
+    let mut lines = permanent_lines;
+    lines.extend(important_lines);
+    lines.extend(normal_lines.into_iter().take(5));
 
     if lines.is_empty() {
         return String::new();
-    }
-
-    // 标记已注入的记忆（一次性参考机制）
-    for entry in &user.entries {
-        mark_injected(user_id, &entry.content);
     }
 
     format!("# 关于用户的记忆\n{}", lines.join("\n"))

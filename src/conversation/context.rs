@@ -38,7 +38,18 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(self_mem);
     }
 
-    // 记忆上下文
+    // 向量检索相关记忆：用最近一条用户消息查询最相关的记忆
+    if let Some((_, last_user_msg)) = history.iter().rev().find(|(role, _)| role == "user") {
+        let relevant = crate::memory::search_memories(user_id, last_user_msg, 5);
+        if !relevant.is_empty() {
+            let rel_lines: Vec<String> = relevant.iter().map(|r| {
+                format!("- {}", r.content)
+            }).collect();
+            parts.push(format!("# 相关记忆（与当前对话相关）\n{}", rel_lines.join("\n")));
+        }
+    }
+
+    // 记忆上下文（全量，但受冷却控制）
     let mem = memory::get_context(user_id);
     if !mem.is_empty() {
         parts.push(mem);
