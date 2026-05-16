@@ -11,81 +11,59 @@ use super::runtime::{
 };
 use super::generate::{generate_mood_message, generate_greeting};
 
-/// 群级消息去重：记录每个群最近发送的消息 (group_id -> (message, timestamp))
-static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, (String, u64)>>> = Mutex::new(None);
+/// 群级最近发送的消息列表（用于内容去重）
+/// group_id -> Vec<(content_fingerprint, timestamp)>
+static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, Vec<(String, u64)>>>> = Mutex::new(None);
 
-/// 同群相同消息的冷却时间（秒）
-const GROUP_MSG_COOLDOWN_SECS: u64 = 1800;
+/// 同群去重冷却时间（秒）
+const GROUP_MSG_COOLDOWN_SECS: u64 = 1200;
 
-/// 追踪每个用户最近发送的话题关键词，用于内容去重
-static RECENT_TOPICS: Mutex<Option<HashMap<u64, Vec<String>>>> = Mutex::new(None);
+/// 保留的最近消息数量
+const RECENT_MSG_KEEP: usize = 5;
 
-/// 提取消息中的话题关键词
-fn extract_topic(msg: &str) -> String {
-    let markers = ["咖啡", "学习", "工作", "游戏", "猫", "运动", "饭", "睡", "心情", "开心", "累", "emo", "天气", "歌", "电影", "书"];
-    for m in &markers {
-        if msg.contains(m) {
-            return m.to_string();
-        }
-    }
-    let first_word = msg.split([' ', '~', '?', '？', '\n'])
-        .next().unwrap_or("");
-    if first_word.len() > 2 {
-        first_word.to_string()
-    } else {
-        String::new()
-    }
+/// 提取消息的"指纹"：取前 8 个非空白字符用于去重
+fn content_fingerprint(msg: &str) -> String {
+    let cleaned: String = msg.chars()
+        .filter(|c| !c.is_whitespace() && *c != '，' && *c != '。' && *c != '~' && *c != '|')
+        .collect();
+    cleaned.chars().take(8).collect()
 }
 
-/// 检查话题是否在近期出现过的列表中
-fn is_topic_on_cooldown(user_id: u64, topic: &str) -> bool {
-    if topic.is_empty() {
+/// 检查消息是否与近期发送过的消息相似
+///
+/// 两条消息只要有相同的前 8 个有效字符即视为重复
+fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
+    let fp = content_fingerprint(msg);
+    if fp.is_empty() {
         return false;
     }
-    let guard = RECENT_TOPICS.lock().unwrap();
-    if let Some(ref map) = *guard
-        && let Some(topics) = map.get(&user_id) {
-            for recent in topics {
-                if recent == topic {
-                    return true;
-                }
-            }
-        }
-    false
-}
-
-/// 记录已发送的话题
-fn record_topic(user_id: u64, topic: &str) {
-    if topic.is_empty() {
-        return;
-    }
-    let mut guard = RECENT_TOPICS.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    let topics = map.entry(user_id).or_default();
-    topics.push(topic.to_string());
-    if topics.len() > 10 {
-        topics.remove(0);
-    }
-}
-
-/// 检查同群是否 recently 发过相同消息
-fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     let guard = RECENT_GROUP_MESSAGES.lock().unwrap();
     if let Some(ref map) = *guard
-        && let Some((recent_msg, recent_time)) = map.get(&group_id) {
-            let now = crate::util::now_secs();
-            if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && recent_msg == msg {
+        && let Some(msgs) = map.get(&group_id)
+    {
+        let now = crate::util::now_secs();
+        for (recent_fp, recent_time) in msgs {
+            if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && recent_fp == &fp {
                 return true;
             }
         }
+    }
     false
 }
 
-/// 记录群级已发送消息
+/// 记录已发送消息的指纹
 fn record_group_message(group_id: u64, msg: &str) {
+    let fp = content_fingerprint(msg);
+    if fp.is_empty() {
+        return;
+    }
     let mut guard = RECENT_GROUP_MESSAGES.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(group_id, (msg.to_string(), crate::util::now_secs()));
+    let msgs = map.entry(group_id).or_default();
+    msgs.push((fp, crate::util::now_secs()));
+    if msgs.len() > RECENT_MSG_KEEP {
+        msgs.remove(0);
+    }
 }
 
 pub fn check_proactive_messages(user_id: u64, group_id: u64) {
@@ -147,27 +125,19 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
                 debug!(user_id, group_id, msg = %msg, "proactive: duplicate mood message, skipping");
                 return;
             }
-            let topic = extract_topic(&msg);
-            if is_topic_on_cooldown(user_id, &topic) {
-                debug!(user_id, group_id, topic, "proactive: topic on cooldown, skipping");
-                return;
-            }
             debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
             if sender::safe_send_quiet(group_id, user_id, &msg) {
                 record_sent(user_id);
                 record_group_message(group_id, &msg);
-                record_topic(user_id, &topic);
             }
             return;
         }
     }
 
-    // ── 触发路径 2: 随机化间隔的时间问候 ────────────────────────
-    // 把固定间隔乘以一个 0.5~1.5 的随机因子
+    // ── 触发路径 2: 随机化间隔的主动消息 ────────────────────────
     let jitter = 0.5 + pseudo_random(user_id.wrapping_add(now / 60)) * 1.0;
     let effective_interval = (interval as f64 * jitter) as u64;
 
-    // 低情绪时延长间隔
     let mood_adjusted = if emo.current == emotion::EmotionType::Sad || emo.current == emotion::EmotionType::Tired {
         (effective_interval as f64 * low_mood_mult) as u64
     } else {
@@ -180,19 +150,13 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             return;
         }
         if is_duplicate_message(group_id, &msg) {
-            debug!(user_id, group_id, msg = %msg, "proactive: duplicate greeting, skipping");
+            debug!(user_id, group_id, msg = %msg, time_since_last, "proactive: duplicate, skipping");
             return;
         }
-        let topic = extract_topic(&msg);
-        if is_topic_on_cooldown(user_id, &topic) {
-            debug!(user_id, group_id, topic, "proactive: topic on cooldown, skipping");
-            return;
-        }
-        debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending greeting");
+        debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending");
         if sender::safe_send_quiet(group_id, user_id, &msg) {
             record_sent(user_id);
             record_group_message(group_id, &msg);
-            record_topic(user_id, &topic);
         }
     } else {
         tracing::debug!(

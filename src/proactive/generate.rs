@@ -28,10 +28,10 @@ pub fn ai_generate_message(
     // 情绪
     ctx.push(format!("# 情绪状态\n{}, intensity: {}", emo.current.as_str(), emo.intensity));
 
-    // 主动消息的自我记忆（更长时间窗口）
+    // 内心独白（仅供内部参考，不要说出去）
     let self_thoughts = self_memory::get_context(10);
     if !self_thoughts.is_empty() {
-        ctx.push(self_thoughts);
+        ctx.push(format!("# 你的内心想法（仅作为内部参考，不要直接说出来）\n{}", self_thoughts));
     }
 
     // 关于用户的记忆
@@ -42,7 +42,7 @@ pub fn ai_generate_message(
 
     // 包含 bot 自己的历史回复（因为 raw_send_msg 中会 record_bot_reply）
     if group_id > 0 {
-        let wm = working_memory::get_context(group_id, 7200);
+        let wm = working_memory::get_context(group_id, 3600);
         if !wm.is_empty() {
             ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
         }
@@ -53,11 +53,29 @@ pub fn ai_generate_message(
             let recent: Vec<String> = history.iter().rev().take(8).map(|(role, content)| {
                 format!("[{}] {}", role, content)
             }).collect();
-            debug!("proactive: user {} has recent private history: {}", user_id, recent.join("\n"));
-
             ctx.push(format!("# 最近的私聊对话\n{}", recent.join("\n")));
-        }else{
-            debug!("proactive: user {} has no private history", user_id);
+        }
+    }
+
+    // 活动安排（如果 bot 正在做什么）
+    let self_qq = config::get().self_qq;
+    if self_qq > 0 {
+        if let Some(activity) = crate::activity::get_active_activity(self_qq) {
+            let act_str = match activity.activity {
+                crate::activity::ActivityType::Training => "正在运动/训练",
+                crate::activity::ActivityType::Eating => "正在吃饭",
+                crate::activity::ActivityType::Sleeping => "正在休息/睡觉",
+                crate::activity::ActivityType::Working => "正在工作/学习",
+                crate::activity::ActivityType::Outing => "外出中",
+                crate::activity::ActivityType::Bathing => "正在洗澡",
+                crate::activity::ActivityType::Custom(ref s) => s,
+            };
+            ctx.push(format!("# 你正在做的事\n{}", act_str));
+        }
+        // 今日计划上下文
+        let schedule_ctx = crate::schedule::get_current_context();
+        if !schedule_ctx.is_empty() {
+            ctx.push(schedule_ctx);
         }
     }
 
