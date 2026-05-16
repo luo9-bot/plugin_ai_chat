@@ -9,16 +9,16 @@ use crate::ai::{Tool, FunctionDef};
 pub fn tool_reply() -> Tool {
     Tool { tool_type: "function".into(), function: FunctionDef {
         name: "reply".into(),
-        description: "当你判断 bot 应该正式发送一条可见回复时调用。".into(),
-        parameters: serde_json::json!({"type":"object","properties":{"reference_info":{"type":"string","description":"回复参考信息"}},"required":["reference_info"]}),
+        description: "只有在你已从记忆或上下文中获得足够信息，确定 bot 应该回复时才调用。信息不足时请使用 finish 保持沉默。".into(),
+        parameters: serde_json::json!({"type":"object","properties":{"reference_info":{"type":"string","description":"回复参考信息（基于你已获取到的信息简要说明为什么回复）"}},"required":["reference_info"]}),
     }}
 }
 
 pub fn tool_query_memory() -> Tool {
     Tool { tool_type: "function".into(), function: FunctionDef {
         name: "query_memory".into(),
-        description: "查询关于某个用户的长期记忆。".into(),
-        parameters: serde_json::json!({"type":"object","properties":{"user_id":{"type":"integer"},"query":{"type":"string"}},"required":["user_id"]}),
+        description: "查询关于某个用户的长期记忆。可能返回空结果——如果返回为空说明没有相关信息，不要编造。".into(),
+        parameters: serde_json::json!({"type":"object","properties":{"user_id":{"type":"integer"},"query":{"type":"string","description":"要查询的内容，如用户的喜好、说过的话等"}},"required":["user_id"]}),
     }}
 }
 
@@ -33,8 +33,8 @@ pub fn tool_query_person_info() -> Tool {
 pub fn tool_finish() -> Tool {
     Tool { tool_type: "function".into(), function: FunctionDef {
         name: "finish".into(),
-        description: "结束本轮推理，不回复。".into(),
-        parameters: serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]}),
+        description: "结束本轮推理，不回复。当你缺乏足够信息无法给出有意义回复时，请选择 finish 而不是胡乱回应。".into(),
+        parameters: serde_json::json!({"type":"object","properties":{"reason":{"type":"string","description":"不回复的原因（如：信息不足、话题不相关、不需要回复等）"}},"required":["reason"]}),
     }}
 }
 
