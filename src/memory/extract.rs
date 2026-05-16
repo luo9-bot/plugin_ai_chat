@@ -1,7 +1,70 @@
 use tracing::debug;
 
 use super::operations::add;
-use super::store::Importance;
+use super::store::{Importance, MemoryStore};
+
+/// 最近关键词记忆注入记录，防止刷屏
+static RECENT_KEYWORD_EXTRACTS: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> = std::sync::Mutex::new(None);
+
+const KEYWORD_COOLDOWN_SECS: u64 = 600; // 同关键词模式 10 分钟内不重复存储
+
+/// 检查同类型的关键词记忆是否在冷却中
+fn is_keyword_on_cooldown(user_id: u64, keyword: &str) -> bool {
+    let key = format!("{}:{}", user_id, keyword);
+    let guard = RECENT_KEYWORD_EXTRACTS.lock().unwrap();
+    if let Some(ref map) = *guard
+        && let Some(ts) = map.get(&key)
+    {
+        return crate::util::now_secs().saturating_sub(*ts) < KEYWORD_COOLDOWN_SECS;
+    }
+    false
+}
+
+fn mark_keyword_extracted(user_id: u64, keyword: &str) {
+    let key = format!("{}:{}", user_id, keyword);
+    let mut guard = RECENT_KEYWORD_EXTRACTS.lock().unwrap();
+    let map = guard.get_or_insert_with(std::collections::HashMap::new);
+    map.insert(key, crate::util::now_secs());
+}
+
+/// 检查新记忆是否与现有记忆矛盾（如 "我叫小红" vs 已有的 "我叫小明"）
+/// 如果矛盾，返回 true 且不存储新内容
+fn is_contradictory(user_id: u64, content: &str) -> bool {
+    // 只检测个人信息类记忆（我是/我叫/我喜欢/我不喜欢等）
+    let prefixes = ["我叫", "我是", "我的名字", "我住", "我在"];
+    let has_prefix = prefixes.iter().any(|p| content.contains(p));
+    if !has_prefix {
+        return false;
+    }
+
+    let store = MemoryStore::load();
+    let user = match store.users.get(&user_id.to_string()) {
+        Some(u) => u,
+        None => return false,
+    };
+
+    // 提取新信息的类型标签（如 "我叫" 后面的内容）
+    let new_info_type = prefixes.iter().find(|p| content.contains(*p)).copied().unwrap_or("");
+    if new_info_type.is_empty() {
+        return false;
+    }
+
+    // 提取新信息的具体内容
+    let new_value = content.split(new_info_type).nth(1).unwrap_or("").trim();
+
+    for entry in &user.entries {
+        // 检查是否有相同类型但不同内容的已有记忆
+        if entry.content.contains(new_info_type)
+            && !entry.content.contains(new_value)
+        {
+            let existing_value = entry.content.split(new_info_type).nth(1).unwrap_or("").trim();
+            // 如果已有记忆是重要/永久的，新矛盾信息大概率是捣乱
+            debug!(user_id, existing = %existing_value, new = %new_value, "memory: contradictory info detected, skipping");
+            return true;
+        }
+    }
+    false
+}
 
 /// AI 驱动的记忆提取 (发送回复后调用)
 ///
@@ -67,8 +130,12 @@ fn extract_memory_from_keyword(user_id: u64, message: &str) {
     for (keyword, importance) in patterns {
         if let Some(pos) = message.find(keyword) {
             let after = &message[pos + keyword.len()..].trim();
-            if !after.is_empty() {
+            if !after.is_empty()
+                && !is_keyword_on_cooldown(user_id, keyword)
+                && !is_contradictory(user_id, after)
+            {
                 add(user_id, after, importance.clone());
+                mark_keyword_extracted(user_id, keyword);
             }
         }
     }
@@ -86,10 +153,13 @@ fn extract_memory_from_keyword(user_id: u64, message: &str) {
         ("我是", Importance::Important),
     ];
     for (keyword, importance) in auto_patterns {
-        if let Some(pos) = message.find(keyword) {
+        if let Some(pos) = message.find(keyword)
+            && !is_keyword_on_cooldown(user_id, keyword)
+        {
             let info = &message[pos..];
-            if info.len() > keyword.len() + 1 {
+            if info.len() > keyword.len() + 1 && !is_contradictory(user_id, info) {
                 add(user_id, info, importance.clone());
+                mark_keyword_extracted(user_id, keyword);
             }
         }
     }
@@ -106,8 +176,12 @@ pub fn extract_memory_from_message(user_id: u64, message: &str) {
     for (keyword, importance) in patterns {
         if let Some(pos) = message.find(keyword) {
             let after = &message[pos + keyword.len()..].trim();
-            if !after.is_empty() {
+            if !after.is_empty()
+                && !is_keyword_on_cooldown(user_id, keyword)
+                && !is_contradictory(user_id, after)
+            {
                 add(user_id, after, importance.clone());
+                mark_keyword_extracted(user_id, keyword);
             }
         }
     }
@@ -125,10 +199,13 @@ pub fn extract_memory_from_message(user_id: u64, message: &str) {
         ("我是", Importance::Important),
     ];
     for (keyword, importance) in auto_patterns {
-        if let Some(pos) = message.find(keyword) {
+        if let Some(pos) = message.find(keyword)
+            && !is_keyword_on_cooldown(user_id, keyword)
+        {
             let info = &message[pos..];
-            if info.len() > keyword.len() + 1 {
+            if info.len() > keyword.len() + 1 && !is_contradictory(user_id, info) {
                 add(user_id, info, importance.clone());
+                mark_keyword_extracted(user_id, keyword);
             }
         }
     }

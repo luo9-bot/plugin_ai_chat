@@ -243,8 +243,8 @@ pub fn memory_review_tool() -> Tool {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["keep", "consolidate", "update"],
-                        "description": "操作类型"
+                        "enum": ["keep", "consolidate", "update", "remove"],
+                        "description": "操作类型：keep=无需改动, consolidate=合并, update=更新, remove=删除虚假/过时的记忆"
                     },
                     "reason": { "type": "string", "description": "原因" },
                     "updates": {

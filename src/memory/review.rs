@@ -61,6 +61,16 @@ pub fn ai_review_all() {
             Err(_) => continue,
         };
 
+        // 跳过没有对话历史的用户（避免浪费 API）
+        let has_recent_history = crate::read_shared_state(|s| {
+            let history = s.get_history_clone(0, user_id);
+            !history.is_empty()
+        });
+        if !has_recent_history {
+            debug!(user_id, "memory: review skipped (no recent conversation)");
+            continue;
+        }
+
         // 构建审查上下文: 现有记忆
         let memories_text: Vec<String> = user_memory.entries.iter().map(|e| {
             let imp = match e.importance {
@@ -97,13 +107,14 @@ pub fn ai_review_all() {
             Ok(parsed) => {
                 let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");
                 if action == "keep" {
+                    debug!(user_id = user_id_str, "memory: review skipped (keep)");
                     continue;
                 }
 
                 let mut store = MemoryStore::load();
                 let user = store.get_user_mut(user_id);
 
-                // 删除记忆
+                // 删除虚假/过时的记忆
                 if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
                     for remove in removes {
                         if let Some(content) = remove.as_str() {
