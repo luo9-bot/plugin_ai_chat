@@ -450,12 +450,32 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
         }
 
         // 情况 3: memory_review — { action: "keep", reason: text }
-        if tool.function.name == "memory_review" || tool.function.name == "review_conversation" {
+        if tool.function.name == "memory_review" {
             let wrapped = serde_json::json!({
                 "action": "keep",
                 "reason": text
             });
             debug!("try_wrap_text_for_tools: wrapped as memory_review");
+            return Ok(wrapped);
+        }
+
+        // 情况 4: review_conversation — { relevant: [], emotion: { state: "neutral", intensity: 0.3 } }
+        if tool.function.name == "review_conversation" {
+            let wrapped = serde_json::json!({
+                "relevant": [],
+                "emotion": {"state": "neutral", "intensity": 0.3}
+            });
+            debug!("try_wrap_text_for_tools: wrapped as review_conversation (skip)");
+            return Ok(wrapped);
+        }
+
+        // 情况 5: self_reflect — { thoughts: [{ content, category }], share: { should_share: false } }
+        if tool.function.name == "self_reflect" {
+            let wrapped = serde_json::json!({
+                "thoughts": [{"content": text, "category": "reflection"}],
+                "share": {"should_share": false, "content": "", "target_group_id": 0}
+            });
+            debug!("try_wrap_text_for_tools: wrapped as self_reflect");
             return Ok(wrapped);
         }
     }

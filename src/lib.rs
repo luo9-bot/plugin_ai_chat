@@ -586,7 +586,18 @@ fn do_post_conversation_reflection(group_id: u64) {
         return;
     }
 
-    let recent_context: Vec<String> = entries.iter().map(|e| {
+    let self_qq = config::get().self_qq;
+
+    // 过滤掉 bot 自己的消息，防止自我引用产生的幻觉记忆
+    let user_entries: Vec<&working_memory::Entry> = entries.iter()
+        .filter(|e| self_qq == 0 || e.user_id != self_qq)
+        .collect();
+
+    if user_entries.is_empty() {
+        return;
+    }
+
+    let recent_context: Vec<String> = user_entries.iter().map(|e| {
         let tag = if e.bot_replied { "[已回复]" } else { "[未回复]" };
         format!("[用户{}]{} {}", e.user_id, tag, e.content)
     }).collect();
