@@ -59,6 +59,24 @@ pub fn record_bot_reply(group_id: u64, content: &str) {
     store.save();
 }
 
+/// 获取某群最近用户消息的最新时间戳（排除 bot 自身）
+/// 用于主动消息系统判断是否有新消息
+pub fn get_latest_user_message_ts(group_id: u64) -> u64 {
+    let store = WorkingMemoryStore::load();
+    let self_qq = crate::config::get().self_qq;
+    store.groups
+        .get(&group_id.to_string())
+        .map(|group| {
+            group.entries.iter()
+                .rev()
+                .filter(|e| self_qq == 0 || e.user_id != self_qq)
+                .map(|e| e.timestamp)
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+}
+
 /// 获取某群最近的消息
 pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Entry> {
     let store = WorkingMemoryStore::load();

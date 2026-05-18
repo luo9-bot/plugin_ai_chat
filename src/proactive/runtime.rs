@@ -12,6 +12,7 @@ pub struct ProactiveState {
     pub last_sent: u64,
     pub ignore_count: u32,
     pub last_user_reply: u64,
+    pub last_working_memory_ts: u64, // 上次发送时工作记忆中最新的用户消息时间戳
     pub pending_reminders: Vec<DateReminder>,
 }
 
@@ -22,6 +23,7 @@ impl Default for ProactiveState {
             last_sent: 0,
             ignore_count: 0,
             last_user_reply: now,
+            last_working_memory_ts: 0,
             pending_reminders: Vec::new(),
         }
     }
@@ -141,10 +143,14 @@ pub fn record_user_reply(user_id: u64) {
     save_state(user_id, &state);
 }
 
-pub fn record_sent(user_id: u64) {
+pub fn record_sent(user_id: u64, group_id: u64) {
     let mut state = load_state(user_id);
     state.last_sent = crate::util::now_secs();
     state.ignore_count += 1;
+    // 记录当前工作记忆中最新的用户消息时间戳，下次无新消息时不触发
+    if group_id > 0 {
+        state.last_working_memory_ts = crate::working_memory::get_latest_user_message_ts(group_id);
+    }
     save_state(user_id, &state);
 }
 

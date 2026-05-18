@@ -89,7 +89,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         }
         debug!(user_id, group_id, msg = %reminder_msg, "proactive: sending date reminder");
         if sender::safe_send_quiet(group_id, user_id, &reminder_msg) {
-            record_sent(user_id);
+            record_sent(user_id, group_id);
             record_group_message(group_id, &reminder_msg);
         }
         return;
@@ -103,6 +103,15 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         let cooldown = interval * (state.ignore_count as u64);
         if time_since_last < cooldown {
             tracing::debug!(user_id, group_id, ignore_count = state.ignore_count, cooldown, "proactive: cooling down");
+            return;
+        }
+    }
+
+    // 无新消息不触发：如果工作记忆没有更新，说明群聊没有新内容，不应该重复触发
+    if group_id > 0 && state.last_working_memory_ts > 0 {
+        let latest_ts = crate::working_memory::get_latest_user_message_ts(group_id);
+        if latest_ts <= state.last_working_memory_ts {
+            tracing::debug!(user_id, group_id, last_ts = state.last_working_memory_ts, latest_ts, "proactive: no new messages since last send, skipping");
             return;
         }
     }
@@ -127,7 +136,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             }
             debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
             if sender::safe_send_quiet(group_id, user_id, &msg) {
-                record_sent(user_id);
+                record_sent(user_id, group_id);
                 record_group_message(group_id, &msg);
             }
             return;
@@ -155,7 +164,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         }
         debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending");
         if sender::safe_send_quiet(group_id, user_id, &msg) {
-            record_sent(user_id);
+            record_sent(user_id, group_id);
             record_group_message(group_id, &msg);
         }
     } else {
