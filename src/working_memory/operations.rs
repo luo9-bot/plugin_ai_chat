@@ -105,7 +105,18 @@ pub fn get_context(group_id: u64, max_age_secs: u64) -> String {
 /// 旧消息逐步退出而不是突然消失，减少上下文抖动。
 /// 每条消息附带相对时间戳，帮助 AI 理解时间关系。
 pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usize) -> String {
-    let expanded_count = base_count * 2; // 2x 缓存稳定性放大
+    get_context_filtered(group_id, max_age_secs, base_count, false)
+}
+
+/// 获取排除了 bot 自身消息的工作记忆上下文（用于主动消息生成等场景）
+///
+/// 防止 bot 把自己的消息当成其他用户的消息来理解，产生幻觉。
+pub fn get_context_no_self(group_id: u64, max_age_secs: u64) -> String {
+    get_context_filtered(group_id, max_age_secs, 15, true)
+}
+
+fn get_context_filtered(group_id: u64, max_age_secs: u64, base_count: usize, exclude_self: bool) -> String {
+    let expanded_count = base_count * 2;
     let entries = get_recent(group_id, max_age_secs, expanded_count);
     if entries.is_empty() {
         return String::new();
@@ -113,12 +124,22 @@ pub fn get_context_with_window(group_id: u64, max_age_secs: u64, base_count: usi
 
     let now = crate::util::now_secs();
     let self_qq = crate::config::get().self_qq;
-    // 标记哪些是"新消息"（后半部分）
-    let new_start = entries.len().saturating_sub(base_count);
 
-    // 合并同一用户的连续消息
+    // 排除 bot 自身消息（主动消息场景下防止自我引用幻觉）
+    let filtered: Vec<&Entry> = if exclude_self && self_qq > 0 {
+        entries.iter().filter(|e| e.user_id != self_qq).collect()
+    } else {
+        entries.iter().collect()
+    };
+
+    if filtered.is_empty() {
+        return String::new();
+    }
+
+    let new_start = filtered.len().saturating_sub(base_count);
+
     let mut lines: Vec<String> = Vec::new();
-    let mut iter = entries.iter().enumerate().peekable();
+    let mut iter = filtered.iter().enumerate().peekable();
     while let Some((idx, first)) = iter.next() {
         let is_new = idx >= new_start;
         let is_self = self_qq > 0 && first.user_id == self_qq;

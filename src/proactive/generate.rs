@@ -42,7 +42,8 @@ pub fn ai_generate_message(
 
     // 包含 bot 自己的历史回复（因为 raw_send_msg 中会 record_bot_reply）
     if group_id > 0 {
-        let wm = working_memory::get_context(group_id, 3600);
+        // 使用排除 bot 自身消息的上下文，防止自我引用幻觉
+        let wm = working_memory::get_context_no_self(group_id, 3600);
         if !wm.is_empty() {
             ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
         }
