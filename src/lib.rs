@@ -428,6 +428,9 @@ fn check_periodic() {
     // 刷新挂起的 embedding 批量写入
     memory::flush_pending_embeddings();
 
+    // 检查活动进度（完成的活动会记录，供生命事件路径触发）
+    activity::check_activity_progress();
+
     // 心理状态衰减 (担忧 + 要考量)
     let ms_cfg = &config::get().mental_state;
     mental_state::decay_concerns(ms_cfg.concern_decay_rate);

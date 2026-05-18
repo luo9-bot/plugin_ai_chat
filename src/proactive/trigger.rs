@@ -107,7 +107,44 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         }
     }
 
-    // 无新消息不触发：如果工作记忆没有更新，说明群聊没有新内容，不应该重复触发
+    // ── 触发路径 3: 生命事件（起床/入睡/活动完成） ────────────
+    // 这个路径不受"无新消息"限制——bot 可以基于自己的生活状态说话
+    // 但需要超过最短间隔，防止刚发完又发
+    let self_qq = crate::config::get().self_qq;
+    let min_life_event_interval = 300u64; // 5 分钟
+    if self_qq > 0 && time_since_last > min_life_event_interval && time_since_reply > 60 {
+        if let Some(life_event) = crate::activity::get_pending_life_event(self_qq) {
+            let trigger = match &life_event {
+                crate::activity::LifeEvent::WokeUp => "woke_up",
+                crate::activity::LifeEvent::GoingToSleep => "going_to_sleep",
+                crate::activity::LifeEvent::ActivityCompleted(_) => "activity_completed",
+            };
+            let life_emo = emotion::get_state(self_qq);
+            let extra_ctx = match &life_event {
+                crate::activity::LifeEvent::WokeUp => "你刚睡醒，可以自然地跟群友打招呼，或者说说刚醒时的状态。".to_string(),
+                crate::activity::LifeEvent::GoingToSleep => "你准备睡觉了，可以告诉大家一声，或者简单道晚安。".to_string(),
+                crate::activity::LifeEvent::ActivityCompleted(act) => {
+                    format!("你刚完成了{}，可以跟大家分享一下感受或者自然地聊起来。", act.describe())
+                }
+            };
+            let msg = super::generate::ai_generate_message(trigger, user_id, group_id, &life_emo, &extra_ctx);
+            if let Some(msg) = msg {
+                if msg.is_empty() || is_duplicate_message(group_id, &msg) {
+                    crate::activity::clear_life_event(&life_event);
+                    return;
+                }
+                debug!(user_id, group_id, msg = %msg, ?life_event, "proactive: life event");
+                if sender::safe_send_quiet(group_id, user_id, &msg) {
+                    record_sent(user_id, group_id);
+                    record_group_message(group_id, &msg);
+                }
+            }
+            crate::activity::clear_life_event(&life_event);
+            return;
+        }
+    }
+
+    // 无新消息不触发（不影响路径 3，但对路径 1/2 起作用）
     if group_id > 0 && state.last_working_memory_ts > 0 {
         let latest_ts = crate::working_memory::get_latest_user_message_ts(group_id);
         if latest_ts <= state.last_working_memory_ts {
@@ -242,7 +279,7 @@ fn generate_atmosphere_message(group_id: u64) -> String {
     } else {
         "group_atmosphere"
     };
-    super::generate::ai_generate_message(trigger, 0, group_id, &emo).unwrap_or_default()
+    super::generate::ai_generate_message(trigger, 0, group_id, &emo, "").unwrap_or_default()
 }
 
 /// 情绪冲动概率: 大幅降低，只有强烈情绪才可能触发

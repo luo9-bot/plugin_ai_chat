@@ -13,6 +13,7 @@ pub fn ai_generate_message(
     user_id: u64,
     group_id: u64,
     emo: &emotion::EmotionState,
+    extra_life_event_ctx: &str,
 ) -> Option<String> {
     let mut ctx = Vec::new();
 
@@ -78,6 +79,10 @@ pub fn ai_generate_message(
         if !schedule_ctx.is_empty() {
             ctx.push(schedule_ctx);
         }
+        // 生命事件上下文：按触发类型添加说明
+        if !extra_life_event_ctx.is_empty() {
+            ctx.push(format!("# 你刚经历的事\n{}", extra_life_event_ctx));
+        }
     }
 
     // 人设
@@ -114,13 +119,13 @@ pub fn ai_generate_message(
 
 /// 情绪驱动的消息：AI 生成，失败返回空字符串（不发送）
 pub fn generate_mood_message(user_id: u64, emo: &emotion::EmotionState, group_id: u64) -> String {
-    ai_generate_message("mood_impulse", user_id, group_id, emo).unwrap_or_default()
+    ai_generate_message("mood_impulse", user_id, group_id, emo, "").unwrap_or_default()
 }
 
 /// 时间问候：AI 生成，失败返回空字符串（不发送）
 pub fn generate_greeting(user_id: u64, group_id: u64) -> String {
     let emo = emotion::get_state(user_id);
-    ai_generate_message("greeting", user_id, group_id, &emo).unwrap_or_default()
+    ai_generate_message("greeting", user_id, group_id, &emo, "").unwrap_or_default()
 }
 
 // /// 从自我记忆文本中随机挑一条想法（排除 [反思] 类）
