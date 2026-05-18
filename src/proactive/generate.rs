@@ -101,6 +101,12 @@ pub fn ai_generate_message(
         Some(serde_json::json!("auto")),
     ) {
         Ok(parsed) => {
+            // 如果 AI 选择跳过，不发送
+            let should_skip = parsed.get("skip").and_then(|v| v.as_bool()).unwrap_or(false);
+            if should_skip {
+                debug!("proactive: AI chose to skip");
+                return None;
+            }
             let msg = parsed.get("message").and_then(|v| v.as_str()).unwrap_or("");
             if msg.is_empty() {
                 debug!("proactive: AI returned empty message");

@@ -290,16 +290,19 @@ pub fn proactive_message_tool() -> Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
             name: "proactive_message".to_string(),
-            description: "生成一条自然的主动消息".to_string(),
+            description: "决定是否要主动说话，以及要说什么".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description": "要发送的消息内容，简短口语化，像真人的自言自语"
+                        "description": "要发送的消息内容，简短口语化。如果没什么想说的就留空。"
+                    },
+                    "skip": {
+                        "type": "boolean",
+                        "description": "是否跳过不说话。true = 没什么好说的，不发送任何消息。false = 有话说。"
                     }
-                },
-                "required": ["message"]
+                }
             }),
         },
     }

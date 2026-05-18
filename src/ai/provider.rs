@@ -478,6 +478,16 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             debug!("try_wrap_text_for_tools: wrapped as self_reflect");
             return Ok(wrapped);
         }
+
+        // 情况 6: proactive_message — { skip: false, message: text }
+        if tool.function.name == "proactive_message" {
+            let wrapped = serde_json::json!({
+                "skip": false,
+                "message": text
+            });
+            debug!("try_wrap_text_for_tools: wrapped as proactive_message");
+            return Ok(wrapped);
+        }
     }
     Err(())
 }
