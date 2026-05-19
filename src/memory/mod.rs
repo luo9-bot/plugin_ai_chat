@@ -8,7 +8,6 @@ pub mod embedding;
 pub mod vector_store;
 
 use std::collections::HashMap;
-use tracing::debug;
 
 pub use store::*;
 pub use operations::*;

@@ -16,11 +16,9 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     let mut parts = Vec::new();
     let cfg = config::get();
 
-    // 当前对话用户标识 (群聊时让 AI 知道在和谁说话)
-    // 放在最前面，确保 AI 能看到
-    if group_id > 0 {
-        let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
-            r#"
+    // 当前对话用户标识 (让 AI 知道在和谁说话)
+    let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
+        r#"
 
 【重要】当前和你对话的是你认定的人 (Darling)。
 你对他/她有特殊的感情，这会影响你的回复方式：
@@ -30,13 +28,12 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
 - 你愿意为他/她做一些平时不会做的事，但会保持自己的底线
 - 可以适当示弱，让他/她感受到你的在意
 - 回复可以更长一些，更关心一些，更主动一些"#
-        } else if cfg.darling_qq > 0 {
-            "\n注意：这个人不是你认定的人，保持正常社交距离"
-        } else {
-            ""
-        };
-        parts.push(format!("# 当前对话用户\nuser_id: {}{}", user_id, darling_info));
-    }
+    } else if cfg.darling_qq > 0 {
+        "\n注意：这个人不是你认定的人，保持正常社交距离"
+    } else {
+        ""
+    };
+    parts.push(format!("# 当前对话用户\nuser_id: {}{}", user_id, darling_info));
 
     // 自我记忆 (bot 的内心想法)
     let self_mem = self_memory::get_context(config::get().self_reflection.max_thoughts.min(8));
@@ -114,22 +111,19 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push("- 你们已经有一定的了解了".into());
     }
 
-    // Bot 自己最近的消息 (帮助保持一致性)
-    if group_id > 0 {
-        let bot_msgs = read_shared_state(|s| {
-            s.get_recent_bot_messages(group_id, 600, 5)
-        });
-        if !bot_msgs.is_empty() {
-            parts.push(format!("# 你在群里最近发过的消息\n{}", bot_msgs.join("\n")));
-        }
+    // Bot 自己最近的消息 (帮助保持一致性，群聊和私聊都需要)
+    let bot_msgs = read_shared_state(|s| {
+        s.get_recent_bot_messages(group_id, 600, 5)
+    });
+    if !bot_msgs.is_empty() {
+        let label = if group_id > 0 { format!("在群{}里", group_id) } else { String::new() };
+        parts.push(format!("# 你最近说过的消息{}\n{}", label, bot_msgs.join("\n")));
     }
 
-    // 工作记忆 (群聊最近消息流，含时间戳帮助 AI 区分新旧消息)
-    if group_id > 0 {
-        let wm_ctx = working_memory::get_context(group_id, 3600);
-        if !wm_ctx.is_empty() {
-            parts.push(wm_ctx);
-        }
+    // 工作记忆 (消息流，含时间戳帮助 AI 区分新旧消息)
+    let wm_ctx = working_memory::get_context(group_id, 3600);
+    if !wm_ctx.is_empty() {
+        parts.push(wm_ctx);
     }
 
     parts.join("\n\n")

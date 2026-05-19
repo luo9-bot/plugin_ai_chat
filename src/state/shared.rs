@@ -92,7 +92,6 @@ impl SharedState {
 
     /// 记录机器人在群里发出的消息
     pub fn record_bot_message(&mut self, group_id: u64, message: &str) {
-        if group_id == 0 { return; }
         let entry = self.recent_bot_messages.entry(group_id).or_default();
         entry.push((message.to_string(), Instant::now()));
         if entry.len() > 10 {

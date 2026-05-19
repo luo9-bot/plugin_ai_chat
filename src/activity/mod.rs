@@ -214,7 +214,7 @@ pub fn get_activity_context(user_id: u64) -> Option<String> {
 
 /// 检查是否有待处理的生命事件
 /// 返回优先级最高的事件（只返回一个，消费后需调用 clear_life_event）
-pub fn get_pending_life_event(user_id: u64) -> Option<LifeEvent> {
+pub fn get_pending_life_event(_user_id: u64) -> Option<LifeEvent> {
     let now = crate::util::now_secs();
     let schedule_config = crate::schedule::config::load_config();
 

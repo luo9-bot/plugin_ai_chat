@@ -66,12 +66,12 @@ impl MemoryStore {
             .or_default()
     }
 
-    /// 兼容旧数据：检查 entry 是否有有效的 group_id
-    /// group_id=0 且创建时间早于迁移时间的视为"传统/全范围"记忆
-    /// 这些记忆在私聊和群聊中都会展示（向后兼容）
-    pub(crate) fn is_legacy_entry(entry: &MemoryEntry) -> bool {
-        entry.group_id == 0
-    }
+    // /// 兼容旧数据：检查 entry 是否有有效的 group_id
+    // /// group_id=0 且创建时间早于迁移时间的视为"传统/全范围"记忆
+    // /// 这些记忆在私聊和群聊中都会展示（向后兼容）
+    // pub(crate) fn is_legacy_entry(entry: &MemoryEntry) -> bool {
+    //     entry.group_id == 0
+    // }
 }
 
 /// 初始化时调用：返回有记忆的用户数量

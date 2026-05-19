@@ -1,10 +1,9 @@
 use super::store::{Entry, WorkingMemoryStore};
 
-/// 记录一条群聊消息 (无论是否回复)，返回写入时间戳
+/// 记录一条消息 (无论是否回复)，返回写入时间戳
 ///
 /// 存储前剥离 Unicode emoji，防止污染记忆
 pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> u64 {
-    if group_id == 0 { return 0; }
     let mut store = WorkingMemoryStore::load();
     let ts = crate::util::now_secs();
     let group = store.groups.entry(group_id.to_string()).or_default();
@@ -27,7 +26,6 @@ pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> 
 
 /// 标记某用户最近的消息为已回复
 pub fn mark_replied(group_id: u64, user_id: u64) {
-    if group_id == 0 { return; }
     let mut store = WorkingMemoryStore::load();
     if let Some(group) = store.groups.get_mut(&group_id.to_string())
         && let Some(entry) = group.entries.iter_mut().rev().find(|e| e.user_id == user_id && !e.bot_replied)
@@ -39,7 +37,6 @@ pub fn mark_replied(group_id: u64, user_id: u64) {
 
 /// 记录机器人自己的回复到工作记忆（让 AI 知道之前说过什么）
 pub fn record_bot_reply(group_id: u64, content: &str) {
-    if group_id == 0 { return; }
     let self_qq = crate::config::get().self_qq;
     if self_qq == 0 { return; }
     let mut store = WorkingMemoryStore::load();
