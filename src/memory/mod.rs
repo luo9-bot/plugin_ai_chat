@@ -18,6 +18,7 @@ pub use review::*;
 /// 初始化记忆系统
 pub fn init() {
     store::init();
+    vector_store::init();
 }
 
 /// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
