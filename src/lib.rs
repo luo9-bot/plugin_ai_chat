@@ -220,7 +220,7 @@ pub extern "C" fn plugin_main() {
     typo::init(config::data_dir());
 
     // 初始化记忆系统（JSON 存储）
-    memory::init(config::data_dir());
+    memory::init();
 
     // 初始化知识图谱
     memory::graph::init();

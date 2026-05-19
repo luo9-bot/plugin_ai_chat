@@ -1,7 +1,7 @@
 use tracing::debug;
 
 use super::operations::add;
-use super::store::{Importance, MemoryStore};
+use super::store::Importance;
 
 static RECENT_KEYWORD_EXTRACTS: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> = std::sync::Mutex::new(None);
 const KEYWORD_COOLDOWN_SECS: u64 = 600;
@@ -36,14 +36,11 @@ fn is_contradictory(user_id: u64, content: &str) -> bool {
     let prefixes = ["我叫", "我是", "我的名字", "我住", "我在", "我喜欢", "我不喜欢", "我讨厌"];
     let has_prefix = prefixes.iter().any(|p| content.contains(p));
     if !has_prefix { return false; }
-    let store = MemoryStore::load();
-    let user = match store.users.get(&user_id.to_string()) {
-        Some(u) => u, None => return false,
-    };
+    let user_mem = super::store::load_user_memory(user_id);
     let new_info_type = prefixes.iter().find(|p| content.contains(*p)).copied().unwrap_or("");
     if new_info_type.is_empty() { return false; }
     let new_value = content.split(new_info_type).nth(1).unwrap_or("").trim();
-    for entry in &user.entries {
+    for entry in &user_mem.entries {
         if entry.content.contains(new_info_type) && !entry.content.contains(new_value) {
             let existing_value = entry.content.split(new_info_type).nth(1).unwrap_or("").trim();
             debug!(user_id, existing = %existing_value, new = %new_value, "memory: contradictory info detected, skipping");

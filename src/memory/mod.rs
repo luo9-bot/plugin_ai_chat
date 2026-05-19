@@ -1,4 +1,4 @@
-mod store;
+pub mod store;
 mod operations;
 mod extract;
 mod review;
@@ -8,6 +8,7 @@ pub mod embedding;
 pub mod vector_store;
 
 use std::collections::HashMap;
+use tracing::debug;
 
 pub use store::*;
 pub use operations::*;
@@ -15,28 +16,29 @@ pub use extract::*;
 pub use review::*;
 
 /// 初始化记忆系统
-pub fn init(_data_dir: &std::path::Path) {
-    store::MemoryStore::load();
+pub fn init() {
+    store::init();
 }
 
 /// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
 ///
-/// current_group_id=0: 只检索私聊相关的记忆
-/// current_group_id>0: 只检索该群相关的记忆
+/// 同时检索全局记忆和群特定记忆
 pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: usize) -> Vec<retrieval::RetrievalResult> {
-    let store = MemoryStore::load();
-    let user_mem = match store.users.get(&user_id.to_string()) {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
+    let mut documents: Vec<(String, String)> = Vec::new();
 
-    let documents: Vec<(String, String)> = user_mem
-        .entries
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| operations::should_show_entry(entry, current_group_id))
-        .map(|(i, entry)| (format!("{}_{}", user_id, i), entry.content.clone()))
-        .collect();
+    // 全局记忆
+    let global = store::load_user_memory(user_id);
+    for (i, entry) in global.entries.iter().enumerate() {
+        documents.push((format!("global_{}_{}", user_id, i), entry.content.clone()));
+    }
+
+    // 群特定记忆
+    if current_group_id > 0 {
+        let group_user = store::load_group_user_memory(current_group_id, user_id);
+        for (i, entry) in group_user.entries.iter().enumerate() {
+            documents.push((format!("group_{}_{}_{}", current_group_id, user_id, i), entry.content.clone()));
+        }
+    }
 
     if documents.is_empty() {
         return Vec::new();

@@ -299,9 +299,12 @@ pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::
 // ── 仪表盘统计 ────────────────────────────────────────────────
 
 pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
-    let mem_store = crate::memory::MemoryStore::load();
-    let user_count = mem_store.users.len();
-    let mem_count: usize = mem_store.users.values().map(|u| u.entries.len()).sum();
+    let user_ids = crate::memory::store::all_user_ids();
+    let user_count = user_ids.len();
+    let mut mem_count: usize = 0;
+    for uid in &user_ids {
+        mem_count += crate::memory::store::load_user_memory(*uid).entries.len();
+    }
 
     let (_, sticker_registered) = crate::sticker::get_stats();
     let emotion_count = crate::emotion::user_count();

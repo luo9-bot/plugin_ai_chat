@@ -1,7 +1,7 @@
 use tracing::{debug, info};
 
 use super::operations::add;
-use super::store::{Importance, MemoryEntry, MemoryStore};
+use super::store::{Importance, MemoryEntry};
 
 pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)]) {
     let threshold = crate::config::get().memory.auto_summarize_threshold;
@@ -54,17 +54,13 @@ pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)])
 /// AI 驱动的记忆审查 (定期调用，整合和修正所有用户的记忆)
 pub fn ai_review_all() {
     info!("memory_review: 开始审查所有用户记忆");
-    let store = MemoryStore::load();
+    let user_ids = super::store::all_user_ids();
 
-    for (user_id_str, user_memory) in &store.users {
+    for user_id in user_ids {
+        let mut user_memory = super::store::load_user_memory(user_id);
         if user_memory.entries.is_empty() {
             continue;
         }
-
-        let user_id: u64 = match user_id_str.parse() {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
 
         // 跳过没有对话历史的用户（避免浪费 API）
         let has_recent_history = crate::read_shared_state(|s| {
@@ -112,18 +108,17 @@ pub fn ai_review_all() {
             Ok(parsed) => {
                 let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");
                 if action == "keep" {
-                    debug!(user_id = user_id_str, "memory: review skipped (keep)");
+                    debug!(user_id, "memory: review skipped (keep)");
                     continue;
                 }
 
-                let mut store = MemoryStore::load();
-                let user = store.get_user_mut(user_id);
+                let mut memory = super::store::load_user_memory(user_id);
 
                 // 删除虚假/过时的记忆
                 if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
                     for remove in removes {
                         if let Some(content) = remove.as_str() {
-                            user.entries.retain(|e| !e.content.contains(content));
+                            memory.entries.retain(|e| !e.content.contains(content));
                         }
                     }
                 }
@@ -140,7 +135,7 @@ pub fn ai_review_all() {
                             "important" => Importance::Important,
                             _ => Importance::Normal,
                         };
-                        if let Some(entry) = user.entries.iter_mut().find(|e| e.content.contains(old)) {
+                        if let Some(entry) = memory.entries.iter_mut().find(|e| e.content.contains(old)) {
                             entry.content = new.to_string();
                             entry.importance = importance;
                         }
@@ -158,12 +153,11 @@ pub fn ai_review_all() {
                             "important" => Importance::Important,
                             _ => Importance::Normal,
                         };
-                        if !user.entries.iter().any(|e| e.content == content) {
+                        if !memory.entries.iter().any(|e| e.content == content) {
                             let now = crate::util::now_secs();
-                            user.entries.push(MemoryEntry {
+                            memory.entries.push(MemoryEntry {
                                 content: content.to_string(),
                                 importance,
-                                group_id: 0,
                                 created: now,
                                 last_accessed: now,
                                 access_count: 1,
@@ -172,11 +166,11 @@ pub fn ai_review_all() {
                     }
                 }
 
-                store.save();
-                debug!(user_id = user_id_str, action, "memory: review completed");
+                super::store::save_user_memory(user_id, &memory);
+                debug!(user_id, action, "memory: review completed");
             }
             Err(e) => {
-                debug!(user_id = user_id_str, error = %e, "memory: review AI error");
+                debug!(user_id, error = %e, "memory: review AI error");
             }
         }
     }

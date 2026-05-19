@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info};
 
-use super::store::{Importance, MemoryEntry, MemoryStore};
+use super::store::{Importance, MemoryEntry, MemoryFile};
 
 /// Embedding 批量队列
 static EMBED_QUEUE: Mutex<Option<Vec<String>>> = Mutex::new(None);
@@ -36,11 +36,21 @@ fn queue_embedding(content: &str) {
     }
 }
 
-/// 添加一条用户记忆
+fn touch_entry(entry: &mut MemoryEntry, importance: Importance) {
+    let now = crate::util::now_secs();
+    entry.last_accessed = now;
+    entry.access_count += 1;
+    if importance == Importance::Permanent {
+        entry.importance = Importance::Permanent;
+    }
+}
+
+// ── 三层存储 API ────────────────────────────────────────────────
+
+/// 添加记忆
 ///
-/// group_id 含义:
-///   0 = 私聊记忆 (不在群聊上下文中展示)
-///  >0 = 群聊记忆 (只在该群聊上下文中展示)
+/// group_id=0  → 用户的全局记忆（私聊/跨群共享，存 users/{uid}.json）
+/// group_id>0  → 用户在群里的特定记忆（存 groups/{gid}/{uid}.json）
 pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
     let self_qq = crate::config::get().self_qq;
     if self_qq > 0 && user_id == self_qq {
@@ -48,131 +58,199 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
         return;
     }
 
-    let mut store = MemoryStore::load();
     let now = crate::util::now_secs();
-    let user = store.get_user_mut(user_id);
-
-    if let Some(entry) = user.entries.iter_mut().find(|e| e.content == content) {
-        entry.last_accessed = now;
-        entry.access_count += 1;
-        if importance == Importance::Permanent {
-            entry.importance = Importance::Permanent;
-        }
-        let content_preview: String = content.chars().take(40).collect();
-        debug!(user_id, content = %content_preview, "memory: updated existing entry");
-        store.save();
-        info!(user_id, content = %content_preview, "memory: saved to JSON (update)");
-        return;
-    }
-
     let content_preview: String = content.chars().take(40).collect();
-    debug!(user_id, group_id, content = %content_preview, ?importance, "memory: added new entry");
-    user.entries.push(MemoryEntry {
-        content: content.to_string(),
-        importance,
-        group_id,
-        created: now,
-        last_accessed: now,
-        access_count: 1,
-    });
-    store.save();
-    info!(user_id, content = %content_preview, "memory: saved to JSON (new)");
+
+    if group_id == 0 {
+        // 用户全局记忆
+        let mut mem = crate::memory::store::load_user_memory(user_id);
+        if let Some(existing) = mem.entries.iter_mut().find(|e| e.content == content) {
+            touch_entry(existing, importance);
+            crate::memory::store::save_user_memory(user_id, &mem);
+            debug!(user_id, content = %content_preview, "memory: updated existing (global)");
+            info!(user_id, content = %content_preview, "memory: saved to JSON (update, global)");
+            return;
+        }
+        mem.entries.push(MemoryEntry {
+            content: content.to_string(),
+            importance,
+            created: now,
+            last_accessed: now,
+            access_count: 1,
+        });
+        crate::memory::store::save_user_memory(user_id, &mem);
+        info!(user_id, content = %content_preview, "memory: saved (global)");
+    } else {
+        // 用户在群里的特定记忆
+        let mut mem = crate::memory::store::load_group_user_memory(group_id, user_id);
+        if let Some(existing) = mem.entries.iter_mut().find(|e| e.content == content) {
+            touch_entry(existing, importance);
+            crate::memory::store::save_group_user_memory(group_id, user_id, &mem);
+            debug!(user_id, group_id, content = %content_preview, "memory: updated existing (group-user)");
+            return;
+        }
+        mem.entries.push(MemoryEntry {
+            content: content.to_string(),
+            importance,
+            created: now,
+            last_accessed: now,
+            access_count: 1,
+        });
+        crate::memory::store::save_group_user_memory(group_id, user_id, &mem);
+        info!(user_id, group_id, content = %content_preview, "memory: saved (group-user)");
+    }
 
     queue_embedding(content);
     crate::memory::graph::update_graph_from_memory(user_id, content);
 }
 
-/// 添加群组级别的记忆（不归属具体用户，如群氛围、共同话题）
+/// 添加群级别记忆（存 groups/{gid}/group.json）
 pub fn add_group_memory(group_id: u64, content: &str, importance: Importance) {
-    let mut store = MemoryStore::load();
-    let now = crate::util::now_secs();
-
-    let entries = store.group_memories.entry(group_id.to_string()).or_default();
-    if entries.iter().any(|e| e.content == content) {
+    let mut mem = crate::memory::store::load_group_memory(group_id);
+    if mem.entries.iter().any(|e| e.content == content) {
         return;
     }
-
-    entries.push(MemoryEntry {
+    let now = crate::util::now_secs();
+    mem.entries.push(MemoryEntry {
         content: content.to_string(),
         importance,
-        group_id,
         created: now,
         last_accessed: now,
         access_count: 1,
     });
-    store.save();
-    debug!(group_id, content = %content.chars().take(40).collect::<String>(), "memory: added group memory");
+    crate::memory::store::save_group_memory(group_id, &mem);
+    debug!(group_id, content = %content.chars().take(40).collect::<String>(), "memory: saved (group level)");
 }
 
 pub fn flush_pending_embeddings() { flush_embed_queue(); }
 
-pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
-    let mut store = MemoryStore::load();
-    let user = store.get_user_mut(user_id);
+// ── 删除/修正 ────────────────────────────────────────────────────
+
+fn filter_and_archive(
+    user_entries: &mut Vec<MemoryEntry>,
+    predicate: impl Fn(&MemoryEntry) -> bool,
+    user_id: u64,
+) -> Vec<MemoryEntry> {
     let mut archived = Vec::new();
     let mut remaining = Vec::new();
-    for entry in user.entries.drain(..) {
-        if entry.content.contains(pattern) { archived.push(entry); }
+    for entry in user_entries.drain(..) {
+        if predicate(&entry) { archived.push(entry); }
         else { remaining.push(entry); }
     }
-    user.entries = remaining;
-    let removed = archived.len();
-    if removed > 0 {
-        for entry in &archived { crate::memory::vector_store::remove_vector(&entry.content); }
-        crate::archive::archive_long_term_memory(user_id, archived);
+    *user_entries = remaining;
+    if !archived.is_empty() {
+        for entry in &archived {
+            crate::memory::vector_store::remove_vector(&entry.content);
+        }
+        crate::archive::archive_long_term_memory(user_id, archived.clone());
     }
-    store.save();
-    if removed > 0 { vec![format!("已遗忘 {} 条记忆", removed)] }
+    archived
+}
+
+pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
+    let mut total = 0;
+
+    // 全局记忆
+    let mut mem = crate::memory::store::load_user_memory(user_id);
+    let archived = filter_and_archive(&mut mem.entries, |e| e.content.contains(pattern), user_id);
+    if !archived.is_empty() {
+        crate::memory::store::save_user_memory(user_id, &mem);
+        total += archived.len();
+    }
+
+    // 所有群的群内记忆
+    let groups_dir = crate::config::data_dir().join("memory").join("groups");
+    if let Ok(entries) = std::fs::read_dir(&groups_dir) {
+        for entry in entries.flatten() {
+            if let Ok(gid) = entry.file_name().to_string_lossy().parse::<u64>() {
+                let mut gmem = crate::memory::store::load_group_user_memory(gid, user_id);
+                let archived = filter_and_archive(&mut gmem.entries, |e| e.content.contains(pattern), user_id);
+                if !archived.is_empty() {
+                    crate::memory::store::save_group_user_memory(gid, user_id, &gmem);
+                    total += archived.len();
+                }
+            }
+        }
+    }
+
+    if total > 0 { vec![format!("已遗忘 {} 条记忆", total)] }
     else { vec!["没有找到匹配的记忆".to_string()] }
 }
 
 pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
-    let mut store = MemoryStore::load();
-    let user = store.get_user_mut(user_id);
-    let now = crate::util::now_secs();
     let mut count = 0;
-    if new.is_empty() {
-        let mut archived = Vec::new();
-        let mut remaining = Vec::new();
-        for entry in user.entries.drain(..) {
-            if entry.content.contains(old) { archived.push(entry); count += 1; }
-            else { remaining.push(entry); }
+    let now = crate::util::now_secs();
+
+    // 全局记忆
+    let mut mem = crate::memory::store::load_user_memory(user_id);
+    for entry in &mut mem.entries {
+        if entry.content.contains(old) {
+            crate::memory::vector_store::remove_vector(&entry.content);
+            entry.content = new.to_string();
+            entry.last_accessed = now;
+            count += 1;
         }
-        user.entries = remaining;
-        if !archived.is_empty() {
-            for entry in &archived { crate::memory::vector_store::remove_vector(&entry.content); }
-            crate::archive::archive_long_term_memory(user_id, archived);
-        }
-    } else {
-        for entry in &mut user.entries {
-            if entry.content.contains(old) {
-                crate::memory::vector_store::remove_vector(&entry.content);
-                entry.content = new.to_string();
-                entry.last_accessed = now;
-                count += 1;
+    }
+    if count > 0 { crate::memory::store::save_user_memory(user_id, &mem); }
+
+    // 群内记忆
+    let groups_dir = crate::config::data_dir().join("memory").join("groups");
+    if let Ok(entries) = std::fs::read_dir(&groups_dir) {
+        for dir_entry in entries.flatten() {
+            if let Ok(gid) = dir_entry.file_name().to_string_lossy().parse::<u64>() {
+                let mut gmem = crate::memory::store::load_group_user_memory(gid, user_id);
+                for entry in &mut gmem.entries {
+                    if entry.content.contains(old) {
+                        crate::memory::vector_store::remove_vector(&entry.content);
+                        entry.content = new.to_string();
+                        entry.last_accessed = now;
+                        count += 1;
+                    }
+                }
+                if count > 0 { crate::memory::store::save_group_user_memory(gid, user_id, &gmem); }
             }
         }
     }
-    if count > 0 { store.save(); debug!(user_id, old, new, count, "memory: corrected entries"); }
+
+    if count > 0 { debug!(user_id, old, new, count, "memory: corrected entries"); }
     count
 }
 
 pub fn forget_all(user_id: u64) {
-    let mut store = MemoryStore::load();
-    if let Some(user) = store.users.remove(&user_id.to_string())
-        && !user.entries.is_empty() {
-            for entry in &user.entries { crate::memory::vector_store::remove_vector(&entry.content); }
-            crate::archive::archive_long_term_memory(user_id, user.entries);
+    let mem = crate::memory::store::load_user_memory(user_id);
+    if !mem.entries.is_empty() {
+        for entry in &mem.entries { crate::memory::vector_store::remove_vector(&entry.content); }
+        crate::archive::archive_long_term_memory(user_id, mem.entries);
+    }
+    crate::memory::store::save_user_memory(user_id, &MemoryFile::default());
+
+    // 清除所有群的群内记忆
+    let groups_dir = crate::config::data_dir().join("memory").join("groups");
+    if let Ok(entries) = std::fs::read_dir(&groups_dir) {
+        for dir_entry in entries.flatten() {
+            if let Ok(gid) = dir_entry.file_name().to_string_lossy().parse::<u64>() {
+                let gmem = crate::memory::store::load_group_user_memory(gid, user_id);
+                if !gmem.entries.is_empty() {
+                    for entry in &gmem.entries { crate::memory::vector_store::remove_vector(&entry.content); }
+                    crate::archive::archive_long_term_memory(user_id, gmem.entries);
+                }
+                crate::memory::store::save_group_user_memory(gid, user_id, &MemoryFile::default());
+            }
         }
-    store.save();
+    }
 }
 
-/// 最近注入的记忆缓存
+// ── 注入冷却 ────────────────────────────────────────────────────
+
 static RECENTLY_INJECTED: std::sync::Mutex<Option<HashMap<String, u64>>> = std::sync::Mutex::new(None);
 const INJECTION_COOLDOWN_SECS: u64 = 1800;
 
-fn is_recently_injected(user_id: u64, content: &str) -> bool {
-    let key = format!("{}:{}", user_id, content);
+fn inject_key(user_id: u64, group_id: u64, content: &str) -> String {
+    format!("{}:{}:{}", user_id, group_id, content)
+}
+
+fn is_recently_injected(user_id: u64, group_id: u64, content: &str) -> bool {
+    let key = inject_key(user_id, group_id, content);
     let guard = RECENTLY_INJECTED.lock().unwrap();
     if let Some(ref map) = *guard && let Some(ts) = map.get(&key) {
         return crate::util::now_secs().saturating_sub(*ts) < INJECTION_COOLDOWN_SECS;
@@ -180,54 +258,35 @@ fn is_recently_injected(user_id: u64, content: &str) -> bool {
     false
 }
 
-fn mark_injected(user_id: u64, content: &str) {
-    let key = format!("{}:{}", user_id, content);
+fn mark_injected(user_id: u64, group_id: u64, content: &str) {
+    let key = inject_key(user_id, group_id, content);
     let mut guard = RECENTLY_INJECTED.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
     map.insert(key, crate::util::now_secs());
 }
 
-/// 判断记忆条目是否应在当前上下文中展示
-pub(crate) fn should_show_entry(entry: &MemoryEntry, current_group_id: u64) -> bool {
-    match entry.group_id as i64 {
-        -1 => current_group_id == 0,        // 私聊标记：只私聊显示
-        0 => true,                           // 传统遗留：到处显示（向后兼容）
-        gid => gid as u64 == current_group_id, // 群特定：只在该群显示
-    }
-}
+// ── 上下文读取 ───────────────────────────────────────────────────
 
-/// 获取用户在指定上下文中的记忆
-///
-/// current_group_id=0: 私聊上下文 — 只展示 legacy + 私聊记忆
-/// current_group_id>0: 群聊上下文 — 只展示 legacy + 该群记忆
-pub fn get_context(user_id: u64, current_group_id: u64) -> String {
-    let store = MemoryStore::load();
-    let user = match store.users.get(&user_id.to_string()) {
-        Some(u) => u,
-        None => return String::new(),
-    };
-    if user.entries.is_empty() { return String::new(); }
-
-    let cfg = &crate::config::get().memory;
+fn collect_entries(
+    entries: &[MemoryEntry],
+    user_id: u64,
+    group_id: u64,
+    cfg: &crate::config::MemoryConfig,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
     let now = crate::util::now_secs();
     let normal_expire = cfg.normal_expire_days * 86400;
     let important_fade = cfg.important_fade_days * 86400;
-    let mut permanent_lines = Vec::new();
-    let mut important_lines = Vec::new();
-    let mut normal_lines = Vec::new();
-    let source_label = if current_group_id > 0 { format!("(来自群{})", current_group_id) } else { "(私聊)".to_string() };
+    let mut permanent = Vec::new();
+    let mut important = Vec::new();
+    let mut normal = Vec::new();
 
-    for entry in &user.entries {
-        // 范围过滤：只展示当前上下文相关的记忆
-        if !should_show_entry(entry, current_group_id) {
-            continue;
-        }
+    for entry in entries {
         if entry.importance == Importance::Normal
             && now.saturating_sub(entry.last_accessed) > normal_expire {
             continue;
         }
         if entry.importance != Importance::Permanent
-            && is_recently_injected(user_id, &entry.content) {
+            && is_recently_injected(user_id, group_id, &entry.content) {
             continue;
         }
         let tag = match entry.importance {
@@ -238,54 +297,72 @@ pub fn get_context(user_id: u64, current_group_id: u64) -> String {
                 else { "" }
             }
         };
+        let formatted = format!("- {}{}", tag, entry.content);
         match entry.importance {
-            Importance::Permanent => permanent_lines.push(format!("- {}{} {}", tag, entry.content, source_label)),
-            Importance::Important => important_lines.push(format!("- {}{} {}", tag, entry.content, source_label)),
-            Importance::Normal => normal_lines.push(format!("- {}{} {}", tag, entry.content, source_label)),
+            Importance::Permanent => permanent.push(formatted),
+            Importance::Important => important.push(formatted),
+            Importance::Normal => normal.push(formatted),
         }
         if entry.importance != Importance::Permanent {
-            mark_injected(user_id, &entry.content);
+            mark_injected(user_id, group_id, &entry.content);
+        }
+    }
+    (permanent, important, normal)
+}
+
+/// 获取用户在指定上下文中的记忆
+///
+/// current_group_id=0  → 只显示全局记忆（私聊）
+/// current_group_id>0  → 显示全局 + 该群特定记忆（群聊）
+pub fn get_context(user_id: u64, current_group_id: u64) -> String {
+    let cfg = &crate::config::get().memory;
+
+    // 全局记忆
+    let global = crate::memory::store::load_user_memory(user_id);
+    let (perm, imp, norm) = collect_entries(&global.entries, user_id, current_group_id, cfg);
+    let mut lines: Vec<String> = Vec::new();
+    lines.extend(perm);
+    lines.extend(imp);
+    lines.extend(norm.into_iter().take(5));
+
+    // 群特定记忆（仅群聊上下文时显示）
+    if current_group_id > 0 {
+        let group_user = crate::memory::store::load_group_user_memory(current_group_id, user_id);
+        let (g_perm, g_imp, g_norm) = collect_entries(&group_user.entries, user_id, current_group_id, cfg);
+        if !g_perm.is_empty() || !g_imp.is_empty() || !g_norm.is_empty() {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push(format!("--- 在群{}中的记忆 ---", current_group_id));
+            for e in g_perm { lines.push(e); }
+            for e in g_imp { lines.push(e); }
+            for e in g_norm.into_iter().take(5) { lines.push(e); }
         }
     }
 
-    let mut lines = permanent_lines;
-    lines.extend(important_lines);
-    lines.extend(normal_lines.into_iter().take(5));
     if lines.is_empty() { return String::new(); }
     format!("# 关于用户{}的记忆\n{}", user_id, lines.join("\n"))
 }
 
 /// 获取群内其他成员的记忆（交叉引用）
-/// 只展示与当前群相关的记忆
 pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
     let participants = crate::working_memory::get_participants(group_id);
     if participants.is_empty() { return String::new(); }
 
-    let store = MemoryStore::load();
-    let now = crate::util::now_secs();
-    let normal_expire = crate::config::get().memory.normal_expire_days * 86400;
+    let cfg = &crate::config::get().memory;
     let mut user_blocks = Vec::new();
 
-    for user_id in &participants {
-        if *user_id == exclude_user { continue; }
-        if let Some(user_mem) = store.users.get(&user_id.to_string()) {
-            let mut lines = Vec::new();
-            for entry in &user_mem.entries {
-                if !should_show_entry(entry, group_id) { continue; }
-                if entry.importance == Importance::Normal
-                    && now.saturating_sub(entry.last_accessed) > normal_expire {
-                    continue;
-                }
-                let tag = match entry.importance {
-                    Importance::Permanent => "[永久]",
-                    Importance::Important => "[重要]",
-                    Importance::Normal => "[普通]",
-                };
-                lines.push(format!("  - {}{}", tag, entry.content));
-            }
-            if !lines.is_empty() {
-                user_blocks.push(format!("用户{}:\n{}", user_id, lines.join("\n")));
-            }
+    for &uid in &participants {
+        if uid == exclude_user || uid == 0 { continue; }
+
+        let global = crate::memory::store::load_user_memory(uid);
+        let group_user = crate::memory::store::load_group_user_memory(group_id, uid);
+        let (_, _, mut lines) = collect_entries(&global.entries, uid, group_id, cfg);
+        let (_, _, mut g_lines) = collect_entries(&group_user.entries, uid, group_id, cfg);
+        lines.append(&mut g_lines);
+
+        if !lines.is_empty() {
+            user_blocks.push(format!("用户{}:\n{}", uid, lines.join("\n")));
         }
     }
 
@@ -293,18 +370,15 @@ pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
     format!("# 群内其他成员的记忆\n{}", user_blocks.join("\n"))
 }
 
-/// 获取群组级别的记忆（群氛围、共同话题等）
+/// 获取群级别记忆（groups/{gid}/group.json）
 pub fn get_group_level_context(group_id: u64) -> String {
-    let store = MemoryStore::load();
-    let entries = match store.group_memories.get(&group_id.to_string()) {
-        Some(e) => e,
-        None => return String::new(),
-    };
-    let lines: Vec<String> = entries.iter().map(|e| {
-        format!("- {}", e.content)
-    }).collect();
+    let mem = crate::memory::store::load_group_memory(group_id);
+    if mem.entries.is_empty() { return String::new(); }
+    let lines: Vec<String> = mem.entries.iter().map(|e| format!("- {}", e.content)).collect();
     format!("# 群记忆\n{}", lines.join("\n"))
 }
+
+// ── 命令识别 ────────────────────────────────────────────────────
 
 pub fn check_forget_command(user_id: u64, message: &str) -> Option<String> {
     let forget_patterns = ["忘掉", "忘记", "不要记", "别记"];
@@ -315,21 +389,8 @@ pub fn check_forget_command(user_id: u64, message: &str) -> Option<String> {
                 .replace("我刚才说的", "").replace("刚才说的", "").replace("刚才说", "")
                 .trim().to_string();
             if content.is_empty() {
-                let mut store = MemoryStore::load();
-                let user = store.get_user_mut(user_id);
-                let mut archived = Vec::new();
-                let mut remaining = Vec::new();
-                for entry in user.entries.drain(..) {
-                    if entry.importance == Importance::Permanent { remaining.push(entry); }
-                    else { archived.push(entry); }
-                }
-                user.entries = remaining;
-                if !archived.is_empty() {
-                    for entry in &archived { crate::memory::vector_store::remove_vector(&entry.content); }
-                    crate::archive::archive_long_term_memory(user_id, archived);
-                }
-                store.save();
-                return Some("已清除近期记忆".to_string());
+                forget_all(user_id);
+                return Some("已清除相关记忆".to_string());
             } else {
                 let result = forget(user_id, &content);
                 return Some(result.join("\n"));
