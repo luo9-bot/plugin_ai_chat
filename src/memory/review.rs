@@ -9,13 +9,15 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
         return;
     }
 
-    // 构建对话文本（只包含用户消息，不含 bot 自身回复，防止把 bot 的话归因到用户）
+    // 构建对话文本（保持完整的对话上下文，用 [bot] 和 [user] 区分发言者）
     let conversation: Vec<String> = history
         .iter()
         .rev()
         .take(10)
-        .filter(|(role, _)| role == "user")
-        .map(|(_, content)| format!("[用户] {}", content))
+        .map(|(role, content)| {
+            let who = if role == "user" { "用户" } else { "bot" };
+            format!("[{}] {}", who, content)
+        })
         .collect();
     if conversation.is_empty() {
         return;
