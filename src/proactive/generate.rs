@@ -41,9 +41,17 @@ pub fn ai_generate_message(
         ctx.push(format!("# 关于用户 user_id:{}\n{}", user_id, mem));
     }
 
-    // 包含 bot 自己的历史回复（因为 raw_send_msg 中会 record_bot_reply）
+    // 你自己刚才在群里说过的话（防止重复说一样的内容）
+    let self_qq = config::get().self_qq;
+    if self_qq > 0 && group_id > 0 {
+        let self_recent = read_shared_state(|s| s.get_recent_bot_messages(group_id, 600, 3));
+        if !self_recent.is_empty() {
+            ctx.push(format!("# 你自己刚才说过的话（仅参考，不要重复）\n{}", self_recent.join("\n")));
+        }
+    }
+
+    // 群聊最近消息（排除 bot 自身，防止自我引用幻觉）
     if group_id > 0 {
-        // 使用排除 bot 自身消息的上下文，防止自我引用幻觉
         let wm = working_memory::get_context_no_self(group_id, 3600);
         if !wm.is_empty() {
             ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
@@ -60,7 +68,6 @@ pub fn ai_generate_message(
     }
 
     // 活动安排（如果 bot 正在做什么）
-    let self_qq = config::get().self_qq;
     if self_qq > 0 {
         if let Some(activity) = crate::activity::get_active_activity(self_qq) {
             let act_str = match activity.activity {

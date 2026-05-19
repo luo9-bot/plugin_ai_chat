@@ -16,22 +16,30 @@ use super::generate::{generate_mood_message, generate_greeting};
 static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, Vec<(String, u64)>>>> = Mutex::new(None);
 
 /// 同群去重冷却时间（秒）
-const GROUP_MSG_COOLDOWN_SECS: u64 = 1200;
+const GROUP_MSG_COOLDOWN_SECS: u64 = 3600;
 
 /// 保留的最近消息数量
-const RECENT_MSG_KEEP: usize = 5;
+const RECENT_MSG_KEEP: usize = 15;
 
-/// 提取消息的"指纹"：取前 8 个非空白字符用于去重
+/// 提取消息的"指纹"：取前 6 个非空白字符用于去重
+/// "出去走走好了" → "出去走走"（6 字符）
+/// "出去走走" → "出去走走"（匹配）
 fn content_fingerprint(msg: &str) -> String {
     let cleaned: String = msg.chars()
         .filter(|c| !c.is_whitespace() && *c != '，' && *c != '。' && *c != '~' && *c != '|')
         .collect();
-    cleaned.chars().take(8).collect()
+    cleaned.chars().take(6).collect()
+}
+
+/// 检查两条指纹是否相似（互相包含或完全相同）
+fn fingerprints_similar(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    a == b || a.contains(b) || b.contains(a)
 }
 
 /// 检查消息是否与近期发送过的消息相似
-///
-/// 两条消息只要有相同的前 8 个有效字符即视为重复
 fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     let fp = content_fingerprint(msg);
     if fp.is_empty() {
@@ -43,7 +51,7 @@ fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     {
         let now = crate::util::now_secs();
         for (recent_fp, recent_time) in msgs {
-            if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && recent_fp == &fp {
+            if now.saturating_sub(*recent_time) < GROUP_MSG_COOLDOWN_SECS && fingerprints_similar(recent_fp, &fp) {
                 return true;
             }
         }
