@@ -294,15 +294,20 @@ pub fn proactive_message_tool() -> Tool {
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "要发送的消息内容，简短口语化。如果没什么想说的就留空。"
-                    },
                     "skip": {
                         "type": "boolean",
                         "description": "是否跳过不说话。true = 没什么好说的，不发送任何消息。false = 有话说。"
+                    },
+                    "distinct_from_recent": {
+                        "type": "string",
+                        "description": "必填。对比「你自己刚才说过的话」，解释你即将发送的消息和最近发过的有什么不同。如果内容基本一样或只是换了个说法，请设置 skip=true 而不是填这个字段。"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "要发送的消息内容，简短口语化。只有 skip=false 时才需要填。"
                     }
-                }
+                },
+                "required": ["skip", "distinct_from_recent"]
             }),
         },
     }
