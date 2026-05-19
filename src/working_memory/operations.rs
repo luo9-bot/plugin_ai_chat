@@ -253,15 +253,17 @@ pub fn group_count() -> usize {
     store.groups.len()
 }
 
-/// 获取某群最近参与过的用户列表 (用于群组记忆互通)
+/// 获取群内活跃参与者列表（不含 bot 自身）
 pub fn get_participants(group_id: u64) -> Vec<u64> {
     let store = WorkingMemoryStore::load();
     let now = crate::util::now_secs();
+    let self_qq = crate::config::get().self_qq;
     store.groups
         .get(&group_id.to_string())
         .map(|group| {
             let mut users: Vec<u64> = group.entries.iter()
                 .filter(|e| now.saturating_sub(e.timestamp) < 7200) // 最近2小时
+                .filter(|e| self_qq == 0 || e.user_id != self_qq) // 排除 bot 自身
                 .map(|e| e.user_id)
                 .collect();
             users.sort_unstable();

@@ -591,18 +591,12 @@ fn do_post_conversation_reflection(group_id: u64) {
 
     let self_qq = config::get().self_qq;
 
-    // 过滤掉 bot 自己的消息，防止自我引用产生的幻觉记忆
-    let user_entries: Vec<&working_memory::Entry> = entries.iter()
-        .filter(|e| self_qq == 0 || e.user_id != self_qq)
-        .collect();
-
-    if user_entries.is_empty() {
-        return;
-    }
-
-    let recent_context: Vec<String> = user_entries.iter().map(|e| {
+    // 全部消息都展示，但用 [bot] 和 [user_id:XXX] 清晰区分谁说了什么
+    let recent_context: Vec<String> = entries.iter().map(|e| {
+        let is_self = self_qq > 0 && e.user_id == self_qq;
+        let who = if is_self { "bot".to_string() } else { format!("user_id:{}", e.user_id) };
         let tag = if e.bot_replied { "[已回复]" } else { "[未回复]" };
-        format!("[用户{}]{} {}", e.user_id, tag, e.content)
+        format!("[{}]{} {}", who, tag, e.content)
     }).collect();
     let context_text = recent_context.join("\n");
 

@@ -9,13 +9,17 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
         return;
     }
 
-    // 构建对话文本
+    // 构建对话文本（只包含用户消息，不含 bot 自身回复，防止把 bot 的话归因到用户）
     let conversation: Vec<String> = history
         .iter()
         .rev()
         .take(10)
-        .map(|(role, content)| format!("[{}] {}", role, content))
+        .filter(|(role, _)| role == "user")
+        .map(|(_, content)| format!("[用户] {}", content))
         .collect();
+    if conversation.is_empty() {
+        return;
+    }
     let conversation_text = conversation.join("\n");
 
     // 尝试 AI 摘要

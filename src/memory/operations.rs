@@ -45,6 +45,13 @@ fn queue_embedding(content: &str) {
 }
 
 pub fn add(user_id: u64, content: &str, importance: Importance) {
+    // 安全防护：防止将 bot 自身的消息错误存储为用户记忆
+    let self_qq = crate::config::get().self_qq;
+    if self_qq > 0 && user_id == self_qq {
+        debug!(user_id, content = %content.chars().take(40).collect::<String>(), "memory: skipped (self_qq)");
+        return;
+    }
+
     let mut store = MemoryStore::load();
     let now = crate::util::now_secs();
     let user = store.get_user_mut(user_id);
