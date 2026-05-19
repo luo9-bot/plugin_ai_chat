@@ -311,15 +311,16 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     let bg_final = final_reply.clone();
                     let bg_history = history.clone();
                     let bg_uid = user_id;
+                    let bg_gid = group_id;
                     std::thread::spawn(move || {
                         // 人物事实自动回写：从对话中提取用户事实
                         crate::person_info::extract_facts_from_conversation(bg_uid, &bg_ai_msg, &bg_final);
 
                         // 记忆提取：分析对话内容，提取值得记忆的信息
-                        crate::memory::ai_extract(bg_uid, &bg_ai_msg, &bg_final, &bg_history);
+                        crate::memory::ai_extract(bg_uid, bg_gid, &bg_ai_msg, &bg_final, &bg_history);
 
                         // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
-                        crate::memory::auto_summarize(bg_uid, &bg_history);
+                        crate::memory::auto_summarize(bg_uid, bg_gid, &bg_history);
                     });
                 }
                 Err(e) => {

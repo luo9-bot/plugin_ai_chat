@@ -53,7 +53,7 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
                 .map_or(true, |&last| now.saturating_sub(last) >= SEMANTIC_SEARCH_COOLDOWN)
         };
         if should_search {
-            let relevant = crate::memory::search_memories(user_id, last_user_msg, 5);
+            let relevant = crate::memory::search_memories(user_id, group_id, last_user_msg, 5);
             if !relevant.is_empty() {
                 let rel_lines: Vec<String> = relevant.iter().map(|r| {
                     format!("- {}", r.content)
@@ -66,7 +66,7 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     }
 
     // 记忆上下文（全量，但受冷却控制）
-    let mem = memory::get_context(user_id);
+    let mem = memory::get_context(user_id, group_id);
     if !mem.is_empty() {
         parts.push(mem);
     }

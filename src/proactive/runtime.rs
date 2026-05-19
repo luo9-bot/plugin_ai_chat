@@ -183,7 +183,7 @@ pub fn check_date_reminders(user_id: u64, state: &ProactiveState) -> Option<Stri
         }
     }
 
-    let mem_ctx = crate::memory::get_context(user_id);
+    let mem_ctx = crate::memory::get_context(user_id, 0);
     if mem_ctx.contains("生日") && today.ends_with("-01") {
         return Some("新的一月开始了，有什么计划吗？".to_string());
     }

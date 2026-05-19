@@ -15,16 +15,16 @@ pub use operations::*;
 pub use extract::*;
 pub use review::*;
 
-/// 初始化记忆系统（JSON 元数据 + 二进制向量文件 + 知识图谱）
+/// 初始化记忆系统
 pub fn init(_data_dir: &std::path::Path) {
     store::MemoryStore::load();
-    vector_store::init();
-    graph::init();
-    debug!("memory: JSON store + vectors.bin + graph initialized");
 }
 
 /// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
-pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval::RetrievalResult> {
+///
+/// current_group_id=0: 只检索私聊相关的记忆
+/// current_group_id>0: 只检索该群相关的记忆
+pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: usize) -> Vec<retrieval::RetrievalResult> {
     let store = MemoryStore::load();
     let user_mem = match store.users.get(&user_id.to_string()) {
         Some(m) => m,
@@ -35,6 +35,7 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         .entries
         .iter()
         .enumerate()
+        .filter(|(_, entry)| operations::should_show_entry(entry, current_group_id))
         .map(|(i, entry)| (format!("{}_{}", user_id, i), entry.content.clone()))
         .collect();
 
@@ -42,7 +43,6 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         return Vec::new();
     }
 
-    // 从向量存储中按 content 匹配提取已有 embeddings
     let vector_map = vector_store::all_vectors();
     let mut embeddings: Vec<(String, Vec<f32>)> = Vec::with_capacity(documents.len());
     let mut missing_indices: Vec<usize> = Vec::new();
@@ -55,7 +55,6 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         }
     }
 
-    // 只对缺失的文档生成 embedding，而非全量重做
     if !missing_indices.is_empty() && crate::config::get().embedding.enabled() {
         let missing_texts: Vec<String> = missing_indices.iter()
             .map(|&i| documents[i].1.clone())
@@ -70,12 +69,10 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
         }
     }
 
-    // 没有可用向量时，降级为纯 BM25
     if embeddings.is_empty() {
         return dual_path_bm25_only(query, &documents, top_k);
     }
 
-    // 配置完整检索 pipeline
     let config = retrieval::RetrievalConfig {
         top_k,
         vector_weight: 0.7,
@@ -99,7 +96,6 @@ pub fn search_memories(user_id: u64, query: &str, top_k: usize) -> Vec<retrieval
     results
 }
 
-/// 纯 BM25 降级检索（当无可用向量时）
 fn dual_path_bm25_only(query: &str, documents: &[(String, String)], top_k: usize) -> Vec<retrieval::RetrievalResult> {
     let results = retrieval::bm25::search(query, documents, top_k * 2);
     results.into_iter().take(top_k).map(|r| {

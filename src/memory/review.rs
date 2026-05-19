@@ -3,7 +3,7 @@ use tracing::{debug, info};
 use super::operations::add;
 use super::store::{Importance, MemoryEntry, MemoryStore};
 
-pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
+pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)]) {
     let threshold = crate::config::get().memory.auto_summarize_threshold;
     if history.len() < threshold {
         return;
@@ -30,11 +30,10 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
         Ok(summary) => {
             let summary = summary.trim();
             if !summary.is_empty() && summary.len() > 10 {
-                add(user_id, &format!("曾谈论: {}", summary), Importance::Normal);
+                add(user_id, group_id, &format!("曾谈论: {}", summary), Importance::Normal);
             }
         }
         Err(_) => {
-            // fallback: 简单拼接
             let recent: Vec<&str> = history
                 .iter()
                 .rev()
@@ -45,7 +44,7 @@ pub fn auto_summarize(user_id: u64, history: &[(String, String)]) {
             if recent.len() >= 3 {
                 let summary = recent.join("; ");
                 if summary.len() > 20 {
-                    add(user_id, &format!("曾谈论: {}", summary), Importance::Normal);
+                    add(user_id, group_id, &format!("曾谈论: {}", summary), Importance::Normal);
                 }
             }
         }
@@ -164,6 +163,7 @@ pub fn ai_review_all() {
                             user.entries.push(MemoryEntry {
                                 content: content.to_string(),
                                 importance,
+                                group_id: 0,
                                 created: now,
                                 last_accessed: now,
                                 access_count: 1,

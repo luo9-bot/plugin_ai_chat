@@ -646,7 +646,7 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
     }
     let personality = personality::get_prompt_context();
     if !personality.is_empty() { context_parts.push(personality); }
-    let mem = memory::get_context(0);
+    let mem = memory::get_context(0, group_id);
     if !mem.is_empty() { context_parts.push(mem); }
 
     let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
@@ -669,7 +669,7 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
                         "important" => memory::Importance::Important,
                         _ => memory::Importance::Normal,
                     };
-                    memory::add(user_id, memory_content, importance);
+                    memory::add(user_id, group_id, memory_content, importance);
                 }
                 debug!(group_id, count = relevant.len(), "review_conversation: memories extracted");
             }

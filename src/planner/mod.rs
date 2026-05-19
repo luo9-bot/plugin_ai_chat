@@ -149,7 +149,7 @@ impl PlannerLoopEngine {
                 let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
                 let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if uid == 0 { return "错误：未提供 user_id".into(); }
-                let results = crate::memory::search_memories(uid, query, 10);
+                let results = crate::memory::search_memories(uid, ctx.group_id, query, 10);
                 if results.is_empty() {
                     format!("用户 {} 没有相关记忆（查询: {}）", uid, query)
                 } else {
@@ -163,7 +163,7 @@ impl PlannerLoopEngine {
             "query_person_info" => {
                 let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
                 if uid == 0 { return "错误：未提供 user_id".into(); }
-                let m = crate::memory::get_context(uid);
+                let m = crate::memory::get_context(uid, ctx.group_id);
                 if m.is_empty() { format!("用户 {} 没有已知的人物信息", uid) } else { m }
             }
             "send_sticker" => {

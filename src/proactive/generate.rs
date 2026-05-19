@@ -36,7 +36,7 @@ pub fn ai_generate_message(
     }
 
     // 关于用户的记忆
-    let mem = memory::get_context(user_id);
+    let mem = memory::get_context(user_id, group_id);
     if !mem.is_empty() {
         ctx.push(format!("# 关于用户 user_id:{}\n{}", user_id, mem));
     }
