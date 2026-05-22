@@ -47,6 +47,19 @@ pub fn ai_generate_message(
         if !wm.is_empty() {
             ctx.push(format!("# 群聊最近动态 (group_id:{})\n{}", group_id, wm));
         }
+
+        // 从工作记忆中单独提取你刚才说过的话，放在显眼位置让 AI 看到
+        let self_qq = crate::config::get().self_qq;
+        if self_qq > 0 {
+            let entries = working_memory::get_recent(group_id, 600, 15);
+            let bot_lines: Vec<String> = entries.iter()
+                .filter(|e| e.user_id == self_qq)
+                .map(|e| format!("  \"{}\"", e.content))
+                .collect();
+            if !bot_lines.is_empty() {
+                ctx.push(format!("# 你刚才在群里说过的话（不要重复这些）\n{}", bot_lines.join("\n")));
+            }
+        }
     } else if group_id == 0 {
         // 私聊：从对话历史中获取最近几轮对话，让 AI 知道聊到哪了
         let history = read_shared_state(|s| s.get_history_clone(0, user_id));

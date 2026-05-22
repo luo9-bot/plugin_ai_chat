@@ -21,22 +21,34 @@ const GROUP_MSG_COOLDOWN_SECS: u64 = 3600;
 /// 保留的最近消息数量
 const RECENT_MSG_KEEP: usize = 15;
 
-/// 提取消息的"指纹"：取前 6 个非空白字符用于去重
-/// "出去走走好了" → "出去走走"（6 字符）
-/// "出去走走" → "出去走走"（匹配）
+/// 提取消息的"指纹"：取前 12 个非空白字符用于去重
 fn content_fingerprint(msg: &str) -> String {
     let cleaned: String = msg.chars()
-        .filter(|c| !c.is_whitespace() && *c != '，' && *c != '。' && *c != '~' && *c != '|')
+        .filter(|c| !c.is_whitespace() && *c != '，' && *c != '。' && *c != '~' && *c != '|' && *c != '^')
         .collect();
-    cleaned.chars().take(6).collect()
+    cleaned.chars().take(12).collect()
 }
 
-/// 检查两条指纹是否相似（互相包含或完全相同）
+/// 检查两条指纹是否相似
+///
+/// 策略：
+/// 1. 完全相同 → 重复
+/// 2. 互相包含 → 重复
+/// 3. 字符级重叠度 >= 60% → 重复（防"豆还在播呢"≈"豆还在播啊"）
 fn fingerprints_similar(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a == b || a.contains(b) || b.contains(a)
+    // 完全相同或互相包含
+    if a == b || a.contains(b) || b.contains(a) {
+        return true;
+    }
+    // 字符级重叠度检查：短指纹适合字符级别，长指纹做 bigram
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    let short_chars: std::collections::HashSet<char> = short.chars().collect();
+    let shared = long.chars().filter(|c| short_chars.contains(c)).count();
+    let overlap_ratio = shared as f64 / long.chars().count() as f64;
+    overlap_ratio >= 0.6
 }
 
 /// 检查消息是否与近期发送过的消息相似
