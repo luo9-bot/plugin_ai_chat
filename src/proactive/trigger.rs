@@ -57,6 +57,8 @@ fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     if fp.is_empty() {
         return false;
     }
+
+    // 检查 1: RECENT_GROUP_MESSAGES 缓存（同一群内跨用户去重）
     let guard = RECENT_GROUP_MESSAGES.lock().unwrap();
     if let Some(ref map) = *guard
         && let Some(msgs) = map.get(&group_id)
@@ -68,6 +70,23 @@ fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
             }
         }
     }
+    drop(guard);
+
+    // 检查 2: 工作记忆中 bot 自己最近 600 秒的消息
+    // 覆盖任何发送路径（对话回复、氛围消息等），跨用户彻底去重
+    let self_qq = crate::config::get().self_qq;
+    if self_qq > 0 {
+        let recent = crate::working_memory::get_recent(group_id, 600, 20);
+        for entry in &recent {
+            if entry.user_id == self_qq {
+                let entry_fp = content_fingerprint(&entry.content);
+                if fingerprints_similar(&entry_fp, &fp) {
+                    return true;
+                }
+            }
+        }
+    }
+
     false
 }
 

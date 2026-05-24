@@ -479,13 +479,16 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             return Ok(wrapped);
         }
 
-        // 情况 6: proactive_message — { skip: false, distinct_from_recent: "", message: text }
+        // 情况 6: proactive_message
         if tool.function.name == "proactive_message" {
-            let wrapped = serde_json::json!({
-                "skip": false,
-                "distinct_from_recent": "fallback: ai直接输出文本",
-                "message": text
-            });
+            let trimmed = text.trim();
+            let meaningless = ["没什么要说的", "没有想说的", "没什么想说的", "安静待着", "该安静", "没什么好说的", "不想说话", "先不说了", "先不说话", "下次再说", "不用说话", "不说了", "就不说了"];
+            if trimmed.is_empty() || meaningless.iter().any(|p| trimmed.contains(p)) {
+                let wrapped = serde_json::json!({"skip": true, "distinct_from_recent": "ai判断没什么好说的，选择沉默", "message": ""});
+                debug!("try_wrap_text_for_tools: wrapped as proactive_message (skip)");
+                return Ok(wrapped);
+            }
+            let wrapped = serde_json::json!({"skip": false, "distinct_from_recent": "fallback: ai直接输出文本", "message": text});
             debug!("try_wrap_text_for_tools: wrapped as proactive_message");
             return Ok(wrapped);
         }
