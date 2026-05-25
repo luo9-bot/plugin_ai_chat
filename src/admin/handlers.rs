@@ -972,22 +972,39 @@ pub fn handle_backups(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
             }
         }
         Method::Post => {
-            // POST /api/backups/restore
             let body_val: serde_json::Value = match parse_json(body) {
                 Ok(v) => v,
                 Err(e) => return err(400, &e),
             };
-            let data_type = match body_val.get("type").and_then(|v| v.as_str()) {
-                Some(t) => t,
-                None => return err(400, "type required"),
-            };
-            let filename = match body_val.get("filename").and_then(|v| v.as_str()) {
-                Some(f) => f,
-                None => return err(400, "filename required"),
-            };
-            match backup::restore(data_type, filename) {
-                Ok(()) => ok(serde_json::json!({"ok": true})),
-                Err(e) => err(400, &e),
+            let action = body_val.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            let data_type = body_val.get("type").and_then(|v| v.as_str()).unwrap_or("self_memory");
+            match action {
+                "create" => {
+                    backup::before_modify(data_type);
+                    ok(serde_json::json!({"ok": true}))
+                }
+                "restore" => {
+                    let filename = match body_val.get("filename").and_then(|v| v.as_str()) {
+                        Some(f) => f,
+                        None => return err(400, "filename required"),
+                    };
+                    match backup::restore(data_type, filename) {
+                        Ok(()) => ok(serde_json::json!({"ok": true})),
+                        Err(e) => err(400, &e),
+                    }
+                }
+                "delete" => {
+                    let filename = match body_val.get("filename").and_then(|v| v.as_str()) {
+                        Some(f) => f,
+                        None => return err(400, "filename required"),
+                    };
+                    let backup_path = config::data_dir().join("backups").join(data_type).join(filename);
+                    if backup_path.exists() {
+                        std::fs::remove_file(&backup_path).ok();
+                    }
+                    ok(serde_json::json!({"ok": true}))
+                }
+                _ => err(400, "unknown action: use create, restore, or delete"),
             }
         }
         _ => err(405, "method not allowed"),

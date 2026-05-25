@@ -2,15 +2,13 @@
   <div>
     <div class="config-layout">
       <div class="config-nav glass-card">
-        <div class="nav-group" v-for="group in sections" :key="group.id">
-          <div class="nav-group-label">{{ group.label }}</div>
-          <a v-for="sec in group.items" :key="sec.id"
-             :class="{ active: activeSection === sec.id }"
-             @click="activeSection = sec.id"
-             class="nav-item">
+        <div class="nav-section" v-for="sec in sections" :key="sec.id">
+          <div class="nav-item"
+            :class="{ active: activeSection === sec.id }"
+            @click="activeSection = sec.id">
             <span class="nav-dot" :style="{ background: sec.color }"></span>
             {{ sec.label }}
-          </a>
+          </div>
         </div>
       </div>
 
@@ -355,7 +353,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 @media (max-width: 768px) {
   .config-layout { flex-direction: column; }
   .config-nav { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: 4px; }
-  .nav-group { margin-bottom: 8px; min-width: 100%; }
-  .nav-group .nav-item { display: inline-flex; margin: 2px; }
+  .nav-section { display: inline; }
+  .nav-section .nav-item { display: inline-flex; margin: 2px; }
 }
 </style>

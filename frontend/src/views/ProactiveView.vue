@@ -101,8 +101,8 @@ async function toggleEnabled() {
   if (!config.value) return
   const newVal = !config.value.enabled
   try {
-    await api('/api/proactive/config/enable', {
-      method: 'POST',
+    await api('/api/proactive/config', {
+      method: 'PUT',
       body: JSON.stringify({ enabled: newVal })
     })
     config.value.enabled = newVal

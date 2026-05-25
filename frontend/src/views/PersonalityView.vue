@@ -42,18 +42,21 @@ async function load() {
   try {
     const d = await api('/api/personality')
     current.value = d.current || {}
-    snapshots.value = d.snapshots ? Object.keys(d.snapshots) : []
-    // Try to extract template names from personality.json or defaults
-    templates.value = snapshots.value.length ? snapshots.value : ['default']
+    if (d.snapshots) {
+      snapshots.value = Object.keys(d.snapshots)
+      templates.value = snapshots.value.length ? snapshots.value : ['default']
+    } else {
+      templates.value = ['default']
+    }
   } catch {}
 }
 async function switchTo(t) {
-  try { await api('/api/personality/load/' + encodeURIComponent(t), { method: 'POST' }) } catch (e) { alert('切换失败: ' + e.message) }
+  try { await api('/api/personality/snapshots/' + encodeURIComponent(t) + '/load', { method: 'POST' }) } catch (e) { alert('切换失败: ' + e.message) }
   load()
 }
 async function saveSnap() {
   if (!snapName.value) return
-  try { await api('/api/personality/save/' + encodeURIComponent(snapName.value), { method: 'POST' }); snapName.value = ''; load() }
+  try { await api('/api/personality/snapshots', { method: 'POST', body: JSON.stringify({ name: snapName.value }) }); snapName.value = ''; load() }
   catch (e) { alert('保存失败: ' + e.message) }
 }
 
