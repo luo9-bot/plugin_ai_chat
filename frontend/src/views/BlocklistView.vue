@@ -1,23 +1,19 @@
 <template>
   <div>
-    <div class="section-grid">
-      <div class="glass-card">
-        <div class="card-header"><h3>黑名单</h3><button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button></div>
-        <div v-if="!list.length" class="empty">暂无黑名单用户</div>
-        <div v-else class="card-list">
-          <div v-for="(u, i) in list" :key="i" class="list-item">
-            <span class="mono">{{ u }}</span>
-            <button class="btn btn-ghost btn-xs" @click="remove(u)">移除</button>
-          </div>
+    <div class="glass-card">
+      <div class="card-header">
+        <h3>黑名单管理</h3>
+        <div class="header-actions">
+          <input v-model="addId" placeholder="输入 QQ 号添加" class="glass-input" style="width:160px" />
+          <button class="btn btn-primary btn-sm" @click="addUser" :disabled="!addId.trim()">＋ 添加</button>
+          <button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button>
         </div>
       </div>
-      <div class="glass-card">
-        <div class="card-header"><h3>防注入</h3></div>
-        <div class="config-grid">
-          <div class="config-item"><label>输入长度限制</label><span>{{ config?.input?.max_message_length || 2000 }}</span></div>
-          <div class="config-item"><label>敏感操作</label><span>{{ config?.input?.sensitive_action || 'replace' }}</span></div>
-          <div class="config-item"><label>速率限制</label><span>{{ config?.behavior?.rate_limit ? '🟢 开启' : '🔴 关闭' }}</span></div>
-          <div class="config-item"><label>自动封禁</label><span>{{ config?.behavior?.auto_ban ? '🟢 开启' : '🔴 关闭' }}</span></div>
+      <div v-if="!list.length" class="empty">暂无黑名单用户</div>
+      <div v-else class="chip-list">
+        <div v-for="(u, i) in list" :key="i" class="chip">
+          <span class="mono">{{ u }}</span>
+          <button class="chip-close" @click="remove(u)">✕</button>
         </div>
       </div>
     </div>
@@ -29,34 +25,39 @@ import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
 
 const list = ref([])
-const config = ref(null)
+const addId = ref('')
 
 async function load() {
   try {
     const d = await api('/api/blocklist')
     list.value = d.list || []
-    config.value = await api('/api/anti-injection')
   } catch {}
 }
 async function remove(id) { await api('/api/blocklist/' + id + '/remove', { method: 'POST' }); load() }
+async function addUser() {
+  if (!addId.value.trim()) return
+  await api('/api/blocklist/' + addId.value.trim() + '/add', { method: 'POST' })
+  addId.value = ''
+  load()
+}
+
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 
 <style scoped>
-.section-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
-.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
-.empty { text-align: center; padding: 24px; color: var(--text-3); }
+.header-actions { display: flex; gap: 6px; align-items: center; }
+.glass-input { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-primary { background: var(--primary); color: white; }
 .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
-.btn-xs { padding: 3px 8px; font-size: 11px; }
-.card-list { display: flex; flex-direction: column; gap: 2px; }
-.list-item { display: flex; align-items: center; justify-content: space-between; padding: 8px; border-radius: var(--radius-xs); }
-.list-item:hover { background: var(--surface-hover); }
+.empty { text-align: center; padding: 32px; color: var(--text-3); }
+.chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--surface-hover); border-radius: 20px; font-size: 13px; }
+.chip-close { background: none; border: none; cursor: pointer; color: var(--text-3); font-size: 12px; padding: 0; }
+.chip-close:hover { color: var(--danger); }
 .mono { font-family: monospace; font-size: 13px; }
-.config-grid { display: flex; flex-direction: column; gap: 8px; }
-.config-item { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--glass-border); }
-.config-item label { color: var(--text-2); font-weight: 500; }
 </style>
