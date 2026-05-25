@@ -4,6 +4,7 @@ use tracing::{debug, info};
 
 use crate::emotion;
 use crate::sender;
+use crate::with_shared_state;
 
 use super::runtime::{
     effective_config, load_state, pseudo_random, record_sent,
@@ -105,6 +106,13 @@ fn record_group_message(group_id: u64, msg: &str) {
     }
 }
 
+/// 将主动消息写入用户对话历史，让 AI 知道自己说过什么
+fn push_proactive_to_history(group_id: u64, user_id: u64, msg: &str) {
+    if group_id == 0 || user_id == 0 { return; }
+    let max_pairs = crate::config::get().conversation.max_history;
+    with_shared_state(|s| s.push_history(group_id, user_id, "assistant", msg, max_pairs));
+}
+
 pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     info!(user_id, group_id, "proactive: 检查主动消息");
     let (enabled, quiet_start, quiet_end, interval, max_ignore, low_mood_mult) = effective_config();
@@ -138,6 +146,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         if sender::safe_send_quiet(group_id, user_id, &reminder_msg) {
             record_sent(user_id, group_id);
             record_group_message(group_id, &reminder_msg);
+            push_proactive_to_history(group_id, user_id, &reminder_msg);
         }
         return;
     }
@@ -184,6 +193,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
                 if sender::safe_send_quiet(group_id, user_id, &msg) {
                     record_sent(user_id, group_id);
                     record_group_message(group_id, &msg);
+                    push_proactive_to_history(group_id, user_id, &msg);
                 }
             }
             crate::activity::clear_life_event(&life_event);
@@ -222,6 +232,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             if sender::safe_send_quiet(group_id, user_id, &msg) {
                 record_sent(user_id, group_id);
                 record_group_message(group_id, &msg);
+                push_proactive_to_history(group_id, user_id, &msg);
             }
             return;
         }
@@ -250,6 +261,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         if sender::safe_send_quiet(group_id, user_id, &msg) {
             record_sent(user_id, group_id);
             record_group_message(group_id, &msg);
+            push_proactive_to_history(group_id, user_id, &msg);
         }
     } else {
         tracing::debug!(
