@@ -9,6 +9,7 @@ pub use runtime::{
     ProactiveState, DateReminder, RuntimeConfig,
     user_count, record_user_reply, record_sent, add_date_reminder,
     set_enabled, set_quiet_hours, set_interval,
+    get_group_last_sent,
 };
 
 // trigger.rs

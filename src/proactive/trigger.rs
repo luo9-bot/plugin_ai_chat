@@ -120,6 +120,14 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         return;
     }
 
+    // 群级节流：不管哪个 user_id 触发的，只要这个群最近发过消息就跳过
+    let group_sent = crate::proactive::get_group_last_sent(group_id);
+    let group_cooldown = interval / 2;
+    if group_id > 0 && group_sent > 0 && now.saturating_sub(group_sent) < group_cooldown {
+        tracing::debug!(user_id, group_id, elapsed = now.saturating_sub(group_sent), group_cooldown, "proactive: group cooldown, skipping");
+        return;
+    }
+
     // 日期提醒 -- 最高优先级
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
         if is_duplicate_message(group_id, &reminder_msg) {
