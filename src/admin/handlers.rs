@@ -1378,6 +1378,27 @@ pub fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<V
     }
 }
 
+// ── 日程计划 ──────────────────────────────────────────────────
+
+pub fn handle_schedule() -> Response<std::io::Cursor<Vec<u8>>> {
+    let weekly = crate::schedule::load_weekly_plan();
+    let monthly = crate::schedule::load_monthly_plan();
+    let pushes = crate::schedule::check_plan_push();
+
+    ok(serde_json::json!({
+        "weekly": {
+            "week_start": weekly.week_start,
+            "goals": weekly.goals,
+            "week_reflection": weekly.week_reflection,
+        },
+        "monthly": {
+            "month": monthly.month,
+            "goals": monthly.goals,
+        },
+        "pushes": pushes,
+    }))
+}
+
 // ── 对话管理 ──────────────────────────────────────────────────
 
 pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
