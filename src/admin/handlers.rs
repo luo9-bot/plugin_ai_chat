@@ -1380,6 +1380,12 @@ pub fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<V
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
+pub fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
+    ok(crate::tracking::UsageStore::summary())
+}
+
+// ── 日程计划 ──────────────────────────────────────────────────
+
 pub fn handle_schedule() -> Response<std::io::Cursor<Vec<u8>>> {
     let weekly = crate::schedule::load_weekly_plan();
     let monthly = crate::schedule::load_monthly_plan();

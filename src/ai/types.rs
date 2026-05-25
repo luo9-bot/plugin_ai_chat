@@ -62,6 +62,19 @@ pub(crate) struct ChatMessage {
 #[derive(Deserialize)]
 pub(crate) struct ChatResponse {
     pub choices: Vec<ChatChoice>,
+    #[serde(default)]
+    pub usage: Option<Usage>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    #[serde(default)]
+    pub prompt_cache_hit_tokens: u32,
+    #[serde(default)]
+    pub prompt_cache_miss_tokens: u32,
 }
 
 #[derive(Deserialize)]

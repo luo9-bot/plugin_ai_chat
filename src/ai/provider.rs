@@ -3,6 +3,17 @@ use crate::config;
 use super::types::{ChatMessage, ChatRequest, ChatResponse, Tool, MemoryCorrection, PostAnalysis};
 use super::tools::post_analyze_tool;
 
+/// 记录 token 用量
+fn track_usage(body: &ChatResponse, prompt_name: &str, model: &str) {
+    if let Some(ref u) = body.usage {
+        crate::tracking::UsageStore::record_call(
+            prompt_name, model,
+            u.prompt_tokens, u.completion_tokens, u.total_tokens,
+            u.prompt_cache_hit_tokens, u.prompt_cache_miss_tokens,
+        );
+    }
+}
+
 /// 创建不把 HTTP 错误状态码当作 ureq Error 的 Agent
 /// 这样 4xx/5xx 响应体可以被正常读取，用于排查 API 错误原因
 fn no_error_agent() -> ureq::Agent {
@@ -170,6 +181,7 @@ pub fn chat(
 
     let body: ChatResponse = serde_json::from_str(&resp_str)
         .map_err(|e| format!("API parse failed: {}", e))?;
+    track_usage(&body, "chat", &cfg.model);
 
     let choice = body
         .choices
@@ -244,6 +256,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
 
     let body: ChatResponse = serde_json::from_str(&resp_str)
         .map_err(|e| format!("API parse failed: {}", e))?;
+    track_usage(&body, "analyze", &cfg.model);
 
     let choice = body
         .choices
@@ -358,6 +371,8 @@ pub fn analyze_with_tools(
 
         let body: ChatResponse = serde_json::from_str(&resp_str)
             .map_err(|e| format!("API parse failed: {}", e))?;
+        let prompt_name = tools_summary.first().copied().unwrap_or("analysis");
+        track_usage(&body, prompt_name, &cfg.model);
 
         let choice = body
             .choices
@@ -558,6 +573,8 @@ pub fn analyze_with_tools_named(
 
         let body: ChatResponse = serde_json::from_str(&resp_str)
             .map_err(|e| format!("API parse failed: {}", e))?;
+        let pn = tools.first().map(|t| t.function.name.as_str()).unwrap_or("named");
+        track_usage(&body, pn, &cfg.model);
 
         let choice = body
             .choices

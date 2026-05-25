@@ -108,6 +108,7 @@ import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
 import ScheduleView from './views/ScheduleView.vue'
+import AnalyticsView from './views/AnalyticsView.vue'
 
 const I = {
   dashboard: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M2 10a8 8 0 1116 0H2zm2 0a6 6 0 0112 0H4zm2 0a4 4 0 018 0H6zm2 0a2 2 0 014 0H8z" fill="currentColor"/></svg>',
@@ -129,6 +130,7 @@ const I = {
   backups: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M4 4h12v12H4V4z" stroke="currentColor" stroke-width="1.5"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   sync: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M14.5 5.5A6.5 6.5 0 104 10.5M14.5 2v3.5H11M5.5 14.5A6.5 6.5 0 0016 9.5M5.5 18V14.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   schedule: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="4" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 8h14M7 1v3M13 1v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  analytics: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M2 10a8 8 0 1116 0H2zm2 0a6 6 0 0112 0H4zm2 0a4 4 0 018 0H6zm2 0a2 2 0 014 0H8z" fill="currentColor"/><path d="M10 2v8l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
 }
 
 const loggedIn = ref(false)
@@ -142,6 +144,7 @@ const isDark = ref(false)
 
 const tabs = [
   { id: 'dashboard', name: '仪表盘', icon: I.dashboard, desc: '系统总览与关键指标', comp: DashboardView },
+  { id: 'analytics', name: 'Token 分析', icon: I.analytics, desc: 'API 用量与 Prompt 统计', comp: AnalyticsView },
   { id: 'schedule', name: '日程计划', icon: I.schedule, desc: '周/月计划管理', comp: ScheduleView },
   { id: 'config', name: '配置', icon: I.config, desc: 'Bot 与 AI 参数', comp: ConfigView },
   { id: 'conversations', name: '对话管理', icon: I.conversations, desc: '活跃会话控制', comp: ConversationsView },

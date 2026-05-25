@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod admin;
+pub mod tracking;
 pub mod ai;
 pub mod anti_injection;
 pub mod archive;
