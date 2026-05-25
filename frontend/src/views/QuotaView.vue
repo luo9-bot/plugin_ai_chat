@@ -1,130 +1,43 @@
 <template>
   <div>
-    <h3>配额追踪</h3>
-
-    <!-- 用户兴趣 -->
-    <h3>🎯 用户兴趣</h3>
-    <div v-if="!Object.keys(interest).length" class="empty">暂无兴趣数据</div>
-    <table v-else>
-      <thead><tr><th>用户</th><th>兴趣分</th><th>标记次数</th><th>最后回顾</th><th>最后消息</th></tr></thead>
-      <tbody>
-        <tr v-for="(info, uid) in interest" :key="uid">
-          <td class="mono">{{ uid }}</td>
-          <td>
-            <div class="bar-wrap">
-              <div class="bar-fill" :style="{ width: (info.score * 100) + '%' }"></div>
-              <span class="bar-label">{{ (info.score * 100).toFixed(0) }}%</span>
-            </div>
-          </td>
-          <td>{{ info.marked_count }}</td>
-          <td>{{ fmtTime(info.last_reviewed) }}</td>
-          <td>{{ fmtTime(info.last_message) }}</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- 段历史 -->
-    <h3>📋 段历史</h3>
-    <div class="toolbar">
-      <select v-model="selectedGroup" @change="loadSegments">
-        <option value="">选择群聊</option>
-        <option v-for="g in groups" :key="g" :value="g">群 {{ g }}</option>
-      </select>
+    <div class="glass-card">
+      <div class="card-header"><h3>配额</h3><button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button></div>
+      <div v-if="!quotas" class="empty">加载中...</div>
+      <div v-else class="quota-grid">
+        <div v-for="(v, k) in quotas" :key="k" class="quota-card">
+          <div class="quota-id mono">{{ k }}</div>
+          <div class="quota-bars">
+            <div class="quota-row"><label>分钟</label><div class="bar-wrap"><div class="bar" :style="{ width: Math.min((v.minute || 0) / 20 * 100, 100) + '%', background: '#6366f1' }"></div></div><span class="mono">{{ v.minute || 0 }}/20</span></div>
+            <div class="quota-row"><label>小时</label><div class="bar-wrap"><div class="bar" :style="{ width: Math.min((v.hour || 0) / 200 * 100, 100) + '%', background: '#8b5cf6' }"></div></div><span class="mono">{{ v.hour || 0 }}/200</span></div>
+          </div>
+        </div>
+        <div v-if="!Object.keys(quotas).length" class="empty" style="padding:32px">暂无配额数据</div>
+      </div>
     </div>
-    <div v-if="!selectedGroup" class="empty">请选择群聊查看段历史</div>
-    <div v-else-if="!segments.length" class="empty">暂无段记录</div>
-    <table v-else>
-      <thead><tr><th>时间</th><th>总消息</th><th>已回复</th><th>跳过</th><th>已回顾</th><th></th></tr></thead>
-      <tbody>
-        <template v-for="seg in segments" :key="seg.segment_start">
-          <tr @click="toggleExpand(seg.segment_start)" class="clickable">
-            <td>{{ fmtTime(seg.segment_start) }}</td>
-            <td>{{ seg.messages.length }}</td>
-            <td class="replied">{{ seg.messages.filter(m => m.replied).length }}</td>
-            <td class="skipped">{{ seg.messages.filter(m => !m.replied).length }}</td>
-            <td>{{ seg.reviewed ? '✅' : '⏳' }}</td>
-            <td>{{ expanded === seg.segment_start ? '▼' : '▶' }}</td>
-          </tr>
-          <tr v-if="expanded === seg.segment_start" class="detail-row">
-            <td colspan="6">
-              <table class="inner-table">
-                <thead><tr><th>用户</th><th>消息</th><th>状态</th><th>原因</th></tr></thead>
-                <tbody>
-                  <tr v-for="(m, i) in seg.messages" :key="i">
-                    <td class="mono">{{ m.user_id }}</td>
-                    <td class="msg-text">{{ truncate(m.message, 60) }}</td>
-                    <td><span :class="m.replied ? 'tag-replied' : 'tag-skipped'">{{ m.replied ? '已回复' : '跳过' }}</span></td>
-                    <td class="reason">{{ m.reason || '-' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
   </div>
 </template>
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
-
-const groups = ref([])
-const selectedGroup = ref('')
-const segments = ref([])
-const interest = ref({})
-const expanded = ref(null)
-
-function fmtTime(ts) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN')
-}
-function truncate(s, n) {
-  if (!s) return ''
-  return s.length > n ? s.slice(0, n) + '...' : s
-}
-function toggleExpand(segStart) {
-  expanded.value = expanded.value === segStart ? null : segStart
-}
-
-async function loadGroups() {
-  const data = await api('/api/quota/segments')
-  groups.value = data.groups || []
-}
-async function loadSegments() {
-  if (!selectedGroup.value) { segments.value = []; return }
-  const data = await api('/api/quota/segments/' + selectedGroup.value)
-  segments.value = data.segments || []
-}
-async function loadInterest() {
-  const data = await api('/api/quota/interest')
-  interest.value = data.users || {}
-}
-
-onMounted(() => { loadGroups(); loadInterest() })
+const quotas = ref(null)
+async function load() { try { quotas.value = await api('/api/quota') } catch {} }
+onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 <style scoped>
-h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
-h3 { font-size: 14px; margin: 24px 0 8px; color: var(--text-dim); }
-.toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
-.toolbar select { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px; }
-th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
-th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-tr:hover { background: var(--surface2); }
-.clickable { cursor: pointer; }
-.mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
-.empty { text-align: center; padding: 40px; color: var(--text-dim); }
-.replied { color: var(--success); font-weight: 600; }
-.skipped { color: var(--text-dim); }
-.detail-row td { padding: 0; background: var(--surface); }
-.inner-table { box-shadow: none; margin: 0; }
-.inner-table th { background: var(--surface2); font-size: 11px; }
-.msg-text { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reason { color: var(--text-dim); font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag-replied { background: var(--success); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-.tag-skipped { background: var(--border); color: var(--text-dim); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-.bar-wrap { position: relative; width: 100px; height: 20px; background: var(--surface); border-radius: 10px; overflow: hidden; }
-.bar-fill { height: 100%; background: linear-gradient(90deg, #ec4899, #8b5cf6); border-radius: 10px; transition: width 0.3s; }
-.bar-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--text); }
+.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.card-header h3 { font-size: 15px; font-weight: 600; }
+.btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.empty { text-align: center; padding: 24px; color: var(--text-3); }
+.quota-grid { display: flex; flex-direction: column; gap: 12px; }
+.quota-card { padding: 12px; border-radius: var(--radius-sm); background: var(--surface-hover); }
+.quota-id { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.quota-bars { display: flex; flex-direction: column; gap: 6px; }
+.quota-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.quota-row label { width: 28px; color: var(--text-2); }
+.bar-wrap { flex: 1; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }
+.bar { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 </style>

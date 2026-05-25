@@ -1,41 +1,62 @@
 <template>
   <div>
-    <h3>黑名单</h3>
-    <div class="toolbar">
-      <input v-model="newUid" placeholder="输入 QQ 号" style="width:160px" @keydown.enter="addBlock" />
-      <button class="btn btn-danger" @click="addBlock">🚫 拉黑</button>
+    <div class="section-grid">
+      <div class="glass-card">
+        <div class="card-header"><h3>黑名单</h3><button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button></div>
+        <div v-if="!list.length" class="empty">暂无黑名单用户</div>
+        <div v-else class="card-list">
+          <div v-for="(u, i) in list" :key="i" class="list-item">
+            <span class="mono">{{ u }}</span>
+            <button class="btn btn-ghost btn-xs" @click="remove(u)">移除</button>
+          </div>
+        </div>
+      </div>
+      <div class="glass-card">
+        <div class="card-header"><h3>防注入</h3></div>
+        <div class="config-grid">
+          <div class="config-item"><label>输入长度限制</label><span>{{ config?.input?.max_message_length || 2000 }}</span></div>
+          <div class="config-item"><label>敏感操作</label><span>{{ config?.input?.sensitive_action || 'replace' }}</span></div>
+          <div class="config-item"><label>速率限制</label><span>{{ config?.behavior?.rate_limit ? '🟢 开启' : '🔴 关闭' }}</span></div>
+          <div class="config-item"><label>自动封禁</label><span>{{ config?.behavior?.auto_ban ? '🟢 开启' : '🔴 关闭' }}</span></div>
+        </div>
+      </div>
     </div>
-    <div v-if="!list.length" class="empty">😊 黑名单为空</div>
-    <table v-else><thead><tr><th>用户 ID</th><th>操作</th></tr></thead><tbody>
-      <tr v-for="u in list" :key="u">
-        <td class="mono">{{ u }}</td>
-        <td><button class="btn btn-success btn-sm" @click="removeBlock(u)">移除</button></td>
-      </tr>
-    </tbody></table>
   </div>
 </template>
+
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
+
 const list = ref([])
-const newUid = ref('')
-async function load() { const d = await api('/api/blocklist'); list.value = d.blocked || [] }
-async function addBlock() { const uid = parseInt(newUid.value); if (!uid) return; await api('/api/blocklist', { method: 'POST', body: JSON.stringify({ user_id: uid }) }); newUid.value = ''; load() }
-async function removeBlock(uid) { if (!confirm(`确定将 ${uid} 移出黑名单？`)) return; await api('/api/blocklist/' + uid, { method: 'DELETE' }); load() }
-onMounted(load)
+const config = ref(null)
+
+async function load() {
+  try {
+    const d = await api('/api/blocklist')
+    list.value = d.list || []
+    config.value = await api('/api/anti-injection')
+  } catch {}
+}
+async function remove(id) { await api('/api/blocklist/' + id + '/remove', { method: 'POST' }); load() }
+onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
+
 <style scoped>
-h2 { font-size: 18px; margin-bottom: 16px; font-weight: 600; }
-.toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
-.toolbar input { background: var(--surface); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; outline: none; }
-.toolbar input:focus { border-color: var(--accent); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
-th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--accent-light); }
-th { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-.mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
-.empty { text-align: center; padding: 40px; color: var(--text-dim); }
-.btn { border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 4px; }
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-success { background: var(--success); color: #fff; }
-.btn-sm { padding: 5px 12px; font-size: 11px; }
+.section-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.card-header h3 { font-size: 15px; font-weight: 600; }
+.empty { text-align: center; padding: 24px; color: var(--text-3); }
+.btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-xs { padding: 3px 8px; font-size: 11px; }
+.card-list { display: flex; flex-direction: column; gap: 2px; }
+.list-item { display: flex; align-items: center; justify-content: space-between; padding: 8px; border-radius: var(--radius-xs); }
+.list-item:hover { background: var(--surface-hover); }
+.mono { font-family: monospace; font-size: 13px; }
+.config-grid { display: flex; flex-direction: column; gap: 8px; }
+.config-item { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--glass-border); }
+.config-item label { color: var(--text-2); font-weight: 500; }
 </style>
