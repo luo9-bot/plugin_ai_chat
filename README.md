@@ -145,6 +145,102 @@ blacklist: []
 auto_start_users: []
 ```
 
+## 记忆系统架构
+
+记忆以文件目录结构组织，按来源自动隔离，启动时自动从旧 `memory.json` 迁移。
+
+```
+data/plugin_ai_chat/memory/
+  users/
+    512166443.json     ← 用户 512166443 的「全局记忆」
+                          （私聊来的 + 跨群共享的事实，群聊/私聊都显示）
+
+  groups/
+    676426335/
+      group.json       ← 群聊级别的记忆（氛围/共同话题）
+                          只在群 676426335 中显示
+      512166443.json   ← 512166443 在群 676426335 里的特定记忆
+                          只在群 676426335 中显示
+      2950726483.json  ← 2950726483 在群 676426335 里的特定记忆
+                          只在群 676426335 中显示
+```
+
+### 记忆隔离规则
+
+| 记忆来源 | 群聊上下文 (group_id=G) | 私聊上下文 (group_id=0) |
+|---|---|---|
+| 私聊对话（group_id=0） | ❌ 不显示 | ✅ 显示 |
+| 群 G 中提取 | ✅ 只在群 G 显示 | ❌ 不显示 |
+| 群 A 中提取 | ❌ 不在群 B 显示 | ❌ 不显示 |
+
+### 语义检索
+
+向量数据库（`vectors.bin`）按 content 字符串索引，与文件存储独立。`search_memories(uid, group_id, query, top_k)` 同时检索全局记忆和当前群特定记忆。
+
+### 三层写入路径
+
+| 写入场景 | group_id 来源 | 落盘位置 |
+|---|---|---|
+| AI 提取 / 对话摘要 | 当前对话的群 ID | `groups/{gid}/{uid}.json` |
+| 反思审查 | 被审查群的 ID | `groups/{gid}/{uid}.json` |
+| 用户说"记住" | 硬编码 0 | `users/{uid}.json` |
+| 私聊对话 | 自动为 0 | `users/{uid}.json` |
+
+## 核心架构
+
+### 消息处理流程
+
+```
+QQ 消息到达
+  ↓
+lib.rs 主循环 → handle_group_msg / handle_private_msg
+  ↓
+（不入队，直接返回）
+  ↓
+process_expired_batches() ← 每隔 500ms+ 检查过期批次
+  ↓
+私聊 → process_message(user_id, group_id=0)
+群聊 → batch.rs 串行队列 → timing_gate 决策 → process_message
+  ↓
+process_message 中:
+  私聊 → ai::chat(prompt, context, history, message)
+  群聊 → planner::run_planner() → replyer::generate_reply()
+  ↓
+anti_injection 输出检查 → 发送 → 后处理（记忆提取/摘要）
+```
+
+### 群聊 vs 私聊
+
+| 特性 | 群聊 (group_id > 0) | 私聊 (group_id == 0) |
+|---|---|---|
+| 对话历史 | 按 (group_id, user_id) 存储 | 按 (0, user_id) 存储 |
+| 决策路径 | Planner → Replyer（多轮工具调用） | 直接 `ai::chat` |
+| Timing Gate | 冷却/配额/决策 | 不使用 |
+| 工作记忆 | 群内所有用户消息流 | 私聊消息流 |
+| 主动消息 | 检查 + 触发，群级冷却 | 检查 + 触发，需用户回复 |
+| 上下文标签 | `[bot]` / `[user_id:XXX]` / 时间戳 | `history` 消息数组 |
+
+### Planner 工具
+
+| 工具 | 说明 |
+|---|---|
+| `reply` | 正式发送可见回复 |
+| `finish` | 结束本轮推理，不回复 |
+| `query_memory` | 查询用户长期记忆（自动按当前群过滤） |
+| `query_person_info` | 查询用户人物档案（自动按当前群过滤） |
+| `tool_search` | 搜索可用的延迟工具 |
+| `send_sticker` | 【延迟工具】发送表情包 |
+
+### 自我反思系统
+
+定期执行三层思考：
+
+| 类型 | 触发条件 | 产出 |
+|---|---|---|
+| 对话后反思 | 对话结束一段时间后 | 内心想法 + 记忆审查 |
+| 长时间对话定期审查 | 对话进行中，距上次审查已过间隔 | 记忆整合/修正 |
+| 定时空闲反思 | 全局间隔（默认 1 小时） | 群画像 + 内心想法 |
+
 ## 免责声明
 
 ### 作者立场
@@ -206,4 +302,4 @@ auto_start_users: []
 
 ---
 
-**最后更新：2026年5月9日**
+**最后更新：2026年5月25日**
