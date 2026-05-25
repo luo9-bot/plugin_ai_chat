@@ -98,7 +98,6 @@ import StickerView from './views/StickerView.vue'
 import SelfThoughts from './views/SelfThoughts.vue'
 import UserMemory from './views/UserMemory.vue'
 import WorkingMemory from './views/WorkingMemory.vue'
-import PersonalityView from './views/PersonalityView.vue'
 import EmotionView from './views/EmotionView.vue'
 import MentalState from './views/MentalState.vue'
 import ProactiveView from './views/ProactiveView.vue'
@@ -120,7 +119,6 @@ const I = {
   'self-thoughts': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a7 7 0 00-7 7c0 1.5.5 2.9 1.3 4L3 17l4-1.3A7 7 0 1010 2z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>',
   memory: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M5 3h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="currentColor" stroke-width="1.5"/><path d="M8 7h4M8 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   'working-memory': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M4 4h12v12H4V4z" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h6M7 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-  personality: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="10" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   emotion: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 8a.5.5 0 100-1 .5.5 0 000 1zM13.5 8a.5.5 0 100-1 .5.5 0 000 1z" fill="currentColor"/><path d="M7 12.5c.8 1 2 1.5 3 1.5s2.2-.5 3-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   'mental-state': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a4 4 0 00-4 4c0 2 1 3 1 4s-.5 2-2 3c1.5 0 3-.5 4-1v2a4 4 0 008-2c0-2-1.5-3-2-5s0-3-2-4a4 4 0 00-3-1z" stroke="currentColor" stroke-width="1.5"/></svg>',
   proactive: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a7 7 0 017 7v3l2 2H3l2-2v-3a7 7 0 017-7z" stroke="currentColor" stroke-width="1.5"/></svg>',
@@ -153,7 +151,6 @@ const tabs = [
   { id: 'self-thoughts', name: '自我记忆', icon: I['self-thoughts'], desc: '内心想法', comp: SelfThoughts },
   { id: 'memory', name: '用户记忆', icon: I.memory, desc: '长期记忆', comp: UserMemory },
   { id: 'working-memory', name: '工作记忆', icon: I['working-memory'], desc: '短期工作记忆', comp: WorkingMemory },
-  { id: 'personality', name: '人格', icon: I.personality, desc: '人设与快照', comp: PersonalityView },
   { id: 'emotion', name: '情绪', icon: I.emotion, desc: '情绪状态', comp: EmotionView },
   { id: 'mental-state', name: '心理状态', icon: I['mental-state'], desc: 'Bot 心理', comp: MentalState },
   { id: 'proactive', name: '主动对话', icon: I.proactive, desc: '主动消息', comp: ProactiveView },
@@ -167,8 +164,8 @@ const tabs = [
 const navGroups = computed(() => [
   { label: '概览', items: tabs.slice(0, 2) },
   { label: '管理', items: tabs.slice(2, 6) },
-  { label: '数据', items: tabs.slice(6, 9) },
-  { label: '状态', items: tabs.slice(9, 13) },
+  { label: '数据', items: tabs.slice(6, 10) },
+  { label: '状态', items: tabs.slice(10, 13) },
   { label: '系统', items: tabs.slice(13) },
 ])
 

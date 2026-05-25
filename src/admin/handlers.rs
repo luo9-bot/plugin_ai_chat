@@ -558,141 +558,7 @@ pub fn handle_working_memory(method: &Method, segs: &[&str], _body: &[u8]) -> Re
     }
 }
 
-// ── Handler: 人格 ──────────────────────────────────────────────
 
-pub fn handle_personality(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
-    let path = config::data_dir().join("personality.json");
-    match method {
-        Method::Get => {
-            if segs.first() == Some(&"snapshots") {
-                let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-                let store: serde_json::Value =
-                    serde_json::from_str(&data).unwrap_or(serde_json::json!({}));
-                let snapshots = store
-                    .get("snapshots")
-                    .and_then(|v| v.as_object())
-                    .map(|o| o.keys().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default();
-                return ok(serde_json::json!({"snapshots": snapshots}));
-            }
-            let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let mut store: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!({}));
-            // 文件不存在时填充默认值
-            if store.get("current").is_none() {
-                store["current"] = serde_json::json!({
-                    "name": "default",
-                    "template": "default",
-                    "traits": {
-                        "humor": 0.5, "warmth": 0.6, "curiosity": 0.5,
-                        "formality": 0.3, "verbosity": 0.4, "empathy": 0.6
-                    },
-                    "custom_prompt": ""
-                });
-            }
-            if store.get("snapshots").is_none() {
-                store["snapshots"] = serde_json::json!({});
-            }
-            ok(store)
-        }
-        Method::Put => {
-            let body_val: serde_json::Value = match parse_json(body) {
-                Ok(v) => v,
-                Err(e) => return err(400, &e),
-            };
-            backup::before_modify("personality");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
-            if let Some(current) = body_val.get("current") {
-                store["current"] = current.clone();
-            }
-            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-            ok(serde_json::json!({"ok": true}))
-        }
-        Method::Post => {
-            // POST /api/personality/snapshots -> 保存快照
-            // POST /api/personality/snapshots/{name}/load -> 加载快照
-            if segs.first() == Some(&"snapshots") {
-                if segs.len() >= 3 && segs.get(2) == Some(&"load") {
-                    let name = segs[1];
-                    backup::before_modify("personality");
-                    let mut store: serde_json::Value = serde_json::from_str(
-                        &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-                    )
-                    .unwrap_or(serde_json::json!({}));
-                    let snapshot = store
-                        .get("snapshots")
-                        .and_then(|s| s.get(name))
-                        .cloned();
-                    if let Some(snap) = snapshot {
-                        store["current"] = snap;
-                        std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                        return ok(serde_json::json!({"ok": true}));
-                    }
-                    return err(404, "snapshot not found");
-                }
-                // 保存当前为快照
-                let body_val: serde_json::Value = match parse_json(body) {
-                    Ok(v) => v,
-                    Err(e) => return err(400, &e),
-                };
-                let name = match body_val.get("name").and_then(|v| v.as_str()) {
-                    Some(n) if !n.is_empty() => n,
-                    _ => return err(400, "name required"),
-                };
-                backup::before_modify("personality");
-                let mut store: serde_json::Value = serde_json::from_str(
-                    &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-                )
-                .unwrap_or(serde_json::json!({}));
-                let current = store.get("current").cloned().unwrap_or(serde_json::json!({
-                    "name": "default", "template": "default",
-                    "traits": {"humor": 0.5, "warmth": 0.6, "curiosity": 0.5, "formality": 0.3, "verbosity": 0.4, "empathy": 0.6},
-                    "custom_prompt": ""
-                }));
-                if store.get("snapshots").is_none() {
-                    store["snapshots"] = serde_json::json!({});
-                }
-                let snapshots = store
-                    .get_mut("snapshots")
-                    .and_then(|v| v.as_object_mut())
-                    .unwrap();
-                snapshots.insert(name.to_string(), current);
-                std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                return ok(serde_json::json!({"ok": true}));
-            }
-            err(400, "invalid path")
-        }
-        Method::Delete => {
-            // DELETE /api/personality/snapshots/{name}
-            if segs.first() == Some(&"snapshots") {
-                let name = match segs.get(1) {
-                    Some(n) => *n,
-                    None => return err(400, "snapshot name required"),
-                };
-                backup::before_modify("personality");
-                let mut store: serde_json::Value = serde_json::from_str(
-                    &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-                )
-                .unwrap_or(serde_json::json!({}));
-                let snapshots = store
-                    .get_mut("snapshots")
-                    .and_then(|v| v.as_object_mut())
-                    .unwrap();
-                if snapshots.remove(name).is_some() {
-                    std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                    ok(serde_json::json!({"ok": true}))
-                } else {
-                    err(404, "snapshot not found")
-                }
-            } else {
-                err(400, "invalid path")
-            }
-        }
-        _ => err(405, "method not allowed"),
-    }
-}
 
 // ── Handler: 情绪 ──────────────────────────────────────────────
 
@@ -1217,7 +1083,24 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
                 ok(serde_json::json!({"groups": groups}))
             }
         }
-        _ => err(404, "not found"),
+        _ => {
+            // API quota 配置
+            let cfg = &config::get().quota;
+            let interest = crate::quota::get_all_interest();
+            let users: serde_json::Map<String, serde_json::Value> = interest.iter()
+                .map(|(uid, i)| (uid.to_string(), serde_json::json!({
+                    "score": i.score,
+                    "marked_count": i.marked_count,
+                    "last_reviewed": i.last_reviewed,
+                })))
+                .collect();
+            ok(serde_json::json!({
+                 "enabled": cfg.enabled,
+                 "segment_minutes": cfg.segment_minutes,
+                 "segments": cfg.segments,
+                 "users": users,
+             }))
+        }
     }
 }
 

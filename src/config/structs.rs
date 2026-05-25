@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // ── 顶层配置 ────────────────────────────────────────────────────
 
@@ -566,7 +566,7 @@ impl Default for BehaviorConfig {
 
 // ── 配额配置 ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct QuotaConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -576,7 +576,7 @@ pub struct QuotaConfig {
     pub segments: Vec<QuotaSegment>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct QuotaSegment {
     pub start_hour: u32,
     pub end_hour: u32,

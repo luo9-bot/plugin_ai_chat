@@ -149,7 +149,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"self-thoughts") => handlers::handle_self_thoughts(&method, &api_segs[1..], &body),
         Some(&"memory") => handlers::handle_memory(&method, &api_segs[1..], &body),
         Some(&"working-memory") => handlers::handle_working_memory(&method, &api_segs[1..], &body),
-        Some(&"personality") => handlers::handle_personality(&method, &api_segs[1..], &body),
+        Some(&"backups") => handlers::handle_backups(&method, &api_segs[1..], &body),
         Some(&"emotion") => handlers::handle_emotion(&method, &api_segs[1..], &body),
         Some(&"mental-state") => handlers::handle_mental_state(&method, &api_segs[1..], &body),
         Some(&"blocklist") => handlers::handle_blocklist(&method, &api_segs[1..], &body),
