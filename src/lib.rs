@@ -441,6 +441,24 @@ fn check_periodic() {
         do_daily_plan_generation();
     }
 
+    // 周计划检查 (每周一自动生成)
+    if schedule::check_and_generate_weekly_plan() {
+        do_weekly_plan_generation();
+    }
+
+    // 月计划检查 (每月1号自动生成)
+    if schedule::check_and_generate_monthly_plan() {
+        do_monthly_plan_generation();
+    }
+
+    // 计划推动：检查今天有没有该做的任务
+    let pushes = schedule::check_plan_push();
+    for push in &pushes {
+        debug!(content = %push, "schedule: plan push");
+        // 把推动内容加入自我记忆，主动消息会读取并自然带出来
+        self_memory::add(push, self_memory::ThoughtCategory::Plan);
+    }
+
     // 对话后反思: 对话结束一段时间后回顾刚结束的对话
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
@@ -573,6 +591,84 @@ fn do_daily_plan_generation() {
         Err(e) => {
             debug!(error = %e, "daily plan generation failed");
         }
+    }
+}
+
+/// 生成周计划
+fn do_weekly_plan_generation() {
+    let user_prompt = config::prompt();
+    if user_prompt.is_empty() { return; }
+
+    let context = format!(
+        "{}\n\n{}\n\n# 最近的想法\n{}",
+        user_prompt,
+        crate::prompt::PromptManager::get().raw("weekly_plan"),
+        self_memory::get_context(5),
+    );
+
+    match ai::analyze_with_tools(
+        &context,
+        "制定本周计划",
+        &[ai::weekly_plan_tool()],
+        Some(serde_json::json!("auto")),
+    ) {
+        Ok(parsed) => {
+            if let Some(goals) = parsed.get("goals").and_then(|g| g.as_array()) {
+                let mut plan = schedule::load_weekly_plan();
+                for goal in goals {
+                    if let (Some(content), Some(target_day)) = (
+                        goal.get("content").and_then(|c| c.as_str()),
+                        goal.get("target_day").and_then(|d| d.as_str()),
+                    ) {
+                        plan.goals.push(schedule::WeeklyGoal {
+                            content: content.to_string(),
+                            target_day: target_day.to_string(),
+                            completed: false,
+                        });
+                    }
+                }
+                schedule::save_weekly_plan(&plan);
+                debug!(count = plan.goals.len(), "weekly plan generated");
+            }
+        }
+        Err(e) => debug!(error = %e, "weekly plan generation failed"),
+    }
+}
+
+/// 生成月计划
+fn do_monthly_plan_generation() {
+    let user_prompt = config::prompt();
+    if user_prompt.is_empty() { return; }
+
+    let context = format!(
+        "{}\n\n{}\n\n# 最近的想法\n{}",
+        user_prompt,
+        crate::prompt::PromptManager::get().raw("monthly_plan"),
+        self_memory::get_context(5),
+    );
+
+    match ai::analyze_with_tools(
+        &context,
+        "制定本月计划",
+        &[ai::monthly_plan_tool()],
+        Some(serde_json::json!("auto")),
+    ) {
+        Ok(parsed) => {
+            if let Some(goals) = parsed.get("goals").and_then(|g| g.as_array()) {
+                let mut plan = schedule::load_monthly_plan();
+                for goal in goals {
+                    if let Some(content) = goal.as_str() {
+                        plan.goals.push(schedule::MonthlyGoal {
+                            content: content.to_string(),
+                            completed: false,
+                        });
+                    }
+                }
+                schedule::save_monthly_plan(&plan);
+                debug!(count = plan.goals.len(), "monthly plan generated");
+            }
+        }
+        Err(e) => debug!(error = %e, "monthly plan generation failed"),
     }
 }
 

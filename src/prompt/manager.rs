@@ -131,6 +131,8 @@ impl PromptManager {
             ("mental_state_generate", include_str!("../../defaults/mental_state_generate.prompt")),
             ("vision_describe", include_str!("../../defaults/vision_describe.prompt")),
             ("daily_plan", include_str!("../../defaults/daily_plan.prompt")),
+            ("weekly_plan", include_str!("../../defaults/weekly_plan.prompt")),
+            ("monthly_plan", include_str!("../../defaults/monthly_plan.prompt")),
             ("learn_style", include_str!("../../defaults/learn_style.prompt")),
             ("sticker_content_filtration", include_str!("../../defaults/sticker_content_filtration.prompt")),
             ("sticker_select", include_str!("../../defaults/sticker_select.prompt")),

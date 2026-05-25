@@ -376,3 +376,54 @@ pub fn mental_state_generate_tool() -> Tool {
         },
     }
 }
+
+/// 周计划生成工具
+pub fn weekly_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "weekly_plan".to_string(),
+            description: "制定本周计划".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "goals": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": { "type": "string", "description": "目标内容" },
+                                "target_day": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], "description": "分配到哪一天" }
+                            },
+                            "required": ["content", "target_day"]
+                        },
+                        "description": "本周目标列表，3-5个"
+                    }
+                },
+                "required": ["goals"]
+            }),
+        },
+    }
+}
+
+/// 月计划生成工具
+pub fn monthly_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "monthly_plan".to_string(),
+            description: "制定本月计划".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "goals": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "本月目标列表，2-4个"
+                    }
+                },
+                "required": ["goals"]
+            }),
+        },
+    }
+}

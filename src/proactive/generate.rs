@@ -91,6 +91,11 @@ pub fn ai_generate_message(
         if !schedule_ctx.is_empty() {
             ctx.push(schedule_ctx);
         }
+        // 周/月计划上下文（加入推动内容，让 AI 看到今天该做什么）
+        let plan_ctx = crate::schedule::get_plan_context();
+        if !plan_ctx.is_empty() {
+            ctx.push(plan_ctx);
+        }
         // 生命事件上下文：按触发类型添加说明
         if !extra_life_event_ctx.is_empty() {
             ctx.push(format!("# 你刚经历的事\n{}", extra_life_event_ctx));

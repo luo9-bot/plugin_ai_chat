@@ -91,3 +91,35 @@ pub fn now_formatted_cst() -> String {
     let (year, month, day) = epoch_days_to_ymd(days as u64);
     format!("{:02}:{:02}:{:02} ({}年{}月{}日)", hour, minute, second, year, month, day)
 }
+
+/// 时间戳 → 日期字符串 "YYYY-MM-DD"
+pub fn ts_to_date_str(secs: u64) -> String {
+    let local_secs = secs as i64 + 8 * 3600;
+    let days = (local_secs / 86400) as u64;
+    let (y, m, d) = epoch_days_to_ymd(days);
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// 时间戳 → 月份字符串 "YYYY-MM"
+pub fn ts_to_month_str(secs: u64) -> String {
+    let local_secs = secs as i64 + 8 * 3600;
+    let days = (local_secs / 86400) as u64;
+    let (y, m, _) = epoch_days_to_ymd(days);
+    format!("{:04}-{:02}", y, m)
+}
+
+/// 当前 UTC+8 星期几（1=周一, 7=周日）
+pub fn current_weekday_cst() -> u32 {
+    let secs = now_secs() as i64 + 8 * 3600;
+    let days = (secs / 86400) as u64;
+    // 1970-01-01 是周四
+    let weekday = ((days + 3) % 7) as u32;
+    if weekday == 0 { 7 } else { weekday }
+}
+
+/// 当前 UTC+8 英文星期几
+pub fn current_weekday_eng() -> String {
+    let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    let idx = (current_weekday_cst() - 1) as usize;
+    names[idx].to_string()
+}
