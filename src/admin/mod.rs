@@ -171,6 +171,9 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
         Some(&"sticker") => {
             match api_segs.get(1).copied() {
+                Some(hash) if api_segs.get(2).copied() == Some("image") => {
+                    handlers::handle_sticker_image(hash)
+                }
                 Some("image") => {
                     if let Some(hash) = api_segs.get(2).copied() {
                         handlers::handle_sticker_image(hash)

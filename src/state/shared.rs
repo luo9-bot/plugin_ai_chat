@@ -7,6 +7,8 @@ pub struct UserContext {
     pub history: Vec<(String, String)>,
     /// 当前情绪标签 (由 AI 回复中解析)
     pub emotion: String,
+    /// AI 生成的历史摘要（当历史过长时使用），记录重要内容
+    pub conversation_summary: String,
 }
 
 /// 上下文键: (group_id, user_id)
@@ -123,44 +125,51 @@ impl SharedState {
         self.contexts.entry(key).or_insert(UserContext {
             history: Vec::new(),
             emotion: String::new(),
+            conversation_summary: String::new(),
         })
     }
 
-    /// 向用户历史追加一条消息，并保持窗口大小。
-    /// 使用注意力机制：优先保留重要对话锚点（首轮对话、情绪关键词、bot 自己的消息），
-    /// 而非简单地丢弃最旧条目。
+    /// 向用户历史追加一条消息。
+    /// 超出窗口大小时，用 AI 对最早的消息做摘要压缩（而非简单丢弃），
+    /// 保留重要信息的同时控制 token 消耗。
     pub fn push_history(&mut self, group_id: u64, user_id: u64, role: &str, content: &str, max_pairs: usize) {
         let ctx = self.get_or_create_context(group_id, user_id);
         ctx.history.push((role.to_string(), content.to_string()));
         if ctx.history.len() > max_pairs * 2 {
-            // 注意力式截断：保留"重要"的消息，丢弃"不重要"的消息
-            let max_keep = max_pairs * 2;
-            let excess = ctx.history.len() - max_keep;
-            // 计算每条消息的重要性分数，丢弃分数最低的 excess 条
-            let mut scored: Vec<(usize, f32)> = ctx.history.iter().enumerate().map(|(i, (r, c))| {
-                let mut score = 0.5;
-                // bot 自己的回复更重要（让 AI 知道自己说过什么）
-                if r == "assistant" { score += 0.3; }
-                // 包含情绪关键词的消息更重要
-                if c.contains("难过") || c.contains("开心") || c.contains("生气")
-                    || c.contains("伤心") || c.contains("喜欢") || c.contains("讨厌")
-                    || c.contains("谢谢") || c.contains("对不起") || c.contains("抱歉")
-                    || c.contains("爱") || c.contains("恨") { score += 0.2; }
-                // 用户的第一条消息（i 在靠前位置）更重要
-                if i < 2 { score += 0.2; }
-                // 较长的消息通常包含更多信息
-                if c.len() > 50 { score += 0.1; }
-                // 最近的几条消息（末尾）权重高，防止删除刚加入的
-                if i >= ctx.history.len().saturating_sub(4) { score += 0.3; }
-                (i, score)
-            }).collect();
-            // 按分数升序排序，找出要删除的索引
-            scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            let mut drop_indices: Vec<usize> = scored.iter().take(excess).map(|(i, _)| *i).collect();
-            drop_indices.sort_unstable();
-            drop_indices.reverse();
-            for &idx in &drop_indices {
-                ctx.history.remove(idx);
+            // 窗口过大时，取最早的一半消息请求 AI 压缩为摘要
+            let keep_recent = max_pairs as usize;
+            let compress_end = ctx.history.len().saturating_sub(keep_recent);
+            if compress_end > 2 {
+                let to_compress: Vec<String> = ctx.history[..compress_end].iter()
+                    .map(|(r, c)| format!("[{}] {}", r, c))
+                    .collect();
+                let prompt_text = to_compress.join("\n");
+                // 异步 AI 摘要：如果已有历史摘要，合并后再压缩
+                let existing_summary = ctx.conversation_summary.clone();
+                let final_prompt = if existing_summary.is_empty() {
+                    prompt_text
+                } else {
+                    format!("之前的摘要：{}\n\n新的对话：\n{}", existing_summary, prompt_text)
+                };
+                // 调用 AI 生成摘要（异步触发，不阻塞）
+                let compressed = crate::ai::analyze(
+                    crate::prompt::PromptManager::get().raw("history_attention"),
+                    &final_prompt,
+                );
+                if let Ok(summary) = compressed {
+                    if let Some(json_str) = crate::ai::extract_json(&summary) {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                            if let Some(s) = val.get("summary").and_then(|v| v.as_str()) {
+                                ctx.conversation_summary = s.to_string();
+                            }
+                        }
+                    }
+                }
+                // 删除已压缩的部分，保留最近的消息
+                ctx.history.drain(..compress_end);
+            } else {
+                // 只有少量溢出，简单丢弃最旧条目
+                ctx.history.remove(0);
             }
         }
     }

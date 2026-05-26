@@ -136,6 +136,7 @@ impl PromptManager {
             ("learn_style", include_str!("../../defaults/learn_style.prompt")),
             ("sticker_content_filtration", include_str!("../../defaults/sticker_content_filtration.prompt")),
             ("sticker_select", include_str!("../../defaults/sticker_select.prompt")),
+            ("history_attention", include_str!("../../defaults/history_attention.prompt")),
         ];
 
         for (name, content) in defaults {

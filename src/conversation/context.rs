@@ -82,6 +82,16 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(pers);
     }
 
+    // 对话历史摘要（AI 注意力机制压缩的长期记忆）
+    let summary = crate::read_shared_state(|s| {
+        s.contexts.get(&(group_id, user_id))
+            .map(|ctx| ctx.conversation_summary.clone())
+            .unwrap_or_default()
+    });
+    if !summary.is_empty() {
+        parts.push(format!("# 对话历史摘要\n以下是对之前对话中重要内容的回顾：\n{}", summary));
+    }
+
     // 日程/时间上下文
     let schedule_ctx = schedule::get_current_context();
     if !schedule_ctx.is_empty() {

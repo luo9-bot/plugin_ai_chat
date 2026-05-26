@@ -22,13 +22,13 @@
             <img :src="'/api/sticker/' + s.hash + '/image'" :alt="s.hash" loading="lazy" @error="$event.target.style.display='none'" />
           </div>
           <div class="sticker-info">
-            <div class="sticker-tags" v-if="s.tags?.length">
-              <span v-for="tag in (Array.isArray(s.tags) ? s.tags : [s.tags])" :key="tag" class="chip-sm">{{ tag }}</span>
+            <div class="sticker-tags" v-if="s.description || s.vlm_description">
+              <span class="chip-sm">{{ (s.description || s.vlm_description || '').slice(0, 30) }}</span>
             </div>
-            <span v-else class="text-muted">无标签</span>
+            <span v-else class="text-muted">无描述</span>
             <div class="sticker-actions">
-              <span class="badge-sm" :class="s.enabled ? 'on' : 'off'">{{ s.enabled ? '启用' : '禁用' }}</span>
-              <button class="btn btn-ghost btn-xs" @click="toggle(s.hash)">{{ s.enabled ? '禁用' : '启用' }}</button>
+              <span class="badge-sm" :class="s.is_banned ? 'off' : 'on'">{{ s.is_banned ? '禁用' : '启用' }}</span>
+              <button class="btn btn-ghost btn-xs" @click="toggle(s.hash)">{{ s.is_banned ? '启用' : '禁用' }}</button>
             </div>
           </div>
         </div>
@@ -50,8 +50,8 @@ const filtered = computed(() => {
   if (!search.value) return stickers.value
   const q = search.value.toLowerCase()
   return stickers.value.filter(s => {
-    const tags = Array.isArray(s.tags) ? s.tags.join(' ') : String(s.tags || '')
-    return tags.toLowerCase().includes(q) || s.hash?.includes(q)
+    const desc = ((s.description || s.vlm_description || '') + ' ' + s.hash).toLowerCase()
+    return desc.includes(q)
   })
 })
 
