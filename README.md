@@ -1,4 +1,4 @@
-# luo9-ai-chat
+# plugin_ai_chat
 
 Luo9 bot AI 插件 - 仅供学习使用。
 
@@ -10,25 +10,27 @@ Luo9 bot AI 插件 - 仅供学习使用。
 
 ## 快速开始
 
-### 1. 构建
+### 构建
+
 ```bash
 cargo build --release
 ```
 
-### 2. 部署
-将编译产物（`target/release/plugin_ai_chat.dll` 或 `.so`）放入 Luo9 Bot 插件目录。
+### 部署
 
-### 3. 配置
-编辑 `data/plugin_ai_chat/config.yaml`，**必填**以下三项：
+将 `target/release/plugin_ai_chat.dll`（或 `.so`）放入 Luo9 Bot 插件目录。
+
+### 配置
+
+编辑 `data/plugin_ai_chat/config.yaml`：
+
 ```yaml
 api_key: "sk-你的密钥"
 base_url: "https://api.deepseek.com/v1"
 model: "deepseek-chat"
-self_qq: 123456789      # 机器人自身 QQ 号
-admin_qq: 123456789     # 管理员 QQ 号
+self_qq: 123456789
+admin_qq: 123456789
 ```
-
-### 4. 重启插件
 
 ## 命令
 
@@ -38,30 +40,24 @@ admin_qq: 123456789     # 管理员 QQ 号
 
 | 命令 | 说明 |
 |------|------|
-| `开!` / `开启对话` | 群聊：为当前群开启对话；私聊：为自己开启对话 |
-| `停!` / `关闭对话` | 群聊：关闭当前群对话；私聊：关闭自己的对话 |
+| `开!` / `开启对话` | 开启当前群/私聊对话 |
+| `停!` / `关闭对话` | 关闭当前群/私聊对话 |
 | `遗忘对话` | 查看并清除当前对话历史 |
-| `重启对话` | 清除对话历史和所有记忆 |
+| `重启对话` | 清除对话历史及所有记忆 |
 
 ### 管理员命令
 
-需要 `admin_qq` 匹配（设为 0 则所有人可用）：
+需 `admin_qq` 匹配（设为 0 则所有人可用）：
 
 | 命令 | 说明 |
 |------|------|
-| `查看群聊` | 列出所有已开启的群聊 |
-| `查看用户` | 列出所有已开启的私聊用户 |
-| `查看黑名单` | 列出所有被拉黑的用户 |
-| `开启群聊:群号` | 远程开启指定群聊 |
-| `关闭群聊:群号` | 远程关闭指定群聊 |
-| `开启用户:QQ号` | 远程开启指定用户私聊 |
-| `关闭用户:QQ号` | 远程关闭指定用户私聊 |
-| `拉黑:QQ号` | 将用户加入黑名单 |
-| `移除黑名单:QQ号` | 将用户移出黑名单 |
+| `查看群聊` / `查看用户` | 列出已开启的群聊/私聊 |
+| `查看黑名单` | 列出所有黑名单用户 |
+| `开启群聊:群号` / `关闭群聊:群号` | 远程控制群聊 |
+| `开启用户:QQ号` / `关闭用户:QQ号` | 远程控制私聊 |
+| `拉黑:QQ号` / `移除黑名单:QQ号` | 黑名单管理 |
 | `防注入状态:QQ号` | 查看用户防注入状态 |
-| `解封用户:QQ号` | 完全解封用户 |
-| `启用识图:QQ号` | 为用户重新启用识图 |
-| `重置信誉:QQ号` | 重置用户信誉分数 |
+| `解封用户:QQ号` / `重置信誉:QQ号` | 封禁/信誉管理 |
 
 ### 人格管理
 
@@ -70,176 +66,221 @@ admin_qq: 123456789     # 管理员 QQ 号
 | 命令 | 说明 |
 |------|------|
 | `人格模板` | 查看可用人格模板列表 |
-| `切换人格:温柔体贴` | 切换到指定人格模板 |
-| `调整特质:幽默 0.8` | 调整单项特质值 (0.0~1.0) |
-| `查看人格` | 查看当前人格设定详情 |
-| `保存人格:备份` | 将当前人格保存为快照 |
-| `加载人格:备份` | 加载已保存的人格快照 |
-| `人格列表` | 查看所有已保存的快照 |
+| `切换人格:温柔体贴` | 切换到指定人格 |
+| `调整特质:幽默 0.8` | 调整单项特质 (0.0~1.0) |
+| `查看人格` | 查看当前人格详情 |
+| `保存人格:备份` / `加载人格:备份` | 人格快照管理 |
+| `人格列表` | 查看已保存的快照 |
 
-### 主动对话设置
-
-群聊中仅管理员可用，私聊中所有用户可用：
+### 主动对话
 
 | 命令 | 说明 |
 |------|------|
-| `开启主动对话` | 开启主动消息推送 |
-| `关闭主动对话` | 关闭主动消息推送 |
-| `设置免打扰:23-7` | 设置免打扰时段 (24小时制) |
+| `开启主动对话` / `关闭主动对话` | 控制主动消息推送 |
+| `设置免打扰:23-7` | 设置免打扰时段 |
 | `提醒我:12-25 圣诞节` | 添加日期提醒 |
 
-### 记忆管理 (所有用户)
+### 自然语言记忆管理
 
-在对话中自然语言管理记忆：
 - "记住我喜欢喝咖啡" — 永久记忆
 - "忘掉我刚才说的" — 清除近期记忆
 - "忘掉xxx" — 模糊匹配删除
-- "我不叫小明，我叫小红" — 自动修正记忆
+- "我不叫小明，我叫小红" — 自动修正
 
-## 配置详解
+## 架构
 
-### 顶层配置
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `api_key` | - | **必填** API 密钥 |
-| `base_url` | `https://api.deepseek.com/v1` | **必填** API 地址 (OpenAI 兼容) |
-| `model` | `deepseek-chat` | **必填** 模型名称 |
-| `self_qq` | 0 | **必填** 机器人自身 QQ 号 |
-| `admin_qq` | 0 | 管理员 QQ 号 |
-| `prompts` | `default.txt` | 人设提示词文件名 |
-| `whitelist` | `[]` | 白名单：只允许这些用户使用私聊 |
-| `blacklist` | `[]` | 黑名单：禁止这些用户使用私聊 |
-| `auto_start_users` | `[]` | 默认启动对话用户列表 |
-
-### 防注入配置
-
-防注入系统始终开启，不可关闭。所有检测（关键词过滤、注入模式检测、编码绕过检测、色情/暴力/违法内容检测、系统提示泄露检测、敏感内容检测）均强制开启。
-
-```yaml
-anti_injection:
-  input:
-    max_message_length: 2000   # 最大消息长度
-    sensitive_action: "replace"  # 敏感内容处理: replace | block
-  output:
-    action: "replace"          # 检测到问题时: replace | block
-  behavior:
-    rate_limit: true           # 频率限制
-    max_messages_per_minute: 20
-    max_messages_per_hour: 200
-    reputation_threshold: 0.3  # 信誉阈值
-    auto_ban: true             # 自动封禁
-    auto_ban_threshold: 10     # 封禁触发次数
-```
-
-### 用户访问控制
-
-```yaml
-# 白名单：只允许这些用户使用私聊（为空则不限制）
-# 黑名单：禁止这些用户使用私聊（为空则不限制）
-# 两个都配置时，白名单优先
-whitelist: []
-blacklist: []
-
-# 默认启动对话用户（无需手动开启）
-auto_start_users: []
-```
-
-## 记忆系统架构
-
-记忆以文件目录结构组织，按来源自动隔离，启动时自动从旧 `memory.json` 迁移。
+### 整体数据流
 
 ```
-data/plugin_ai_chat/memory/
-  users/
-    512166443.json     ← 用户 512166443 的「全局记忆」
-                          （私聊来的 + 跨群共享的事实，群聊/私聊都显示）
+消息到达
+  ├─ 黑名单/防注入检查
+  ├─ 人物档案注册 & 情绪分析
+  ├─ 工作记忆记录
+  ├─ 表情包自动注册
+  └─ 批处理缓冲 (2s)
 
-  groups/
-    676426335/
-      group.json       ← 群聊级别的记忆（氛围/共同话题）
-                          只在群 676426335 中显示
-      512166443.json   ← 512166443 在群 676426335 里的特定记忆
-                          只在群 676426335 中显示
-      2950726483.json  ← 2950726483 在群 676426335 里的特定记忆
-                          只在群 676426335 中显示
-```
+批处理
+  ├─ 危机检测 → 强制回复
+  ├─ @bot 检测 → 强制回复
+  ├─ 配额检查
+  └─ Timing Gate (AI 子代理)
+       ├─ continue → Planner
+       ├─ no_reply → 沉默 + 冷却
+       └─ wait → 延迟重评估
 
-### 记忆隔离规则
+Planner (群聊多轮推理，最多10轮)
+  └─ 工具: reply, query_memory, query_person_info,
+           send_sticker, tool_search, finish
 
-| 记忆来源 | 群聊上下文 (group_id=G) | 私聊上下文 (group_id=0) |
-|---|---|---|
-| 私聊对话（group_id=0） | ❌ 不显示 | ✅ 显示 |
-| 群 G 中提取 | ✅ 只在群 G 显示 | ❌ 不显示 |
-| 群 A 中提取 | ❌ 不在群 B 显示 | ❌ 不显示 |
+Replyer (回复生成)
+  └─ 注入人格+记忆+情绪+表达习惯+活动状态+ASI反馈
 
-### 语义检索
-
-向量数据库（`vectors.bin`）按 content 字符串索引，与文件存储独立。`search_memories(uid, group_id, query, top_k)` 同时检索全局记忆和当前群特定记忆。
-
-### 三层写入路径
-
-| 写入场景 | group_id 来源 | 落盘位置 |
-|---|---|---|
-| AI 提取 / 对话摘要 | 当前对话的群 ID | `groups/{gid}/{uid}.json` |
-| 反思审查 | 被审查群的 ID | `groups/{gid}/{uid}.json` |
-| 用户说"记住" | 硬编码 0 | `users/{uid}.json` |
-| 私聊对话 | 自动为 0 | `users/{uid}.json` |
-
-## 核心架构
-
-### 消息处理流程
-
-```
-QQ 消息到达
-  ↓
-lib.rs 主循环 → handle_group_msg / handle_private_msg
-  ↓
-（不入队，直接返回）
-  ↓
-process_expired_batches() ← 每隔 500ms+ 检查过期批次
-  ↓
-私聊 → process_message(user_id, group_id=0)
-群聊 → batch.rs 串行队列 → timing_gate 决策 → process_message
-  ↓
-process_message 中:
-  私聊 → ai::chat(prompt, context, history, message)
-  群聊 → planner::run_planner() → replyer::generate_reply()
-  ↓
-anti_injection 输出检查 → 发送 → 后处理（记忆提取/摘要）
+后处理
+  ├─ 输出安全检查 & emoji 过滤
+  ├─ 打字延迟发送
+  ├─ 回复效果记录 & 人物事实提取
+  └─ 活动状态检测
 ```
 
 ### 群聊 vs 私聊
 
-| 特性 | 群聊 (group_id > 0) | 私聊 (group_id == 0) |
-|---|---|---|
-| 对话历史 | 按 (group_id, user_id) 存储 | 按 (0, user_id) 存储 |
+| 特性 | 群聊 | 私聊 |
+|------|------|------|
 | 决策路径 | Planner → Replyer（多轮工具调用） | 直接 `ai::chat` |
 | Timing Gate | 冷却/配额/决策 | 不使用 |
-| 工作记忆 | 群内所有用户消息流 | 私聊消息流 |
-| 主动消息 | 检查 + 触发，群级冷却 | 检查 + 触发，需用户回复 |
-| 上下文标签 | `[bot]` / `[user_id:XXX]` / 时间戳 | `history` 消息数组 |
+| 工作记忆 | 群内所有用户消息流 | 单用户消息流 |
+| 主动消息 | 群级冷却 | 需用户回复 |
 
-### Planner 工具
+### 上下文注入链
 
-| 工具 | 说明 |
-|---|---|
-| `reply` | 正式发送可见回复 |
-| `finish` | 结束本轮推理，不回复 |
-| `query_memory` | 查询用户长期记忆（自动按当前群过滤） |
-| `query_person_info` | 查询用户人物档案（自动按当前群过滤） |
-| `tool_search` | 搜索可用的延迟工具 |
-| `send_sticker` | 【延迟工具】发送表情包 |
+`build_context` 按序组装 16 层上下文：
+系统提示 → 自我记忆 → 长期记忆 → 群成员记忆 → 人格 → 情绪 → 心理状态 → 对话状态 → 日程 → Bot 最近消息 → 工作记忆 → 活动状态 → ASI 反馈 → 缺陷指令 → 危机干预 → 惩罚上下文
 
-### 自我反思系统
+## 核心模块
 
-定期执行三层思考：
+| 模块 | 职责 |
+|------|------|
+| `conversation/` | 消息路由、批处理、上下文构建、命令处理 |
+| `timing_gate/` | 回复时机决策（continue/no_reply/wait） |
+| `planner/` | 多轮推理引擎，Deferred Tool Discovery |
+| `replyer/` | 回复生成，风格随机化 |
+| `memory/` | 长期记忆：SQLite + BM25 + 向量检索 + 知识图谱 |
+| `self_memory/` | 自我反思记忆（对话后反思、定期审查、空闲反思） |
+| `mental_state/` | 心理状态（担忧/考量/缺陷） |
+| `emotion/` | 情绪系统（10 种状态、时间衰减） |
+| `personality/` | 人格系统（模板切换、traits 调整、快照管理） |
+| `person_info/` | 人物档案（自动回写用户事实） |
+| `working_memory/` | 群聊临时消息流（时间戳 + 窗口管理） |
+| `proactive/` | 主动消息（氛围参与、情绪驱动） |
+| `crisis/` | 危机检测（AI 判断 + 置信度，无频率限制） |
+| `reply_effect/` | 回复效果追踪 + ASI 评分 + LLM Judge |
+| `learner/` | 表达学习（情境→表达模式、黑话挖掘） |
+| `sticker/` | 表情包系统（VLM 网格选择、自动收集、内容过滤） |
+| `vision/` | 识图（Doubao VLM） |
+| `activity/` | 活动状态（训练/吃饭/睡觉等） |
+| `conversation_end/` | 对话结束检测 |
+| `schedule/` | 日/周/月计划自动生成与推送 |
+| `quota/` | 分时段回复配额 + 兴趣分 |
+| `anti_injection/` | 防注入（11 个子模块，多层安全检查） |
+| `admin/` | REST API 管理后台 + 前端 UI |
+| `typo/` | 错别字生成（拼音+字频） |
+| `emoji/` | Unicode emoji 过滤 |
+| `blocklist/` | 用户黑名单管理 |
+| `ai/` | AI API 调用（OpenAI 兼容协议） |
+| `prompt/` | Prompt 模板管理器 |
+| `runtime/` | 运行时：工具注册、请求类型、历史截断、去重 |
+| `crypto/` | ECC 密钥对管理 |
+| `sender/` | 消息发送（分段、打字延迟、emoji 过滤） |
+| `config/` | 配置加载与管理 |
 
-| 类型 | 触发条件 | 产出 |
-|---|---|---|
-| 对话后反思 | 对话结束一段时间后 | 内心想法 + 记忆审查 |
-| 长时间对话定期审查 | 对话进行中，距上次审查已过间隔 | 记忆整合/修正 |
-| 定时空闲反思 | 全局间隔（默认 1 小时） | 群画像 + 内心想法 |
+## 数据存储
+
+统一使用 SQLite（`data/plugin_ai_chat/memory.db`）：
+
+| 数据 | 表名 |
+|------|------|
+| 长期记忆 | `memories` |
+| 知识图谱 | `graph_nodes` / `graph_edges` |
+| 向量索引 | `vectors` |
+| 工作记忆 | `working_memories` |
+| 情绪状态 | `emotions` |
+| 自我记忆 | `self_memories` |
+| 人物档案 | `person_profiles` |
+| 回复效果 | `reply_effects` |
+| 表达习惯 | `expressions` |
+| 黑话 | `jargons` |
+| 配额 | `quota` |
+
+配置文件：
+
+| 数据 | 格式 |
+|------|------|
+| 表情包 | JSON（`stickers.json`） |
+| 人格快照 | JSON（`personality.json`） |
+| 日程计划 | JSON（`daily.json` / `weekly.json` / `monthly.json`） |
+
+## 记忆系统
+
+### 语义检索
+
+双路检索（向量 + BM25） + 后置知识图谱门控 + 自适应阈值 + 智能回退，按用户和群隔离。
+
+### 知识图谱
+
+有向图 + Personalized PageRank 重排序 + BFS 子图扩展 + 关系向量检索，支持 Aho-Corasick + LLM 实体提取。
+
+### 三层写入路径
+
+| 场景 | 落盘位置 |
+|------|----------|
+| AI 提取 / 对话摘要 | 当前群下 |
+| 反思审查 | 被审查群下 |
+| 用户说"记住" / 私聊 | 用户全局 |
+
+## 配置要点
+
+```yaml
+# ── 核心
+model: "deepseek-chat"        # 对话模型
+api_key: "sk-xxx"
+base_url: "https://api.deepseek.com/v1"
+
+# ── 人格
+prompts: "default.txt"        # 人设提示词文件名
+bot_name: "洛玖"
+darling_qq: 0                 # "认定的人"，有特殊情感反应
+
+# ── 对话
+conversation:
+  batch_timeout_ms: 2000      # 消息合并窗口
+  reply_cooldown_secs: 15     # 回复冷却
+  max_history: 10             # 对话历史轮数
+
+# ── 回复
+style:
+  reply_style: ""             # 默认回复风格
+  multiple_reply_styles: []   # 备选风格
+  style_random_probability: 0.3
+  max_reply_chars: 30
+
+# ── 记忆
+memory:
+  normal_expire_days: 30
+  working_memory_expire_hours: 6
+
+# ── 主动消息
+proactive:
+  enabled: true
+  quiet_start: 23             # 免打扰开始
+  quiet_end: 7                # 免打扰结束
+  interval: 7200              # 最小间隔 (秒)
+
+# ── 自我反思
+self_reflection:
+  interval: 1800              # 反思间隔 (秒)
+  post_conversation_delay_secs: 120
+
+# ── 识图 (Doubao VLM)
+vision:
+  api_key: ""
+  model: "doubao-1.5-vision-pro-32k"
+
+# ── Embedding
+embedding:
+  api_key: ""
+  model: "doubao-embedding-vision-251215"
+
+# ── 管理后台
+admin:
+  token: ""                   # 不为空则启动后台
+  port: 17000
+
+# ── 访问控制
+whitelist: []                 # 私聊白名单
+blacklist: []                 # 黑名单
+auto_start_users: []          # 自动开启私聊
+auto_start_groups: []         # 自动开启群聊
+```
 
 ## 免责声明
 
