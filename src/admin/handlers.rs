@@ -720,10 +720,15 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
     let path = config::data_dir().join("blocklist.json");
     match method {
         Method::Get => {
-            let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into());
-            let list: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!([]));
-            ok(serde_json::json!({"blocked": list}))
+            // 合并 blocklist.json 和 config.yaml 中的 blacklist
+            let file_list: Vec<u64> =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()))
+                    .unwrap_or_default();
+            let mut all: Vec<u64> = file_list.clone();
+            for uid in &config::get().blacklist {
+                if !all.contains(uid) { all.push(*uid); }
+            }
+            ok(serde_json::json!({"blocked": all, "from_file": file_list, "from_config": &config::get().blacklist}))
         }
         Method::Post => {
             let body_val: serde_json::Value = match parse_json(body) {
@@ -742,6 +747,8 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
                 list.push(uid);
             }
             std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
+            // 同步运行时状态
+            crate::with_state(|s| { s.add_blacklist(uid); });
             ok(serde_json::json!({"ok": true}))
         }
         Method::Delete => {
@@ -755,6 +762,8 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
                     .unwrap_or_default();
             list.retain(|&x| x != uid);
             std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
+            // 同步运行时状态
+            crate::with_state(|s| { s.remove_blacklist(uid); });
             ok(serde_json::json!({"ok": true}))
         }
         _ => err(405, "method not allowed"),

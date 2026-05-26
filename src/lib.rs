@@ -240,6 +240,16 @@ pub extern "C" fn plugin_main() {
     // 初始化配额系统
     quota::init();
 
+    // ── 同步 config.blacklist 到运行时黑名单 ──
+    {
+        let cfg = config::get();
+        with_state(|s| {
+            for &uid in &cfg.blacklist {
+                s.add_blacklist(uid);
+            }
+        });
+    }
+
     // ── 默认启动对话用户 ──
     // 根据配置自动开启指定用户的私聊
     {
