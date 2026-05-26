@@ -106,13 +106,18 @@ fn record_group_message(group_id: u64, msg: &str) {
     }
 }
 
-/// 将主动消息写入用户对话历史，让 AI 知道自己说过什么
+/// 将主动消息写入对话历史，让 AI 知道自己说过什么
 fn push_proactive_to_history(group_id: u64, user_id: u64, msg: &str) {
-    if group_id == 0 || user_id == 0 { return; }
+    if user_id == 0 { return; }
     let max_pairs = crate::config::get().conversation.max_history;
     with_shared_state(|s| {
-        s.push_history(group_id, user_id, "assistant", msg, max_pairs);
-        s.push_group_history(group_id, "assistant", msg, max_pairs);
+        if group_id > 0 {
+            s.push_history(group_id, user_id, "assistant", msg, max_pairs);
+            s.push_group_history(group_id, "assistant", msg, max_pairs);
+        } else {
+            // 私聊：写入用户自己的历史
+            s.push_history(0, user_id, "assistant", msg, max_pairs);
+        }
     });
 }
 
