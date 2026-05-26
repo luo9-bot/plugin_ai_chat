@@ -40,6 +40,24 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
 
     // ── 基础层：始终注入 ──
 
+    // 对话场景标识：明确告知 AI 当前是私聊还是群聊
+    let scene_info = if group_id == 0 {
+        format!(
+            "# 当前对话场景\n你现在正在和 user_id:{} 进行一对一私聊。\
+             这是私人对话，只有你们两个人。\
+             不要使用群聊用语（如「有人一起吗」「大家」等），\
+             不要@任何人，像朋友单独聊天一样自然交流。",
+            user_id
+        )
+    } else {
+        format!(
+            "# 当前对话场景\n你现在在群 {} 中和 user_id:{} 对话。\
+             群聊中有多个人，你的回复可能被群里所有人看到。\
+             注意区分群聊语境，可以适当简短，不需要每次都深入回复。",
+            group_id, user_id
+        )
+    };
+
     // 当前对话用户标识 (让 AI 知道在和谁说话)
     let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
         r#"
@@ -57,7 +75,7 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     } else {
         ""
     };
-    parts.push(format!("# 当前对话用户\nuser_id: {}{}", user_id, darling_info));
+    parts.push(format!("{}{}", scene_info, darling_info));
 
     // 自我记忆 (bot 的内心想法)
     let self_mem = self_memory::get_context(cfg.self_reflection.max_thoughts.min(8));
