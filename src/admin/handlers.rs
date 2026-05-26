@@ -1291,17 +1291,43 @@ pub fn handle_schedule() -> Response<std::io::Cursor<Vec<u8>>> {
     let monthly = crate::schedule::load_monthly_plan();
     let pushes = crate::schedule::check_plan_push();
 
+    // 推动状态
+    let push_state_path = crate::config::data_dir().join("plan_push_state.json");
+    let push_state: serde_json::Value = std::fs::read_to_string(&push_state_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!({"pushed_today": [], "date": ""}));
+
+    // 推动历史日志（从 push_history.json 读取）
+    let history_path = crate::config::data_dir().join("push_history.json");
+    let history: Vec<serde_json::Value> = std::fs::read_to_string(&history_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    // 统计
+    let total_weekly = weekly.goals.len();
+    let done_weekly = weekly.goals.iter().filter(|g| g.completed).count();
+    let total_monthly = monthly.goals.len();
+    let done_monthly = monthly.goals.iter().filter(|g| g.completed).count();
+
     ok(serde_json::json!({
         "weekly": {
             "week_start": weekly.week_start,
             "goals": weekly.goals,
             "week_reflection": weekly.week_reflection,
+            "total": total_weekly,
+            "done": done_weekly,
         },
         "monthly": {
             "month": monthly.month,
             "goals": monthly.goals,
+            "total": total_monthly,
+            "done": done_monthly,
         },
         "pushes": pushes,
+        "push_state": push_state,
+        "push_history": history,
     }))
 }
 

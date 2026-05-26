@@ -12,6 +12,8 @@ pub struct WeeklyGoal {
     pub content: String,
     pub target_day: String,    // "Monday" | "Tuesday" | ...
     pub completed: bool,
+    #[serde(default)]
+    pub completed_at: u64,     // Unix timestamp when completed
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +41,8 @@ impl Default for WeeklyPlan {
 pub struct MonthlyGoal {
     pub content: String,
     pub completed: bool,
+    #[serde(default)]
+    pub completed_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +84,31 @@ fn monthly_path() -> std::path::PathBuf {
 
 fn push_state_path() -> std::path::PathBuf {
     config::data_dir().join("plan_push_state.json")
+}
+
+fn push_history_path() -> std::path::PathBuf {
+    config::data_dir().join("push_history.json")
+}
+
+/// 记录推动日志
+pub fn record_push_log(kind: &str, content: &str) {
+    let path = push_history_path();
+    let mut history: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    history.push(serde_json::json!({
+        "time": crate::util::now_secs(),
+        "kind": kind,
+        "content": content,
+    }));
+    // 只保留最近 200 条
+    if history.len() > 200 {
+        history.drain(0..history.len() - 200);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&history) {
+        std::fs::write(path, json).ok();
+    }
 }
 
 // ── 周计划 CRUD ─────────────────────────────────────────────────
@@ -140,10 +169,13 @@ pub fn get_today_weekly_goals() -> Vec<String> {
 
 pub fn complete_weekly_goal(content: &str) {
     let mut plan = load_weekly_plan();
+    let now = crate::util::now_secs();
     for goal in &mut plan.goals {
         if goal.content == content && !goal.completed {
             goal.completed = true;
+            goal.completed_at = now;
             save_weekly_plan(&plan);
+            record_push_log("周计划", content);
             debug!(content, "schedule: weekly goal completed");
             break;
         }
@@ -195,10 +227,13 @@ pub fn check_and_generate_monthly_plan() -> bool {
 
 pub fn complete_monthly_goal(content: &str) {
     let mut plan = load_monthly_plan();
+    let now = crate::util::now_secs();
     for goal in &mut plan.goals {
         if goal.content == content && !goal.completed {
             goal.completed = true;
+            goal.completed_at = now;
             save_monthly_plan(&plan);
+            record_push_log("月计划", content);
             debug!(content, "schedule: monthly goal completed");
             break;
         }
@@ -253,9 +288,24 @@ pub fn check_plan_push() -> Vec<String> {
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             fs::write(&state_path, json).ok();
         }
+        // 记录到历史
+        for p in &to_push {
+            let kind = if p.starts_with("周计划") { "周计划" } else { "月计划" };
+            let content = p.trim_start_matches("周计划：").trim_start_matches("月计划：");
+            record_push_log(kind, content);
+        }
     }
 
     to_push
+}
+
+/// 加载今日推动状态
+pub fn load_push_state() -> PushState {
+    let state_path = push_state_path();
+    match fs::read_to_string(&state_path) {
+        Ok(c) => serde_json::from_str(&c).unwrap_or_default(),
+        Err(_) => PushState::default(),
+    }
 }
 
 /// 获取用于上下文展示的周/月计划文本

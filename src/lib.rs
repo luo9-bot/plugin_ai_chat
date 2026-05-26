@@ -625,6 +625,7 @@ fn do_weekly_plan_generation() {
                             content: content.to_string(),
                             target_day: target_day.to_string(),
                             completed: false,
+                            completed_at: 0,
                         });
                     }
                 }
@@ -662,6 +663,7 @@ fn do_monthly_plan_generation() {
                         plan.goals.push(schedule::MonthlyGoal {
                             content: content.to_string(),
                             completed: false,
+                            completed_at: 0,
                         });
                     }
                 }
