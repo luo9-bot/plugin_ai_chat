@@ -1,6 +1,6 @@
 use tracing::{debug, info};
 
-use super::state::{EmotionType, get_state, update_state};
+use super::state::{EmotionType, TriggerType, get_state, update_state};
 
 // 危机检测、状态更新、干预指令已移至 crisis 模块
 // 通过 emotion::detect_crisis 等重新导出保持向后兼容
@@ -18,26 +18,25 @@ pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
         state.interaction_rate = state.interaction_rate * 0.7 + rate * 0.3;
     }
 
+    // 关键词检测情绪
     let (detected, delta) = detect_emotion(message);
     if delta > 0.1 {
-        if detected != state.current {
-            state.history.push((state.current, now));
-            if state.history.len() > 5 {
-                state.history.remove(0);
-            }
-        }
-        state.current = detected;
-        state.intensity = (state.intensity + delta).min(1.0);
+        // 截断消息作为source
+        let source: String = message.chars().take(30).collect();
+        state.update_emotional_dynamics(
+            Some((&detected, delta, &source, TriggerType::UserMessage)),
+            0.0,
+        );
     }
 
+    // 高频互动带来正向情绪
     if state.interaction_rate > crate::config::get().emotion.affinity_threshold {
-        state.intensity = (state.intensity + 0.02).min(1.0);
-        if state.current == EmotionType::Neutral {
-            state.current = EmotionType::Happy;
-        }
+        state.update_emotional_dynamics(
+            Some((&EmotionType::Happy, 0.02, "高频互动", TriggerType::UserMessage)),
+            0.0,
+        );
     }
 
-    state.last_update = now;
     update_state(user_id, state);
 
     // 危机信号检测
@@ -52,7 +51,6 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
     let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("emotion_analyze"), &content);
     match result {
         Ok(raw) => {
-            // 尝试从回复中提取 JSON
             let json_str = if let Some(start) = raw.find('{') {
                 if let Some(end) = raw[start..].find('}') {
                     &raw[start..start + end + 1]
@@ -73,36 +71,25 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
 
                 let detected = EmotionType::from_str(emotion_str);
                 let mut state = get_state(user_id);
-                let now = crate::util::now_secs();
 
-                if detected != state.current {
-                    state.history.push((state.current, now));
-                    if state.history.len() > 5 {
-                        state.history.remove(0);
-                    }
-                }
-                state.current = detected;
-                state.intensity = intensity.clamp(0.0, 1.0);
-                state.last_update = now;
+                // 使用情绪动力学更新替代直接替换
+                state.update_emotional_dynamics(
+                    Some((&detected, intensity, "AI情绪分析", TriggerType::SelfReflection)),
+                    0.0,
+                );
                 update_state(user_id, state);
             }
         }
         Err(e) => {
             debug!(error = %e, "emotion AI analysis failed, falling back to keyword");
-            // fallback: 关键词分析
             let (detected, delta) = detect_emotion(user_message);
             if delta > 0.1 {
                 let mut state = get_state(user_id);
-                let now = crate::util::now_secs();
-                if detected != state.current {
-                    state.history.push((state.current, now));
-                    if state.history.len() > 5 {
-                        state.history.remove(0);
-                    }
-                }
-                state.current = detected;
-                state.intensity = (state.intensity + delta).min(1.0);
-                state.last_update = now;
+                let source: String = user_message.chars().take(30).collect();
+                state.update_emotional_dynamics(
+                    Some((&detected, delta, &source, TriggerType::UserMessage)),
+                    0.0,
+                );
                 update_state(user_id, state);
             }
         }
@@ -113,24 +100,19 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
 pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
     let detected = EmotionType::from_str(emotion_str);
     let mut state = get_state(user_id);
-    let now = crate::util::now_secs();
 
-    if detected != state.current {
-        debug!(user_id, from = ?state.current, to = ?detected, intensity, "emotion: state changed");
-        state.history.push((state.current, now));
-        if state.history.len() > 5 {
-            state.history.remove(0);
-        }
-    }
-    state.current = detected;
-    state.intensity = intensity.clamp(0.0, 1.0);
-    state.last_update = now;
+    debug!(user_id, from = ?state.current, to = ?detected, intensity, "emotion: state changed");
+
+    // 使用情绪动力学更新替代直接替换
+    state.update_emotional_dynamics(
+        Some((&detected, intensity, "对话反思", TriggerType::SelfReflection)),
+        0.0,
+    );
     update_state(user_id, state);
 }
 
 pub fn parse_from_reply(user_id: u64, reply: &str) -> String {
     let mut state = get_state(user_id);
-    let now = crate::util::now_secs();
     let mut cleaned = reply.to_string();
 
     let markers = ["[emotion:", "[Emotion:", "[EMOTION:"];
@@ -140,13 +122,12 @@ pub fn parse_from_reply(user_id: u64, reply: &str) -> String {
             if let Some(end) = cleaned[tag_start..].find(']') {
                 let emotion_str = cleaned[tag_start..tag_start + end].trim();
                 let detected = EmotionType::from_str(emotion_str);
-                state.history.push((state.current, now));
-                if state.history.len() > 5 {
-                    state.history.remove(0);
-                }
-                state.current = detected;
-                state.intensity = (state.intensity + 0.2).min(1.0);
-                state.last_update = now;
+
+                // 使用情绪动力学更新
+                state.update_emotional_dynamics(
+                    Some((&detected, 0.2, "AI自我报告情绪", TriggerType::SelfReflection)),
+                    0.0,
+                );
                 update_state(user_id, state);
 
                 let full_end = tag_start + end + 1;

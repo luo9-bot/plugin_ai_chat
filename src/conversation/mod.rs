@@ -3,6 +3,7 @@
 pub mod batch;
 pub mod context;
 pub mod handler;
+pub mod attention;
 
 use crate::{config, with_state, with_shared_state, read_shared_state, is_admin};
 use tracing::{debug, info, warn};

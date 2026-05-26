@@ -6,7 +6,7 @@ mod context;
 
 // state.rs
 pub use state::{
-    CrisisLevel, EmotionType, EmotionState,
+    CrisisLevel, EmotionType, EmotionState, EmotionTrigger, TriggerType,
     user_count, get_state, update_state, decay, describe,
 };
 

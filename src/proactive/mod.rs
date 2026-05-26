@@ -1,6 +1,7 @@
 mod runtime;
 mod generate;
 mod trigger;
+pub mod motivation;
 
 // ── re-exports ────────────────────────────────────────────────
 

@@ -30,6 +30,8 @@ pub mod replyer;
 pub mod runtime;
 pub mod schedule;
 pub mod self_memory;
+pub mod circadian;
+pub mod social_battery;
 #[cfg(feature = "plugin")]
 pub mod sender;
 pub mod state;
@@ -367,6 +369,16 @@ fn check_periodic() {
     LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
     debug!("periodic: starting check cycle");
 
+    // 社交电量更新
+    if config::get().humanity.social_battery_enabled {
+        let mut battery = social_battery::load();
+        social_battery::update(&mut battery);
+        social_battery::save(&battery);
+    }
+
+    // 主动消息动机更新
+    proactive::motivation::update_motivations();
+
     // 情绪衰减 + 主动消息检查 (分步获取锁，释放后再调用 proactive/emotion)
     let mut all_users: Vec<(u64, u64)> = Vec::new();
 
@@ -421,6 +433,9 @@ fn check_periodic() {
         quota::decay_all_interest();
         debug!("interest: decayed all scores");
     }
+
+    // 每日遗忘扫描
+    memory::unpredictability::run_forgetting_scan();
 
     // 工作记忆清理 (每次周期检查都执行，轻量级)
     let expire_hours = config::get().memory.working_memory_expire_hours;
@@ -478,6 +493,21 @@ fn check_periodic() {
     for group_id in active_review_groups {
         with_state(|s| { s.last_review_times.insert(group_id, now); });
         do_post_conversation_reflection(group_id);
+    }
+
+    // 内心独白：生成和衰减
+    if config::get().humanity.inner_thought_enabled {
+        if let Some(thought) = self_memory::inner_thought::try_generate() {
+            debug!(content = %thought.content, "inner_thought: new thought generated");
+            // 有行动潜力的想法加入自我记忆，可能触发主动消息
+            if thought.action_potential > 0.5 {
+                self_memory::add(
+                    &thought.content,
+                    self_memory::ThoughtCategory::Feeling,
+                );
+            }
+        }
+        self_memory::inner_thought::decay_thoughts();
     }
 
     // 定时空闲反思 (从配置读取间隔)

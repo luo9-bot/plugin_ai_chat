@@ -2,6 +2,8 @@
 //!
 //! 替代原有的 batch_decide，用社交语境判断替代硬性规则。
 
+pub mod behavior_emergence;
+
 
 use std::collections::HashMap;
 use std::sync::Mutex;

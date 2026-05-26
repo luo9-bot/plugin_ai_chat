@@ -64,6 +64,9 @@ pub struct Config {
     /// 默认开启群聊的群号列表（无需管理员手动发送"开启对话"）
     #[serde(default)]
     pub auto_start_groups: Vec<u64>,
+    /// 人类化行为配置
+    #[serde(default)]
+    pub humanity: HumanityConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -593,6 +596,158 @@ impl Default for QuotaConfig {
     }
 }
 
+// ── 人类化行为配置 ──────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HumanityConfig {
+    // 社交电量
+    #[serde(default = "default_true")]
+    pub social_battery_enabled: bool,
+    #[serde(default = "default_battery_capacity")]
+    pub battery_capacity: f32,
+    #[serde(default = "default_battery_drain_rate")]
+    pub battery_drain_rate: f32,
+    #[serde(default = "default_battery_recharge_rate")]
+    pub battery_recharge_rate: f32,
+    #[serde(default = "default_burnout_threshold")]
+    pub burnout_threshold: f32,
+    #[serde(default = "default_burnout_recovery_mult")]
+    pub burnout_recovery_mult: f32,
+
+    // 昼夜节律
+    #[serde(default = "default_true")]
+    pub circadian_enabled: bool,
+    #[serde(default = "default_circadian_amplitude")]
+    pub circadian_amplitude: f32,
+    #[serde(default = "default_circadian_phase_offset")]
+    pub circadian_phase_offset: f32,
+
+    // 认知偏差
+    #[serde(default = "default_true")]
+    pub cognitive_biases_enabled: bool,
+    #[serde(default)]
+    pub cognitive_biases: CognitiveBiasesConfig,
+
+    // 注意力
+    #[serde(default = "default_true")]
+    pub attention_enabled: bool,
+
+    // 满足性决策
+    #[serde(default = "default_true")]
+    pub satisficing_enabled: bool,
+    #[serde(default = "default_satisficing_threshold")]
+    pub satisficing_threshold: f32,
+    #[serde(default = "default_satisficing_max_iterations")]
+    pub satisficing_max_iterations: u32,
+    #[serde(default = "default_satisficing_good_enough_probability")]
+    pub satisficing_good_enough_probability: f32,
+
+    // 变速回复
+    #[serde(default = "default_true")]
+    pub response_timing_enabled: bool,
+    #[serde(default = "default_split_reply_probability")]
+    pub split_reply_probability: f32,
+    #[serde(default = "default_follow_up_probability")]
+    pub follow_up_probability: f32,
+    #[serde(default = "default_self_correction_probability")]
+    pub self_correction_probability: f32,
+    #[serde(default = "default_thinking_pause_probability")]
+    pub thinking_pause_probability: f32,
+    #[serde(default = "default_base_typing_speed")]
+    pub base_typing_speed: f32,
+
+    // 不可预测性
+    #[serde(default = "default_true")]
+    pub unpredictability_enabled: bool,
+    #[serde(default = "default_whim_probability")]
+    pub whim_probability: f32,
+    #[serde(default = "default_opinion_drift_rate")]
+    pub opinion_drift_rate: f32,
+    #[serde(default = "default_forgetting_rate")]
+    pub forgetting_rate: f32,
+    #[serde(default = "default_association_jump_probability")]
+    pub association_jump_probability: f32,
+
+    // 回复人性扰动
+    #[serde(default = "default_true")]
+    pub humanity_filter_enabled: bool,
+    #[serde(default = "default_catchphrase_probability")]
+    pub catchphrase_probability: f32,
+
+    // 内心独白
+    #[serde(default = "default_true")]
+    pub inner_thought_enabled: bool,
+    #[serde(default = "default_inner_thought_interval_min")]
+    pub inner_thought_interval_min: u64,
+    #[serde(default = "default_inner_thought_interval_max")]
+    pub inner_thought_interval_max: u64,
+}
+
+impl Default for HumanityConfig {
+    fn default() -> Self {
+        Self {
+            social_battery_enabled: true,
+            battery_capacity: default_battery_capacity(),
+            battery_drain_rate: default_battery_drain_rate(),
+            battery_recharge_rate: default_battery_recharge_rate(),
+            burnout_threshold: default_burnout_threshold(),
+            burnout_recovery_mult: default_burnout_recovery_mult(),
+            circadian_enabled: true,
+            circadian_amplitude: default_circadian_amplitude(),
+            circadian_phase_offset: default_circadian_phase_offset(),
+            cognitive_biases_enabled: true,
+            cognitive_biases: CognitiveBiasesConfig::default(),
+            attention_enabled: true,
+            satisficing_enabled: true,
+            satisficing_threshold: default_satisficing_threshold(),
+            satisficing_max_iterations: default_satisficing_max_iterations(),
+            satisficing_good_enough_probability: default_satisficing_good_enough_probability(),
+            response_timing_enabled: true,
+            split_reply_probability: default_split_reply_probability(),
+            follow_up_probability: default_follow_up_probability(),
+            self_correction_probability: default_self_correction_probability(),
+            thinking_pause_probability: default_thinking_pause_probability(),
+            base_typing_speed: default_base_typing_speed(),
+            unpredictability_enabled: true,
+            whim_probability: default_whim_probability(),
+            opinion_drift_rate: default_opinion_drift_rate(),
+            forgetting_rate: default_forgetting_rate(),
+            association_jump_probability: default_association_jump_probability(),
+            humanity_filter_enabled: true,
+            catchphrase_probability: default_catchphrase_probability(),
+            inner_thought_enabled: true,
+            inner_thought_interval_min: default_inner_thought_interval_min(),
+            inner_thought_interval_max: default_inner_thought_interval_max(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CognitiveBiasesConfig {
+    #[serde(default = "default_confirmation_bias")]
+    pub confirmation_bias: f32,
+    #[serde(default = "default_recency_bias")]
+    pub recency_bias: f32,
+    #[serde(default = "default_mood_congruence")]
+    pub mood_congruence: f32,
+    #[serde(default = "default_anchoring_strength")]
+    pub anchoring_strength: f32,
+    #[serde(default = "default_availability_heuristic")]
+    pub availability_heuristic: f32,
+}
+
+impl Default for CognitiveBiasesConfig {
+    fn default() -> Self {
+        Self {
+            confirmation_bias: default_confirmation_bias(),
+            recency_bias: default_recency_bias(),
+            mood_congruence: default_mood_congruence(),
+            anchoring_strength: default_anchoring_strength(),
+            availability_heuristic: default_availability_heuristic(),
+        }
+    }
+}
+
 // ── 默认值 ──────────────────────────────────────────────────────
 
 pub(super) fn default_prompts() -> String { "default.txt".into() }
@@ -671,6 +826,33 @@ fn default_auto_ban_threshold() -> u32 { 10 }
 fn default_steal_emoji() -> bool { true }
 fn default_max_reg_num() -> usize { 64 }
 fn default_do_replace() -> bool { true }
+fn default_battery_capacity() -> f32 { 100.0 }
+fn default_battery_drain_rate() -> f32 { 2.0 }
+fn default_battery_recharge_rate() -> f32 { 0.5 }
+fn default_burnout_threshold() -> f32 { 5.0 }
+fn default_burnout_recovery_mult() -> f32 { 0.5 }
+fn default_circadian_amplitude() -> f32 { 0.3 }
+fn default_circadian_phase_offset() -> f32 { 0.0 }
+fn default_confirmation_bias() -> f32 { 0.3 }
+fn default_recency_bias() -> f32 { 0.4 }
+fn default_mood_congruence() -> f32 { 0.5 }
+fn default_anchoring_strength() -> f32 { 0.3 }
+fn default_availability_heuristic() -> f32 { 0.4 }
+fn default_satisficing_threshold() -> f32 { 0.55 }
+fn default_satisficing_max_iterations() -> u32 { 3 }
+fn default_satisficing_good_enough_probability() -> f32 { 0.15 }
+fn default_split_reply_probability() -> f32 { 0.1 }
+fn default_follow_up_probability() -> f32 { 0.08 }
+fn default_self_correction_probability() -> f32 { 0.03 }
+fn default_thinking_pause_probability() -> f32 { 0.15 }
+fn default_base_typing_speed() -> f32 { 5.0 }
+fn default_whim_probability() -> f32 { 0.03 }
+fn default_opinion_drift_rate() -> f32 { 0.01 }
+fn default_forgetting_rate() -> f32 { 0.005 }
+fn default_association_jump_probability() -> f32 { 0.05 }
+fn default_catchphrase_probability() -> f32 { 0.1 }
+fn default_inner_thought_interval_min() -> u64 { 300 }
+fn default_inner_thought_interval_max() -> u64 { 900 }
 
 /// 表情包配置
 #[derive(Debug, Clone, Deserialize)]

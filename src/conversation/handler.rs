@@ -2,10 +2,11 @@
 
 use crate::{
     activity, anti_injection, config, conversation_end, emotion,
-    mental_state, planner, replyer, sender, vision, working_memory,
+    mental_state, person_info, planner, replyer, sender, social_battery, vision, working_memory,
     util, with_shared_state, read_shared_state,
     processing_users, ProcessingGuard,
 };
+use super::attention;
 use tracing::{debug, info, warn};
 
 /// 清理 AI 回复：移除自记忆标签，将中文字符间的空格转为分段符
@@ -115,6 +116,13 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
 
     // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
     with_shared_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
+
+    // 更新注意力模型
+    if config::get().humanity.attention_enabled {
+        let mut attn = attention::load_attention();
+        attention::update_attention(&mut attn, user_id, true);
+        attention::save_attention(&attn);
+    }
 
     let history = read_shared_state(|s| {
         let user_history = s.get_history_clone(group_id, user_id);
@@ -267,6 +275,27 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     let cleaned_reply = clean_reply(&cleaned_reply);
                     info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "replyer: got reply");
 
+                    // ── 人性滤镜：回复后处理 ──
+                    let cleaned_reply = if config::get().humanity.humanity_filter_enabled {
+                        let battery_level = if config::get().humanity.social_battery_enabled {
+                            social_battery::load().level / config::get().humanity.battery_capacity
+                        } else {
+                            0.7
+                        };
+                        let attention_level = if config::get().humanity.attention_enabled {
+                            attention::load_attention().attention_level
+                        } else {
+                            0.7
+                        };
+                        crate::sender::timing::apply_humanity_filter(
+                            &cleaned_reply,
+                            attention_level,
+                            battery_level,
+                        )
+                    } else {
+                        cleaned_reply
+                    };
+
                     // ── 输出层防护：检查 AI 回复安全性 (始终开启) ──
                     let output_check = anti_injection::check_output(user_id, &cleaned_reply, &config::get().anti_injection);
 
@@ -295,6 +324,18 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     } else {
                         sender::send_with_typing(0, user_id, &final_reply);
                     }
+
+                    // 记录社交电量消耗
+                    if config::get().humanity.social_battery_enabled {
+                        let mut battery = social_battery::load();
+                        let emo = emotion::get_state(user_id);
+                        social_battery::set_emotion_modifier(&mut battery, &emo.current);
+                        social_battery::record_active_reply(&mut battery);
+                        social_battery::save(&battery);
+                    }
+
+                    // 记录关系交互
+                    person_info::relationship::record_interaction(user_id, true);
 
                     // 记录回复时间
                     with_shared_state(|s| {

@@ -1,6 +1,7 @@
 //! 人物档案系统
 
 mod store;
+pub mod relationship;
 
 pub use store::*;
 

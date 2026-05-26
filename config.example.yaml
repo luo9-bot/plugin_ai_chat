@@ -269,6 +269,65 @@ mental_state:
   defect_base_probability: 0.1
 
 
+# ── 人类化行为配置 ─────────────────────────────────────────────
+# 控制 AI 的行为从"模拟人类输出"升级为"模拟人类过程"
+humanity:
+  # 社交电量：模拟人类的社交能量波动
+  social_battery_enabled: true
+  battery_capacity: 100.0          # 最大电量
+  battery_drain_rate: 2.0          # 每条回复消耗
+  battery_recharge_rate: 0.5       # 每分钟休息恢复
+  burnout_threshold: 5.0           # 倦怠触发阈值
+  burnout_recovery_mult: 0.5       # 倦怠后恢复速度倍率
+
+  # 昼夜节律：基于时间的连续精力变化
+  circadian_enabled: true
+  circadian_amplitude: 0.3         # 正弦曲线振幅
+  circadian_phase_offset: 0.0      # 人格偏移量（正=夜猫子，负=早起型）
+
+  # 认知偏差：模拟人类记忆检索的偏差
+  cognitive_biases_enabled: true
+  cognitive_biases:
+    confirmation_bias: 0.3         # 确认偏误
+    recency_bias: 0.4              # 近因效应
+    mood_congruence: 0.5           # 情绪一致性
+    anchoring_strength: 0.3        # 锚定效应
+    availability_heuristic: 0.4    # 可得性启发
+
+  # 注意力模型：影响回复深度和风格
+  attention_enabled: true
+
+  # 满足性决策：生成多个候选，选第一个够好的
+  satisficing_enabled: true
+  satisficing_threshold: 0.55      # 满足阈值
+  satisficing_max_iterations: 3    # 最大候选数
+  satisficing_good_enough_probability: 0.15  # "差不多得了"概率
+
+  # 变速回复：动态打字延迟和回复拆分
+  response_timing_enabled: true
+  split_reply_probability: 0.1     # 拆分回复概率
+  follow_up_probability: 0.08      # 补充消息概率
+  self_correction_probability: 0.03  # 自我纠正概率
+  thinking_pause_probability: 0.15   # 思考暂停概率
+  base_typing_speed: 5.0           # 基础打字速度
+
+  # 不可预测性：概率性观点漂移和遗忘
+  unpredictability_enabled: true
+  whim_probability: 0.03           # 心血来潮概率
+  opinion_drift_rate: 0.01         # 观点漂移率
+  forgetting_rate: 0.005           # 自然遗忘率
+  association_jump_probability: 0.05  # 联想跳跃概率
+
+  # 回复人性扰动
+  humanity_filter_enabled: true
+  catchphrase_probability: 0.1     # 口头禅概率
+
+  # 内心独白
+  inner_thought_enabled: true
+  inner_thought_interval_min: 300  # 最小间隔(秒)
+  inner_thought_interval_max: 900  # 最大间隔(秒)
+
+
 # ── 群聊回复配额 (分时段限制回复次数) ───────────────────────
 # 以 5 分钟为最小配额段，按时段分配每段的最大回复次数
 # 配额用完后消息进入延迟审查，对话结束后由反思机制统一处理

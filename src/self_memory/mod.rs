@@ -1,6 +1,7 @@
 mod store;
 mod reflect;
 mod sync;
+pub mod inner_thought;
 
 // ── re-exports ────────────────────────────────────────────────
 

@@ -82,6 +82,7 @@ pub fn init() {
                 blacklist: Vec::new(),
                 auto_start_users: Vec::new(),
                 auto_start_groups: Vec::new(),
+                humanity: HumanityConfig::default(),
             }
         }
     };

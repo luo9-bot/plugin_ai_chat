@@ -1,9 +1,13 @@
 //! 上下文构建：组装注入到 system prompt 的额外上下文
+//!
+//! 根据关系深度、注意力状态、电量选择性注入内容。
+//! 不是把所有信息平等注入，而是根据当前状态决定注入什么和注入多少。
 
 use crate::{
-    config, emotion, memory, mental_state, personality, schedule, self_memory,
-    working_memory, read_shared_state,
+    circadian, config, emotion, memory, mental_state, person_info, personality,
+    schedule, self_memory, social_battery, working_memory, read_shared_state,
 };
+use super::attention;
 
 /// 向量检索记忆的冷却缓存：每轮对话最多检索一次
 static LAST_SEMANTIC_SEARCH: std::sync::Mutex<Option<std::collections::HashMap<u64, u64>>> =
@@ -12,9 +16,29 @@ static LAST_SEMANTIC_SEARCH: std::sync::Mutex<Option<std::collections::HashMap<u
 const SEMANTIC_SEARCH_COOLDOWN: u64 = 120; // 同用户 2 分钟内不重复检索
 
 /// 构建注入到 system prompt 的额外上下文
+///
+/// 选择性注入原则：
+/// - 关系越深，注入越多个性化内容（共享记忆、inside jokes）
+/// - 注意力越低，注入越少记忆
+/// - 电量越低，注入行为简化提示
 pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
     let mut parts = Vec::new();
     let cfg = config::get();
+
+    // 获取当前状态用于选择性注入
+    let relationship = person_info::relationship::get_relationship(user_id);
+    let attention_level = if cfg.humanity.attention_enabled {
+        attention::load_attention().attention_level
+    } else {
+        0.7
+    };
+    let battery_level_frac = if cfg.humanity.social_battery_enabled {
+        social_battery::load().level / cfg.humanity.battery_capacity
+    } else {
+        0.7
+    };
+
+    // ── 基础层：始终注入 ──
 
     // 当前对话用户标识 (让 AI 知道在和谁说话)
     let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
@@ -36,10 +60,50 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     parts.push(format!("# 当前对话用户\nuser_id: {}{}", user_id, darling_info));
 
     // 自我记忆 (bot 的内心想法)
-    let self_mem = self_memory::get_context(config::get().self_reflection.max_thoughts.min(8));
+    let self_mem = self_memory::get_context(cfg.self_reflection.max_thoughts.min(8));
     if !self_mem.is_empty() {
         parts.push(self_mem);
     }
+
+    // 内心独白上下文
+    if cfg.humanity.inner_thought_enabled {
+        let thought_ctx = self_memory::inner_thought::get_inner_thought_context(3);
+        if !thought_ctx.is_empty() {
+            parts.push(thought_ctx);
+        }
+    }
+
+    // ── 关系层：根据亲密度选择性注入 ──
+
+    // 关系上下文
+    let rel_ctx = person_info::relationship::get_relationship_context(user_id);
+    if !rel_ctx.is_empty() {
+        parts.push(rel_ctx);
+    }
+
+    // 亲密度 > 0.3：注入共享记忆
+    if relationship.intimacy > 0.3 {
+        let shared_ctx = person_info::relationship::get_shared_memories_context(user_id, 3);
+        if !shared_ctx.is_empty() {
+            parts.push(shared_ctx);
+        }
+    }
+
+    // 亲密度 > 0.6：注入 inside jokes
+    if relationship.intimacy > 0.6 {
+        let jokes_ctx = person_info::relationship::get_inside_jokes_context(user_id);
+        if !jokes_ctx.is_empty() {
+            parts.push(jokes_ctx);
+        }
+    }
+
+    // 人物档案上下文
+    let person_ctx = person_info::get_person_context(user_id);
+    if !person_ctx.is_empty() {
+        parts.push(person_ctx);
+    }
+
+    // ── 记忆层：根据注意力决定注入量 ──
 
     // 向量检索相关记忆：用最近一条用户消息查询最相关的记忆（2 分钟冷却）
     if let Some((_, last_user_msg)) = history.iter().rev().find(|(role, _)| role == "user") {
@@ -50,7 +114,10 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
                 .map_or(true, |&last| now.saturating_sub(last) >= SEMANTIC_SEARCH_COOLDOWN)
         };
         if should_search {
-            let relevant = crate::memory::search_memories(user_id, group_id, last_user_msg, 5);
+            // 根据注意力调整检索数量
+            let memory_count = (attention_level * 8.0) as usize;
+            let memory_count = memory_count.max(2); // 至少检索2条
+            let relevant = crate::memory::search_memories(user_id, group_id, last_user_msg, memory_count);
             if !relevant.is_empty() {
                 let rel_lines: Vec<String> = relevant.iter().map(|r| {
                     format!("- {}", r.content)
@@ -76,11 +143,14 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         }
     }
 
-    // 人格上下文
+    // ── 人格层 ──
+
     let pers = personality::get_prompt_context();
     if !pers.is_empty() {
         parts.push(pers);
     }
+
+    // ── 状态层：情绪 + 注意力 + 电量 + 节律 ──
 
     // 对话历史摘要（AI 注意力机制压缩的长期记忆）
     let summary = crate::read_shared_state(|s| {
@@ -104,21 +174,62 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(emo);
     }
 
+    // 注意力状态上下文
+    if cfg.humanity.attention_enabled {
+        let attn_state = attention::load_attention();
+        let attn_ctx = attention::get_attention_context(&attn_state);
+        if !attn_ctx.is_empty() {
+            parts.push(attn_ctx);
+        }
+    }
+
+    // 社交电量上下文
+    if cfg.humanity.social_battery_enabled {
+        let battery = social_battery::load();
+        let battery_ctx = social_battery::get_battery_context(&battery);
+        if !battery_ctx.is_empty() {
+            parts.push(battery_ctx);
+        }
+    }
+
+    // 昼夜节律上下文
+    if cfg.humanity.circadian_enabled {
+        let rhythm = circadian::calculate();
+        let rhythm_ctx = circadian::get_circadian_context(&rhythm);
+        if !rhythm_ctx.is_empty() {
+            parts.push(rhythm_ctx);
+        }
+    }
+
     // 心理状态上下文 (担忧 + 要考量)
     let mental_ctx = mental_state::get_prompt_context(
-        config::get().mental_state.concerns_max,
-        config::get().mental_state.deliberations_max,
+        cfg.mental_state.concerns_max,
+        cfg.mental_state.deliberations_max,
     );
     if !mental_ctx.is_empty() {
         parts.push(mental_ctx);
     }
 
-    // 对话状态指令
+    // ── 行为暗示层：电量/注意力驱动的行为提示 ──
+
+    // 对话阶段提示
     let interaction_count = history.len();
     if interaction_count > 20 {
         parts.push("- 你们已经聊了很久了，关系很亲近，可以更自然随意".into());
     } else if interaction_count > 10 {
         parts.push("- 你们已经有一定的了解了".into());
+    }
+
+    // 电量相关的行为暗示（自然语言，非数值）
+    if battery_level_frac < 0.3 {
+        parts.push("- 你现在有些疲惫，可以简短回复，不用每条都说很多。如果不想说话可以用表情包代替".into());
+    } else if battery_level_frac < 0.15 {
+        parts.push("- 你现在非常累，不想回复的话可以简单说「累了」之类的话".into());
+    }
+
+    // 注意力相关的行为暗示
+    if attention_level < 0.3 {
+        parts.push("- 你现在注意力不太集中，不需要进行分析或深入思考，简单回应即可".into());
     }
 
     // Bot 自己最近的消息 (帮助保持一致性，群聊和私聊都需要)

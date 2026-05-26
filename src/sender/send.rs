@@ -7,6 +7,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use super::segments::{normalize_segment_sep, split_segments, clean_reply};
+use super::timing::ResponseTiming;
 use crate::anti_injection;
 use crate::config;
 
@@ -26,22 +27,82 @@ fn raw_send_msg(group_id: u64, user_id: u64, text: &str) {
 
 /// 发送消息，带打字模拟延迟
 pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
-    let conv = &config::get().conversation;
-    let normalized = normalize_segment_sep(reply);
+    let cfg = config::get();
+
+    // 构建动态回复时机
+    let mut timing = ResponseTiming::default();
+
+    // 收集当前状态以调整速度修正系数
+    if cfg.humanity.response_timing_enabled {
+        let battery_level = if cfg.humanity.social_battery_enabled {
+            crate::social_battery::load().level / cfg.humanity.battery_capacity
+        } else {
+            0.7
+        };
+        let circadian_energy = if cfg.humanity.circadian_enabled {
+            crate::circadian::calculate().energy_level
+        } else {
+            0.7
+        };
+        let attention_level = if cfg.humanity.attention_enabled {
+            crate::conversation::attention::load_attention().attention_level
+        } else {
+            0.7
+        };
+        timing.update_modifiers(battery_level, circadian_energy, attention_level);
+    }
+
+    // 检查是否应该拆分回复（"先发简短反应，再发完整内容"）
+    let reply_text = if cfg.humanity.response_timing_enabled && timing.should_split_reply(reply) {
+        if let Some((first, second)) = ResponseTiming::split_reply(reply) {
+            // 先发第一部分
+            let delay = timing.calculate_delay(&first);
+            if delay > 0 {
+                thread::sleep(Duration::from_millis(delay));
+            }
+            raw_send_msg(group_id, user_id, &first);
+
+            // 短暂停顿后发第二部分
+            thread::sleep(Duration::from_millis(800 + fastrand::u64(200..1500)));
+
+            // 第二部分作为主要回复内容
+            second
+        } else {
+            reply.to_string()
+        }
+    } else {
+        reply.to_string()
+    };
+
+    let normalized = normalize_segment_sep(&reply_text);
     let parts = split_segments(&normalized);
 
     for (i, text) in parts.iter().enumerate() {
+        if i == 0 {
+            // 第一条消息前应用思考延迟
+            let delay = timing.calculate_delay(text);
+            if delay > 0 {
+                thread::sleep(Duration::from_millis(delay.min(2000))); // 首条消息思考延迟最多2秒
+            }
+        }
+
         raw_send_msg(group_id, user_id, text);
 
         if i < parts.len() - 1 {
-            let char_count = text.chars().count();
-            let delay_secs = char_count as f64 / conv.typing_speed;
-            let delay_ms = (delay_secs * 1000.0) as u64;
-            let delay_ms = delay_ms.min(conv.max_typing_delay_ms);
+            let delay = timing.calculate_delay(text);
+            let delay_ms = delay.min(cfg.conversation.max_typing_delay_ms);
             if delay_ms > 0 {
                 thread::sleep(Duration::from_millis(delay_ms));
             }
         }
+    }
+
+    // Follow-up 消息（"对了还有一件事..."）
+    if cfg.humanity.response_timing_enabled && timing.should_follow_up() {
+        let follow_up_delay = fastrand::u64(1500..5000);
+        thread::sleep(Duration::from_millis(follow_up_delay));
+        let follow_up = ResponseTiming::generate_follow_up();
+        raw_send_msg(group_id, user_id, follow_up);
     }
 }
 

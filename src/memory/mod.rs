@@ -6,9 +6,12 @@ pub mod retrieval;
 pub mod graph;
 pub mod embedding;
 pub mod vector_store;
+pub mod cognitive_biases;
+pub mod unpredictability;
 
 use std::collections::HashMap;
-use tracing::debug;
+
+use crate::config;
 
 pub use store::*;
 pub use operations::*;
@@ -93,6 +96,18 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
         if let Some(content) = doc_map.get(&result.id) {
             result.content = content.clone();
         }
+    }
+
+    // 应用认知偏差修正
+    if config::get().humanity.cognitive_biases_enabled {
+        let emotion = crate::emotion::get_state(user_id);
+        let mut biases = cognitive_biases::load_biases();
+        results = cognitive_biases::apply_cognitive_biases(
+            results,
+            &emotion.current,
+            &mut biases,
+        );
+        cognitive_biases::save_biases(&biases);
     }
 
     results
