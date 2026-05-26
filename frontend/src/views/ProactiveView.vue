@@ -18,31 +18,29 @@
         <div class="config-item">
           <label>启用</label>
           <div class="config-val">
-            <button class="toggle-btn" :class="{ on: config.enabled }" @click="toggleEnabled">
+            <button class="toggle-btn" :class="{ on: isEnabled }" @click="toggleEnabled">
               <span class="toggle-knob"></span>
             </button>
-            <span>{{ config.enabled ? '已开启' : '已关闭' }}</span>
+            <span>{{ isEnabled ? '已开启' : '已关闭' }}</span>
+            <span v-if="config.enabled === null" class="hint">(使用默认)</span>
           </div>
         </div>
         <div class="config-item">
           <label>免打扰时段</label>
-          <span>{{ config.quiet_start ?? 23 }}:00 — {{ config.quiet_end ?? 7 }}:00</span>
+          <span>
+            {{ config.quiet_start != null ? config.quiet_start : '默认' }}:00 — {{ config.quiet_end != null ? config.quiet_end : '默认' }}:00
+            <span v-if="config.quiet_start == null" class="hint">(使用全局配置)</span>
+          </span>
         </div>
         <div class="config-item">
           <label>间隔</label>
-          <span>{{ config.interval ?? 3600 }} 秒</span>
+          <span>
+            {{ config.interval != null ? config.interval + ' 秒' : '使用全局配置' }}
+          </span>
         </div>
-        <div class="config-item">
-          <label>最大忽略</label>
-          <span>{{ config.max_ignore ?? 3 }} 次</span>
-        </div>
-        <div class="config-item">
-          <label>低情绪倍率</label>
-          <span>{{ config.low_mood_multiplier ?? 2.0 }}x</span>
-        </div>
-        <div class="config-item">
-          <label>检查间隔</label>
-          <span>{{ config.check_interval ?? 60 }} 秒</span>
+        <div class="config-item" v-if="config.group_last_sent">
+          <label>群最近发送</label>
+          <span>{{ Object.keys(config.group_last_sent).length }} 个群有记录</span>
         </div>
       </div>
     </div>
@@ -74,6 +72,7 @@ import { api } from '../api.js'
 
 const config = ref(null)
 const userStates = ref([])
+const isEnabled = ref(false)
 
 const statCards = ref([{ label: '活跃用户', value: '-', sub: '主动对话', color: '#6366f1' }])
 
@@ -93,7 +92,11 @@ async function load() {
       statCards.value[0].value = userStates.value.length
     }
     // Load config separately
-    try { config.value = await api('/api/proactive/config') } catch {}
+    try {
+      config.value = await api('/api/proactive/config')
+      // RuntimeConfig.enabled is Option<bool>, null means use default
+      isEnabled.value = config.value?.enabled != null ? config.value.enabled : true
+    } catch {}
   } catch {}
 }
 
@@ -143,4 +146,5 @@ tr:hover td { background: var(--surface-hover); }
 .badge-state { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 4px; }
 .badge-state.ok { background: rgba(52,211,153,0.15); color: var(--success); }
 .badge-state.tired { background: rgba(251,191,36,0.15); color: var(--warning); }
+.hint { font-size: 11px; color: var(--text-3); margin-left: 4px; }
 </style>

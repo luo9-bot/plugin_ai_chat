@@ -45,7 +45,8 @@
 
         <div class="glass-card notice-card">
           <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M10 2l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V5l7-3z" stroke="currentColor" stroke-width="1.5"/><path d="M9 9h2v5H9zM9 6h2v2H9z" fill="currentColor"/></svg>
-          <span>修改配置后需点击「保存」并重启插件生效。编辑时只需填要改的字段，留空的字段保持原值。</span>
+          <span>修改配置后点击「保存」再「重新载入配置」即可生效，无需重启。</span>
+          <button class="btn btn-primary btn-sm" @click="reloadConfig" style="margin-left:auto;flex-shrink:0">🔄 重新载入配置</button>
         </div>
       </div>
     </div>
@@ -326,6 +327,14 @@ async function saveConfig() {
   } catch (e) {
     alert('保存失败: ' + e.message)
   }
+}
+
+async function reloadConfig() {
+  try {
+    const r = await api('/api/config/reload', { method: 'POST' })
+    alert(r.message || '配置已重新载入')
+    load()
+  } catch (e) { alert('重载失败: ' + e.message) }
 }
 
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })

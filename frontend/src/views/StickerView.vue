@@ -19,7 +19,7 @@
       <div v-else class="sticker-grid">
         <div v-for="(s, i) in filtered" :key="i" class="sticker-card">
           <div class="sticker-img">
-            <img :src="'/api/sticker/' + s.hash + '/image'" :alt="s.hash" loading="lazy" @error="$event.target.style.display='none'" />
+            <img :src="'/api/sticker/image/' + s.hash" :alt="s.hash" loading="lazy" @error="$event.target.style.display='none'" />
           </div>
           <div class="sticker-info">
             <div class="sticker-tags" v-if="s.description || s.vlm_description">

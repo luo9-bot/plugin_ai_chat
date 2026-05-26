@@ -167,7 +167,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"sync") => handlers::handle_sync(&method, &api_segs[1..], &body),
         Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..], &body),
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
-        Some(&"config") => handlers::handle_config(&method, &body),
+        Some(&"config") => handlers::handle_config(&method, &api_segs[1..], &body),
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
         Some(&"sticker") => {
             match api_segs.get(1).copied() {

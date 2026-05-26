@@ -1206,7 +1206,19 @@ pub fn handle_anti_injection(
 
 // ── 配置管理 ──────────────────────────────────────────────────
 
-pub fn handle_config(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_config(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    // POST /api/config/reload — 热重载配置
+    if *method == Method::Post && segs.first() == Some(&"reload") {
+        match config::reload() {
+            Ok(()) => return ok(serde_json::json!({"ok": true, "message": "配置已重新载入"})),
+            Err(e) => return err(500, &e),
+        }
+    }
+    // 原有的 config GET/PUT 逻辑
+    handle_config_main(method, body)
+}
+
+fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     let config_path = config::data_dir().join("config.yaml");
     match method {
         Method::Get => {

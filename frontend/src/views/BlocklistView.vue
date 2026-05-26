@@ -30,13 +30,13 @@ const addId = ref('')
 async function load() {
   try {
     const d = await api('/api/blocklist')
-    list.value = d.list || []
+    list.value = d.blocked || []
   } catch {}
 }
-async function remove(id) { await api('/api/blocklist/' + id + '/remove', { method: 'POST' }); load() }
+async function remove(id) { await api('/api/blocklist/' + id, { method: 'DELETE' }); load() }
 async function addUser() {
   if (!addId.value.trim()) return
-  await api('/api/blocklist/' + addId.value.trim() + '/add', { method: 'POST' })
+  await api('/api/blocklist', { method: 'POST', body: JSON.stringify({ user_id: Number(addId.value.trim()) }) })
   addId.value = ''
   load()
 }

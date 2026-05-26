@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::fs;
+use tracing::debug;
 
 use super::init::{CONFIG, PROMPT, DATA_DIR, DEFAULT_CONFIG_YAML};
 use super::structs::Config;
@@ -8,12 +10,33 @@ pub fn data_dir() -> &'static PathBuf {
     DATA_DIR.get().expect("Config not initialized")
 }
 
-pub fn get() -> &'static Config {
-    CONFIG.get().expect("Config not initialized")
+/// 获取配置的克隆（每次调用会 clone，但 Config 很小且调用不频繁）
+pub fn get() -> Config {
+    CONFIG.read().unwrap().as_ref().expect("Config not initialized").clone()
 }
 
-pub fn prompt() -> &'static str {
-    PROMPT.get().map(|s| s.as_str()).unwrap_or("")
+/// 重新载入配置文件（热重载，无需重启插件）
+pub fn reload() -> Result<(), String> {
+    let config_path = data_dir().join("config.yaml");
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取配置失败: {}", e))?;
+    let config: Config = serde_yaml::from_str(&content)
+        .map_err(|e| format!("解析配置失败: {}", e))?;
+
+    // 更新提示词
+    let prompt_path = data_dir().join("prompts").join(&config.prompts);
+    if prompt_path.exists() {
+        let prompt_content = fs::read_to_string(&prompt_path).unwrap_or_default();
+        *PROMPT.write().unwrap() = prompt_content;
+    }
+
+    *CONFIG.write().unwrap() = Some(config);
+    debug!("config: hot-reloaded successfully");
+    Ok(())
+}
+
+pub fn prompt() -> String {
+    PROMPT.read().unwrap().clone()
 }
 
 /// 返回配置模板（带注释的 YAML）

@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 use tracing::debug;
 
 use super::structs::*;
 
 // ── 全局实例 ────────────────────────────────────────────────────
 
-pub(super) static CONFIG: OnceLock<Config> = OnceLock::new();
-pub(super) static PROMPT: OnceLock<String> = OnceLock::new();
+pub(super) static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
+pub(super) static PROMPT: RwLock<String> = RwLock::new(String::new());
 pub(super) static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn to_absolute(p: &PathBuf) -> PathBuf {
@@ -96,8 +96,8 @@ pub fn init() {
 
     let prompt_content = fs::read_to_string(&prompt_path).unwrap_or_default();
 
-    let _ = CONFIG.set(config);
-    let _ = PROMPT.set(prompt_content);
+    *CONFIG.write().unwrap() = Some(config);
+    *PROMPT.write().unwrap() = prompt_content;
 
     load_all();
 }

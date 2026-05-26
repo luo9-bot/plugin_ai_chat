@@ -583,7 +583,7 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     }
 
     // ── 防注入管理命令（需要权限校验） ──
-    if let Some(reply) = crate::anti_injection::handle_admin_command(user_id, msg, config::get()) {
+    if let Some(reply) = crate::anti_injection::handle_admin_command(user_id, msg, &config::get()) {
         return Some(reply);
     }
 

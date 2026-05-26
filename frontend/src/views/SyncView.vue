@@ -5,13 +5,16 @@
       <div v-if="!status" class="empty">加载中...</div>
       <div v-else>
         <div class="config-grid">
-          <div class="config-item"><label>连接状态</label><span>{{ status.connected ? '🟢 已连接' : '🔴 未连接' }}</span></div>
-          <div class="config-item"><label>最后同步</label><span>{{ status.last_sync ? fmtTime(status.last_sync) : '-' }}</span></div>
-          <div class="config-item"><label>同步计数</label><span>{{ status.sync_count || 0 }}</span></div>
+          <div class="config-item"><label>启用</label><span :style="{ color: status.enabled ? 'var(--success)' : 'var(--text-3)' }">{{ status.enabled ? '是' : '否' }}</span></div>
+          <div class="config-item"><label>API 地址</label><span class="mono">{{ status.api_url || '—' }}</span></div>
+          <div class="config-item"><label>数据库</label><span>{{ status.db_name || '—' }}</span></div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button class="btn btn-primary" style="flex:1" @click="syncNow">同步全部</button>
+        <div v-if="status.enabled" style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary" style="flex:1" @click="pushNow">推送全部</button>
           <button class="btn btn-ghost" style="flex:1" @click="load">刷新</button>
+        </div>
+        <div v-else style="margin-top:12px;padding:12px;background:var(--surface-hover);border-radius:var(--radius-sm);font-size:12px;color:var(--text-2)">
+          同步未启用，请在配置中设置 sync.enabled 和相关参数
         </div>
       </div>
     </div>
@@ -21,9 +24,13 @@
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
 const status = ref(null)
-function fmtTime(ts) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleString('zh-CN') }
-async function load() { try { status.value = await api('/api/sync') } catch {} }
-async function syncNow() { await api('/api/sync/sync', { method: 'POST' }); load() }
+async function load() { try { status.value = await api('/api/sync/status') } catch {} }
+async function pushNow() {
+  try {
+    const r = await api('/api/sync/push', { method: 'POST', body: JSON.stringify({ type: 'self_memory' }) })
+    alert('已推送，同步了 ' + (r.synced || 0) + ' 条')
+  } catch (e) { alert('推送失败: ' + e.message) }
+}
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 <style scoped>
@@ -33,6 +40,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .config-grid { display: flex; flex-direction: column; gap: 8px; }
 .config-item { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid var(--glass-border); }
 .config-item label { color: var(--text-2); }
+.mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
 .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }

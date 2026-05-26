@@ -229,7 +229,7 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
             extra_context
         };
 
-        crate::ai::chat(config::prompt(), &extra_context, &history, &ai_message)
+        crate::ai::chat(&config::prompt(), &extra_context, &history, &ai_message)
     } else {
         // 群聊：Planner → Replyer
         info!(user_id, group_id, ai_message = %ai_message, penalty = penalty_multiplier, "planner: starting");
