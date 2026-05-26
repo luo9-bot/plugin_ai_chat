@@ -110,7 +110,10 @@ fn record_group_message(group_id: u64, msg: &str) {
 fn push_proactive_to_history(group_id: u64, user_id: u64, msg: &str) {
     if group_id == 0 || user_id == 0 { return; }
     let max_pairs = crate::config::get().conversation.max_history;
-    with_shared_state(|s| s.push_history(group_id, user_id, "assistant", msg, max_pairs));
+    with_shared_state(|s| {
+        s.push_history(group_id, user_id, "assistant", msg, max_pairs);
+        s.push_group_history(group_id, "assistant", msg, max_pairs);
+    });
 }
 
 pub fn check_proactive_messages(user_id: u64, group_id: u64) {

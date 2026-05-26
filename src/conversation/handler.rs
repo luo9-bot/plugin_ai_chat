@@ -117,7 +117,23 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     with_shared_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
 
     let history = read_shared_state(|s| {
-        s.get_history_clone(group_id, user_id)
+        let user_history = s.get_history_clone(group_id, user_id);
+        if group_id > 0 {
+            // 群聊时合并群级历史，让用户看到群内其他成员触发的 bot 主动消息
+            let group_history = s.get_group_history_clone(group_id);
+            if !group_history.is_empty() {
+                // 群级历史在前，用户历史在后（群级历史包含 bot 的主动消息）
+                let mut merged = group_history;
+                // 只追加用户历史中群级历史没有的部分（去重）
+                for item in &user_history {
+                    if !merged.contains(item) {
+                        merged.push(item.clone());
+                    }
+                }
+                return merged;
+            }
+        }
+        user_history
     });
 
     // 组装额外上下文: 记忆 + 人格 + 情绪

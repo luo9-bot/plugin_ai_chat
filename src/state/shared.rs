@@ -37,6 +37,8 @@ pub struct SharedState {
     pub last_reviewed_timestamps: HashMap<u64, u64>,
     /// 各群组上次反思时的对话内容 (标准化后)
     pub last_reflected_content: HashMap<u64, String>,
+    /// 群级对话历史 (group_id → history)，用于群聊中跨用户共享上下文
+    pub group_history: HashMap<u64, Vec<(String, String)>>,
 }
 
 impl Default for SharedState {
@@ -57,6 +59,7 @@ impl SharedState {
             active_users: HashSet::new(),
             last_reviewed_timestamps: HashMap::new(),
             last_reflected_content: HashMap::new(),
+            group_history: HashMap::new(),
         }
     }
 
@@ -137,6 +140,24 @@ impl SharedState {
         let key: CtxKey = (group_id, user_id);
         self.contexts.get(&key)
             .map(|ctx| ctx.history.clone())
+            .unwrap_or_default()
+    }
+
+    /// 向群级历史追加一条消息（群聊中跨用户可见）
+    pub fn push_group_history(&mut self, group_id: u64, role: &str, content: &str, max_pairs: usize) {
+        if group_id == 0 { return; }
+        let history = self.group_history.entry(group_id).or_default();
+        history.push((role.to_string(), content.to_string()));
+        while history.len() > max_pairs * 2 {
+            history.remove(0);
+        }
+    }
+
+    /// 克隆群级历史
+    pub fn get_group_history_clone(&self, group_id: u64) -> Vec<(String, String)> {
+        if group_id == 0 { return vec![]; }
+        self.group_history.get(&group_id)
+            .cloned()
             .unwrap_or_default()
     }
 
