@@ -1380,3 +1380,122 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
         _ => err(405, "method not allowed"),
     }
 }
+
+// ── Handler: 人性化状态 ──────────────────────────────────────────
+
+pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
+    let cfg = config::get();
+
+    let battery = if cfg.humanity.social_battery_enabled {
+        let b = crate::social_battery::load();
+        Some(serde_json::json!({
+            "level": b.level,
+            "capacity": b.capacity,
+            "percentage": crate::social_battery::level_percentage(&b),
+            "is_burned_out": b.is_burned_out,
+            "is_passive_mode": b.is_passive_mode,
+            "active_minutes": b.active_minutes,
+        }))
+    } else { None };
+
+    let circadian = if cfg.humanity.circadian_enabled {
+        let c = crate::circadian::calculate();
+        Some(serde_json::json!({
+            "energy_level": c.energy_level,
+            "cognitive_clarity": c.cognitive_clarity,
+            "patience_level": c.patience_level,
+            "sociability": c.sociability,
+            "humor_sensitivity": c.humor_sensitivity,
+            "current_hour": c.current_hour,
+            "is_quiet_hours": crate::circadian::is_quiet_hours(),
+        }))
+    } else { None };
+
+    let attention = if cfg.humanity.attention_enabled {
+        let a = crate::conversation::attention::load_attention();
+        Some(serde_json::json!({
+            "attention_level": a.attention_level,
+            "flow_state": a.flow_state,
+            "focused_topic": a.focused_topic,
+            "flow_recovering": a.flow_recovery_until > crate::util::now_secs(),
+        }))
+    } else { None };
+
+    let biases = if cfg.humanity.cognitive_biases_enabled {
+        let b = crate::memory::cognitive_biases::load_biases();
+        Some(serde_json::json!({
+            "confirmation_bias": b.confirmation_bias,
+            "recency_bias": b.recency_bias,
+            "mood_congruence": b.mood_congruence,
+            "anchoring_strength": b.anchoring_strength,
+            "availability_heuristic": b.availability_heuristic,
+        }))
+    } else { None };
+
+    let motivation = crate::proactive::motivation::get_dominant_motivation()
+        .map(|(name, strength)| serde_json::json!({"type": name, "strength": strength}));
+
+    let rel_path = config::data_dir().join("relationships.json");
+    let rel_count = std::fs::read_to_string(&rel_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("relationships").and_then(|r| r.as_object()).map(|o| o.len()))
+        .unwrap_or(0);
+
+    let inner_thoughts = if cfg.humanity.inner_thought_enabled {
+        let thoughts = crate::self_memory::inner_thought::get_active_thoughts(10);
+        Some(thoughts.iter().map(|t| serde_json::json!({
+            "content": t.content,
+            "timestamp": t.timestamp,
+            "emotional_impact": t.emotional_impact,
+            "action_potential": t.action_potential,
+            "faded": t.faded,
+            "recall_count": t.recall_count,
+        })).collect::<Vec<_>>())
+    } else { None };
+
+    ok(serde_json::json!({
+        "social_battery": battery,
+        "circadian": circadian,
+        "attention": attention,
+        "cognitive_biases": biases,
+        "motivation": motivation,
+        "relationship_count": rel_count,
+        "inner_thoughts": inner_thoughts,
+        "config_enabled": {
+            "social_battery": cfg.humanity.social_battery_enabled,
+            "circadian": cfg.humanity.circadian_enabled,
+            "attention": cfg.humanity.attention_enabled,
+            "cognitive_biases": cfg.humanity.cognitive_biases_enabled,
+            "satisficing": cfg.humanity.satisficing_enabled,
+            "response_timing": cfg.humanity.response_timing_enabled,
+            "unpredictability": cfg.humanity.unpredictability_enabled,
+            "inner_thought": cfg.humanity.inner_thought_enabled,
+        },
+    }))
+}
+
+pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+    if *method != Method::Get {
+        return err(405, "method not allowed");
+    }
+    let rel_path = config::data_dir().join("relationships.json");
+    let data = std::fs::read_to_string(&rel_path).unwrap_or_else(|_| "{}".into());
+    let store: serde_json::Value = serde_json::from_str(&data).unwrap_or(serde_json::json!({"relationships": {}}));
+    if let Some(uid) = segs.first() {
+        let rels = store.get("relationships").and_then(|v| v.as_object());
+        match rels.and_then(|r| r.get(*uid)) {
+            Some(rel) => ok(rel.clone()),
+            None => err(404, "relationship not found"),
+        }
+    } else {
+        ok(store)
+    }
+}
+
+pub fn handle_info() -> Response<std::io::Cursor<Vec<u8>>> {
+    ok(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "build_time": option_env!("BUILD_TIME").unwrap_or("dev"),
+    }))
+}

@@ -75,25 +75,33 @@
     </div>
 
     <div class="glass-card data-card">
-      <h3 class="card-title">数据存储结构</h3>
-      <div class="file-tree">
-        <div class="tree-item dir">📁 memory/</div>
-        <div class="tree-item dir" style="padding-left:24px">📁 users/</div>
-        <div class="tree-item file" style="padding-left:48px">📄 512166443.json  <span class="tree-meta">— 用户全局记忆</span></div>
-        <div class="tree-item file" style="padding-left:48px">📄 2950726483.json</div>
-        <div class="tree-item dir" style="padding-left:24px">📁 groups/</div>
-        <div class="tree-item dir" style="padding-left:48px">📁 676426335/</div>
-        <div class="tree-item file" style="padding-left:72px">📄 group.json  <span class="tree-meta">— 群级别记忆</span></div>
-        <div class="tree-item file" style="padding-left:72px">📄 512166443.json  <span class="tree-meta">— 群内用户记忆</span></div>
+      <h3 class="card-title">最近活跃</h3>
+      <div v-if="activeGroups.length || activeUsers.length" class="active-lists">
+        <div v-if="activeGroups.length" class="active-section">
+          <div class="active-section-title">群聊 ({{ activeGroups.length }})</div>
+          <div class="active-chips">
+            <span v-for="g in activeGroups" :key="g" class="chip">群 {{ g }}</span>
+          </div>
+        </div>
+        <div v-if="activeUsers.length" class="active-section">
+          <div class="active-section-title">私聊 ({{ activeUsers.length }})</div>
+          <div class="active-chips">
+            <span v-for="u in activeUsers" :key="u" class="chip">用户 {{ u }}</span>
+          </div>
+        </div>
       </div>
+      <div v-else class="empty-sm">暂无活跃会话</div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { api } from '../api.js'
 
 const stats = ref({})
+const activeGroups = ref([])
+const activeUsers = ref([])
 let interval = null
 
 const I = {
@@ -135,7 +143,12 @@ const emotionArc = computed(() => {
 })
 
 async function load() {
-  try { const d = await (await fetch('/api/dashboard', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token') } })).json(); stats.value = d } catch {}
+  try {
+    stats.value = await api('/api/dashboard')
+    const conv = await api('/api/conversations')
+    activeGroups.value = conv.groups || []
+    activeUsers.value = conv.private_users || []
+  } catch {}
 }
 
 onMounted(() => { load(); interval = setInterval(load, 15000); window.addEventListener('refresh-all', load) })
@@ -165,9 +178,9 @@ onUnmounted(() => { clearInterval(interval); window.removeEventListener('refresh
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .data-card { margin-bottom: 24px; }
-.file-tree { font-family: monospace; font-size: 12px; line-height: 1.8; }
-.tree-item { padding: 2px 0; }
-.tree-item.dir { color: var(--primary); font-weight: 600; }
-.tree-item.file { color: var(--text-2); }
-.tree-meta { color: var(--text-3); font-size: 11px; }
+.active-lists { display: flex; flex-direction: column; gap: 16px; }
+.active-section-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.active-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 4px 10px; background: var(--surface-hover); border-radius: var(--radius-xs); color: var(--text-2); font-family: monospace; }
+.empty-sm { text-align: center; padding: 20px; color: var(--text-3); font-size: 13px; }
 </style>

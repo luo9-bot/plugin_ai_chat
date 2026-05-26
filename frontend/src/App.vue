@@ -108,6 +108,7 @@ import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
+import HumanityView from './views/HumanityView.vue'
 
 const I = {
   dashboard: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M2 10a8 8 0 1116 0H2zm2 0a6 6 0 0112 0H4zm2 0a4 4 0 018 0H6zm2 0a2 2 0 014 0H8z" fill="currentColor"/></svg>',
@@ -154,6 +155,7 @@ const tabs = [
   { id: 'emotion', name: '情绪', icon: I.emotion, desc: '情绪状态', comp: EmotionView },
   { id: 'mental-state', name: '心理状态', icon: I['mental-state'], desc: 'Bot 心理', comp: MentalState },
   { id: 'proactive', name: '主动对话', icon: I.proactive, desc: '主动消息', comp: ProactiveView },
+  { id: 'humanity', name: '人性化', icon: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a7 7 0 017 7c0 2.5-1 4.5-2.5 5.5S10 17 10 17s-3.5-.5-4.5-1.5S3 12.5 3 10a7 7 0 017-7z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="9" r="1" fill="currentColor"/><circle cx="12" cy="9" r="1" fill="currentColor"/><path d="M7 12.5c.8 1 2 1.5 3 1.5s2.2-.5 3-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>', desc: '人性化状态监控', comp: HumanityView },
   { id: 'blocklist', name: '黑名单', icon: I.blocklist, desc: '用户管理', comp: BlocklistView },
   { id: 'anti-injection', name: '防注入', icon: I['anti-injection'], desc: '安全防护', comp: AntiInjectionView },
   { id: 'archive', name: '归档', icon: I.archive, desc: '数据归档', comp: ArchiveView },
@@ -198,7 +200,7 @@ onMounted(async () => {
   initTheme()
   const t = getToken()
   if (t) { try { if (await tryLogin(t)) loggedIn.value = true } catch {} }
-  try { const info = await api('/api/info'); appVersion.value = info.version; buildTime.value = info.build_time } catch {}
+  try { const info = await api('/api/version'); appVersion.value = info.version } catch {}
 })
 </script>
 

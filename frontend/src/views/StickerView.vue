@@ -62,7 +62,7 @@ async function load() {
     statCards.value[0].value = stickers.value.length
   } catch {}
 }
-async function toggle(hash) { await api('/api/sticker/' + hash + '/toggle', { method: 'POST' }); load() }
+async function toggle(hash) { await api('/api/sticker/' + hash, { method: 'POST' }); load() }
 
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>

@@ -83,8 +83,8 @@ function loadEntries() {
   if (uid) { const u = users.value[uid]; entries.value = (u?.entries || []).map((e, i) => ({ ...e, uid, idx: i })) }
   else { const all = []; for (const [uid, u] of Object.entries(users.value)) { (u.entries || []).forEach((e, i) => all.push({ ...e, uid, idx: i })) }; entries.value = all }
 }
-async function del(uid, idx) { await api(`/api/memory/${uid}/delete`, { method: 'POST', body: JSON.stringify({ index: idx }) }); load() }
-async function addMem() { if (!addUid.value || !addContent.value) return; await api(`/api/memory/${addUid.value}/add`, { method: 'POST', body: JSON.stringify({ content: addContent.value, importance: addImp.value }) }); showAdd.value = false; load() }
+async function del(uid, idx) { await api(`/api/memory/${uid}/${idx}`, { method: 'DELETE' }); load() }
+async function addMem() { if (!addUid.value || !addContent.value) return; await api(`/api/memory/${addUid.value}`, { method: 'POST', body: JSON.stringify({ content: addContent.value, importance: addImp.value }) }); showAdd.value = false; addUid.value = ''; addContent.value = ''; load() }
 
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>

@@ -1,24 +1,25 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card" v-for="(s, i) in stats" :key="i">
+      <div class="glass-card" v-for="s in stats" :key="s.label">
         <div class="stat-value" :style="{ color: s.color }">{{ s.value ?? '-' }}</div>
         <div class="stat-label">{{ s.label }}</div>
         <div class="stat-sub">{{ s.sub }}</div>
       </div>
     </div>
     <div class="glass-card">
-      <div class="card-header"><h3>情绪分析 - 用户消息</h3></div>
+      <div class="card-header"><h3>情绪状态</h3></div>
       <div v-if="!emotions.length" class="empty">暂无情绪数据</div>
       <div v-else class="table-wrap">
         <table>
-          <thead><tr><th>用户</th><th>情绪</th><th>强度</th><th>时间</th></tr></thead>
+          <thead><tr><th>用户ID</th><th>情绪</th><th>强度</th><th>次要情绪</th><th>互动频率</th></tr></thead>
           <tbody>
-            <tr v-for="(e, i) in emotions" :key="i">
+            <tr v-for="e in emotions" :key="e.user_id">
               <td class="mono">{{ e.user_id }}</td>
-              <td><span class="emotion-badge" :style="{ background: emoColor(e.emotion), color: '#fff' }">{{ e.emotion }}</span></td>
-              <td><div class="bar-wrap"><div class="bar" :style="{ width: (e.intensity || 0) * 100 + '%', background: emoColor(e.emotion) }"></div></div></td>
-              <td class="mono">{{ fmtTime(e.timestamp) }}</td>
+              <td><span class="emotion-badge" :style="{ background: emoColor(e.current) }">{{ emoLabel(e.current) }}</span></td>
+              <td><div class="bar-wrap"><div class="bar" :style="{ width: (e.intensity || 0) * 100 + '%', background: emoColor(e.current) }"></div></div><span class="bar-val">{{ ((e.intensity || 0) * 100).toFixed(0) }}%</span></td>
+              <td><span v-if="e.secondary" class="emotion-badge" :style="{ background: emoColor(e.secondary), opacity: 0.7 }">{{ emoLabel(e.secondary) }}</span><span v-else class="text-muted">—</span></td>
+              <td class="mono">{{ (e.interaction_rate || 0).toFixed(1) }}/h</td>
             </tr>
           </tbody>
         </table>
@@ -28,17 +29,39 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api.js'
 
-const emotions = ref([])
-const stats = ref([])
+const rawData = ref({})
+const emotions = computed(() => {
+  return Object.entries(rawData.value)
+    .filter(([uid]) => uid !== '0')
+    .map(([uid, state]) => ({
+      user_id: uid,
+      current: state?.current || 'neutral',
+      secondary: state?.secondary || null,
+      intensity: state?.intensity || 0,
+      interaction_rate: state?.interaction_rate || 0,
+      last_update: state?.last_update || 0,
+    }))
+    .sort((a, b) => b.intensity - a.intensity)
+})
+const stats = computed(() => [
+  { label: '追踪用户', value: emotions.value.length, sub: '有情绪记录', color: '#6366f1' },
+  { label: '活跃情绪', value: [...new Set(emotions.value.map(e => e.current))].length, sub: '不同情绪类型', color: '#34d399' },
+])
 
-function emoColor(e) { const m = { neutral: '#6b7280', happy: '#34d399', sad: '#60a5fa', thinking: '#8b5cf6', surprised: '#fbbf24', angry: '#ef4444', shy: '#f472b6', worried: '#f97316', tired: '#6b7280', excited: '#f59e0b' }; return m[e?.toLowerCase()] || '#6b7280' }
-function fmtTime(ts) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleString('zh-CN') }
+function emoColor(e) {
+  const m = { neutral: '#6b7280', happy: '#34d399', sad: '#60a5fa', thinking: '#8b5cf6', surprised: '#fbbf24', angry: '#ef4444', shy: '#f472b6', worried: '#f97316', tired: '#9ca3af', excited: '#f59e0b', like: '#ec4899' }
+  return m[e?.toLowerCase()] || '#6b7280'
+}
+function emoLabel(e) {
+  const m = { neutral: '平静', happy: '开心', sad: '难过', thinking: '沉思', surprised: '惊讶', angry: '不悦', shy: '害羞', worried: '担忧', tired: '疲惫', excited: '兴奋', like: '心动' }
+  return m[e?.toLowerCase()] || e || '未知'
+}
 
 async function load() {
-  try { const d = await api('/api/emotion'); emotions.value = (d.history || []).reverse().slice(0, 100); stats.value = [{ label: '追踪中', value: d.user_count, sub: '用户', color: '#6366f1' }, { label: '当前状态', value: d.current_state || 'neutral', sub: 'bot', color: '#34d399' }] } catch {}
+  try { rawData.value = await api('/api/emotion') } catch {}
 }
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
@@ -56,8 +79,10 @@ th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; col
 td { padding: 8px 12px; border-bottom: 1px solid var(--glass-border); }
 tr:hover td { background: var(--surface-hover); }
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
-.emotion-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-.bar-wrap { width: 80px; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }
+.emotion-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; color: #fff; }
+.bar-wrap { width: 80px; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
 .bar { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.bar-val { font-size: 11px; color: var(--text-2); margin-left: 6px; }
+.text-muted { color: var(--text-3); }
 .empty { text-align: center; padding: 40px; color: var(--text-3); }
 </style>

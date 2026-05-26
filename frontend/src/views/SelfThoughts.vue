@@ -81,8 +81,8 @@ const filtered = computed(() => {
 async function load() {
   try { const d = await api('/api/self-thoughts'); thoughts.value = (d.thoughts || []).map((t, i) => ({ ...t, _idx: i })).reverse() } catch {}
 }
-async function del(idx) { await api('/api/self-thoughts/' + idx + '/delete', { method: 'POST' }); load() }
-async function addThought() { if (!addContent.value) return; await api('/api/self-thoughts/add', { method: 'POST', body: JSON.stringify({ content: addContent.value, category: addCategory.value }) }); showAdd.value = false; load() }
+async function del(idx) { await api('/api/self-thoughts/' + idx, { method: 'DELETE' }); load() }
+async function addThought() { if (!addContent.value) return; await api('/api/self-thoughts', { method: 'POST', body: JSON.stringify({ content: addContent.value, category: addCategory.value }) }); showAdd.value = false; addContent.value = ''; load() }
 
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
