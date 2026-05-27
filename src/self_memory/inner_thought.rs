@@ -343,11 +343,24 @@ pub fn recall_thought(content_hint: &str) -> Option<InnerThought> {
 }
 
 /// 标准化想法文本用于比较
+/// 移除方括号中的标签（如 [-0.3] [0.5]），然后只保留字母和汉字
 fn normalize_thought(s: &str) -> String {
-    s.chars()
-        .filter(|c| c.is_alphanumeric() || (*c >= '\u{4e00}' && *c <= '\u{9fff}'))
-        .collect::<String>()
-        .to_lowercase()
+    // 先移除所有方括号及其内容（标签）
+    let mut result = String::new();
+    let mut in_bracket = false;
+    for c in s.chars() {
+        match c {
+            '[' => in_bracket = true,
+            ']' => in_bracket = false,
+            _ if !in_bracket => {
+                if c.is_alphanumeric() || (c >= '\u{4e00}' && c <= '\u{9fff}') {
+                    result.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+    result.to_lowercase()
 }
 
 /// 检查两个标准化后的想法是否高度相似
