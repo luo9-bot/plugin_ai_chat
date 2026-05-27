@@ -98,7 +98,15 @@ pub fn try_generate() -> Option<InnerThought> {
         let normalized_new = normalize_thought(&t.content);
         let is_dup = store.thoughts.iter().rev().take(10).any(|existing| {
             let normalized_existing = normalize_thought(&existing.content);
-            is_similar(&normalized_new, &normalized_existing)
+            let similar = is_similar(&normalized_new, &normalized_existing);
+            if similar {
+                debug!(
+                    new = %normalized_new,
+                    existing = %normalized_existing,
+                    "inner_thought: similar detected"
+                );
+            }
+            similar
         });
         if is_dup {
             debug!(content = %t.content, "inner_thought: skipped duplicate thought");

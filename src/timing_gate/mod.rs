@@ -24,6 +24,7 @@ pub struct GateContext {
     pub working_memory: String,
     pub self_qq: u64,
     pub is_group: bool,
+    pub intrusiveness_weight: f32,
 }
 
 /// NoReply 冷却记录 (group_id -> last_no_reply_timestamp)
@@ -130,6 +131,8 @@ pub fn run_timing_gate(
     };
     prompt_vars.insert("timing_gate_wait_rule", wait_rule);
     prompt_vars.insert("group_chat_attention_block", "");
+    let intrusiveness_str = format!("{:.1}", context.intrusiveness_weight);
+    prompt_vars.insert("intrusiveness_weight", &intrusiveness_str);
     let prompt = crate::prompt::PromptManager::get().render("luo9_timing_gate", &prompt_vars);
 
     // 截断上下文：只保留最近的消息（降低 token 消耗）

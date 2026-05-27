@@ -174,12 +174,14 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         return;
     }
 
+    let cfg = config::get();
     let gate_context = timing_gate::GateContext {
         identity: config::prompt().to_string(),
         recent_bot_messages: read_shared_state(|s| s.get_recent_bot_messages(group_id, 600, 5)),
         working_memory: working_memory::get_context(group_id, 3600),
         self_qq,
         is_group: true,
+        intrusiveness_weight: cfg.conversation.intrusiveness_weight,
     };
 
     let decision = timing_gate::run_timing_gate(group_id, &remaining, &gate_context);

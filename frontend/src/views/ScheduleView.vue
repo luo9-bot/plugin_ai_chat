@@ -144,18 +144,39 @@ async function load() {
 async function toggleWeekly(i) {
   const goal = weekly.value.goals[i]
   if (!goal) return
-  goal.completed = !goal.completed
-  if (goal.completed) goal.completed_at = Math.floor(Date.now() / 1000)
-  else goal.completed_at = 0
-  // TODO: sync to backend via schedule API when available
+  try {
+    const res = await api('/api/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle', kind: 'weekly', index: i })
+    })
+    if (res.ok !== undefined) {
+      goal.completed = res.completed
+      if (res.completed) goal.completed_at = Math.floor(Date.now() / 1000)
+      else goal.completed_at = 0
+    }
+  } catch (e) {
+    console.error('toggle weekly failed:', e)
+  }
 }
 
 async function toggleMonthly(i) {
   const goal = monthly.value.goals[i]
   if (!goal) return
-  goal.completed = !goal.completed
-  if (goal.completed) goal.completed_at = Math.floor(Date.now() / 1000)
-  else goal.completed_at = 0
+  try {
+    const res = await api('/api/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle', kind: 'monthly', index: i })
+    })
+    if (res.ok !== undefined) {
+      goal.completed = res.completed
+      if (res.completed) goal.completed_at = Math.floor(Date.now() / 1000)
+      else goal.completed_at = 0
+    }
+  } catch (e) {
+    console.error('toggle monthly failed:', e)
+  }
 }
 
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })

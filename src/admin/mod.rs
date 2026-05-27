@@ -162,7 +162,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
             }
         }
         Some(&"backups") => handlers::handle_backups(&method, &api_segs[1..], &body),
-        Some(&"schedule") => handlers::handle_schedule(),
+        Some(&"schedule") => handlers::handle_schedule(&method, &body),
         Some(&"analytics") => handlers::handle_analytics(),
         Some(&"sync") => handlers::handle_sync(&method, &api_segs[1..], &body),
         Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..], &body),

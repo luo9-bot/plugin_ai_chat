@@ -1307,7 +1307,60 @@ pub fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
-pub fn handle_schedule() -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    // POST: 更新计划状态
+    if method == &Method::Post {
+        let body_val: serde_json::Value = match serde_json::from_slice(body) {
+            Ok(v) => v,
+            Err(e) => return err(400, &format!("invalid json: {}", e)),
+        };
+
+        let action = body_val.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = body_val.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let index = body_val.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        match (action, kind) {
+            ("toggle", "weekly") => {
+                let mut plan = crate::schedule::load_weekly_plan();
+                if index >= plan.goals.len() {
+                    return err(404, "goal not found");
+                }
+                let goal = &mut plan.goals[index];
+                goal.completed = !goal.completed;
+                let completed = goal.completed;
+                let content = goal.content.clone();
+                if completed {
+                    goal.completed_at = crate::util::now_secs();
+                    crate::schedule::record_push_log("周计划完成", &content);
+                } else {
+                    goal.completed_at = 0;
+                }
+                crate::schedule::save_weekly_plan(&plan);
+                return ok(serde_json::json!({"ok": true, "completed": completed}));
+            }
+            ("toggle", "monthly") => {
+                let mut plan = crate::schedule::load_monthly_plan();
+                if index >= plan.goals.len() {
+                    return err(404, "goal not found");
+                }
+                let goal = &mut plan.goals[index];
+                goal.completed = !goal.completed;
+                let completed = goal.completed;
+                let content = goal.content.clone();
+                if completed {
+                    goal.completed_at = crate::util::now_secs();
+                    crate::schedule::record_push_log("月计划完成", &content);
+                } else {
+                    goal.completed_at = 0;
+                }
+                crate::schedule::save_monthly_plan(&plan);
+                return ok(serde_json::json!({"ok": true, "completed": completed}));
+            }
+            _ => return err(400, "invalid action or kind"),
+        }
+    }
+
+    // GET: 返回计划数据
     let weekly = crate::schedule::load_weekly_plan();
     let monthly = crate::schedule::load_monthly_plan();
     let pushes = crate::schedule::check_plan_push();

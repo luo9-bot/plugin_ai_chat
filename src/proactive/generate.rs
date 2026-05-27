@@ -17,6 +17,13 @@ pub fn ai_generate_message(
 ) -> Option<String> {
     let mut ctx = Vec::new();
 
+    // 场景标识
+    if group_id == 0 {
+        ctx.push("# 场景\n私聊（一对一聊天）".to_string());
+    } else {
+        ctx.push(format!("# 场景\n群聊（group_id: {}）", group_id));
+    }
+
     ctx.push(format!("# 触发类型\n{}", trigger));
 
     // 时间
