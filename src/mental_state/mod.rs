@@ -72,17 +72,51 @@ pub(crate) fn is_similar(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
+
+    // 完全相同
     if a == b {
         return true;
     }
-    let shorter = a.len().min(b.len());
-    if shorter >= 4 {
-        let (s, l) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-        if l.contains(s) {
+
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let shorter_len = a_chars.len().min(b_chars.len());
+
+    // 子串包含
+    let (shorter, longer) = if a_chars.len() <= b_chars.len() { (&a_chars, &b_chars) } else { (&b_chars, &a_chars) };
+    if longer.len() >= 6 && longer.windows(shorter.len()).any(|w| w == shorter.as_slice()) {
+        return true;
+    }
+
+    // LCS 比例: 最长公共子序列占较短文本的 50% 以上
+    if shorter_len >= 6 {
+        let lcs = lcs_len(&a_chars, &b_chars);
+        if lcs as f64 / shorter_len as f64 > 0.5 {
             return true;
         }
     }
+
     false
+}
+
+/// 最长公共子序列长度
+fn lcs_len(a: &[char], b: &[char]) -> usize {
+    let a_len = a.len();
+    let b_len = b.len();
+    if a_len == 0 || b_len == 0 { return 0; }
+    let mut prev = vec![0usize; b_len + 1];
+    for i in 1..=a_len {
+        let mut curr = vec![0usize; b_len + 1];
+        for j in 1..=b_len {
+            if a[i - 1] == b[j - 1] {
+                curr[j] = prev[j - 1] + 1;
+            } else {
+                curr[j] = prev[j].max(curr[j - 1]);
+            }
+        }
+        prev = curr;
+    }
+    prev[b_len]
 }
 
 // ── Prompt 注入 ──────────────────────────────────────────────

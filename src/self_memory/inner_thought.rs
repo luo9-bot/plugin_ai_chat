@@ -94,6 +94,19 @@ pub fn try_generate() -> Option<InnerThought> {
     let thought = generate_inner_thought(&context);
 
     if let Some(ref t) = thought {
+        // 去重：检查是否与最近的想法高度相似
+        let normalized_new = normalize_thought(&t.content);
+        let is_dup = store.thoughts.iter().rev().take(10).any(|existing| {
+            let normalized_existing = normalize_thought(&existing.content);
+            is_similar(&normalized_new, &normalized_existing)
+        });
+        if is_dup {
+            debug!(content = %t.content, "inner_thought: skipped duplicate thought");
+            store.last_generation = now;
+            store.save();
+            return None;
+        }
+
         store.last_generation = now;
         store.thoughts.push(t.clone());
         // 保持最近50条
@@ -319,4 +332,62 @@ pub fn recall_thought(content_hint: &str) -> Option<InnerThought> {
         debug!(content = %result.as_ref().unwrap().content, "inner_thought: recalled");
     }
     result
+}
+
+/// 标准化想法文本用于比较
+fn normalize_thought(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric() || (*c >= '\u{4e00}' && *c <= '\u{9fff}'))
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// 检查两个标准化后的想法是否高度相似
+fn is_similar(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let shorter_len = a_chars.len().min(b_chars.len());
+
+    // 子串包含
+    let (shorter, longer) = if a_chars.len() <= b_chars.len() { (&a_chars, &b_chars) } else { (&b_chars, &a_chars) };
+    if longer.len() >= 6 && longer.windows(shorter.len()).any(|w| w == shorter.as_slice()) {
+        return true;
+    }
+
+    // LCS 比例: 最长公共子序列占较短文本的 50% 以上
+    if shorter_len >= 6 {
+        let lcs = lcs_len(&a_chars, &b_chars);
+        if lcs as f64 / shorter_len as f64 > 0.5 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// 最长公共子序列长度
+fn lcs_len(a: &[char], b: &[char]) -> usize {
+    let a_len = a.len();
+    let b_len = b.len();
+    if a_len == 0 || b_len == 0 { return 0; }
+    let mut prev = vec![0usize; b_len + 1];
+    for i in 1..=a_len {
+        let mut curr = vec![0usize; b_len + 1];
+        for j in 1..=b_len {
+            if a[i - 1] == b[j - 1] {
+                curr[j] = prev[j - 1] + 1;
+            } else {
+                curr[j] = prev[j].max(curr[j - 1]);
+            }
+        }
+        prev = curr;
+    }
+    prev[b_len]
 }

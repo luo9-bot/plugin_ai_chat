@@ -63,6 +63,84 @@ pub fn extract_json(raw: &str) -> Option<String> {
     None
 }
 
+/// 尝试修复被截断的 JSON（如 finish_reason="length" 时工具调用参数不完整）
+///
+/// 策略：逐字符追踪 JSON 结构，补全未关闭的字符串、数组和对象
+fn repair_truncated_json(raw: &str) -> Option<serde_json::Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let chars: Vec<char> = trimmed.chars().collect();
+    let mut repaired = String::with_capacity(trimmed.len() + 32);
+    let mut in_string = false;
+    let mut escape_next = false;
+    let mut depth: Vec<char> = Vec::new(); // 追踪 [ 或 {
+
+    for &ch in &chars {
+        if escape_next {
+            repaired.push(ch);
+            escape_next = false;
+            continue;
+        }
+
+        if in_string {
+            if ch == '\\' {
+                repaired.push(ch);
+                escape_next = true;
+            } else if ch == '"' {
+                repaired.push(ch);
+                in_string = false;
+            } else {
+                repaired.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                repaired.push(ch);
+                in_string = true;
+            }
+            '[' | '{' => {
+                repaired.push(ch);
+                depth.push(ch);
+            }
+            ']' => {
+                if depth.last() == Some(&'[') {
+                    repaired.push(ch);
+                    depth.pop();
+                }
+                // 忽略不匹配的闭合
+            }
+            '}' => {
+                if depth.last() == Some(&'{') {
+                    repaired.push(ch);
+                    depth.pop();
+                }
+            }
+            _ => repaired.push(ch),
+        }
+    }
+
+    // 补全未关闭的字符串
+    if in_string {
+        repaired.push('"');
+    }
+
+    // 补全未关闭的数组和对象
+    while let Some(open) = depth.pop() {
+        match open {
+            '[' => repaired.push(']'),
+            '{' => repaired.push('}'),
+            _ => {}
+        }
+    }
+
+    serde_json::from_str(&repaired).ok()
+}
+
 /// 从 JSON Value 中解析布尔值 (兼容布尔值和字符串 "true"/"false")
 pub fn parse_bool(value: &serde_json::Value) -> Option<bool> {
     value.as_bool().or_else(|| {
@@ -389,9 +467,20 @@ pub fn analyze_with_tools(
             && let Some(first_call) = tool_calls.first() {
                 debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
                     "analyze_with_tools: got tool call");
-                let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
-                    .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
-                return Ok(args);
+                let args_str = &first_call.function.arguments;
+                // 先尝试正常解析
+                match serde_json::from_str::<serde_json::Value>(args_str) {
+                    Ok(args) => return Ok(args),
+                    Err(e) => {
+                        // 尝试修复被截断的 JSON（finish_reason="length" 时常见）
+                        debug!(error = %e, "analyze_with_tools: JSON parse failed, attempting repair");
+                        if let Some(repaired) = repair_truncated_json(args_str) {
+                            debug!("analyze_with_tools: JSON repaired successfully");
+                            return Ok(repaired);
+                        }
+                        return Err(format!("Tool call arguments parse failed: {}", e));
+                    }
+                }
             }
 
         // Fallback: 从文本内容中提取 JSON (兼容旧行为)

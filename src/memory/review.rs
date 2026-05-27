@@ -57,7 +57,7 @@ pub fn ai_review_all() {
     let user_ids = super::store::all_user_ids();
 
     for user_id in user_ids {
-        let mut user_memory = super::store::load_user_memory(user_id);
+        let user_memory = super::store::load_user_memory(user_id);
         if user_memory.entries.is_empty() {
             continue;
         }
@@ -72,8 +72,16 @@ pub fn ai_review_all() {
             continue;
         }
 
-        // 构建审查上下文: 现有记忆
-        let memories_text: Vec<String> = user_memory.entries.iter().map(|e| {
+        // 构建审查上下文: 现有记忆（限制数量避免 token 超限）
+        const MAX_REVIEW_MEMORIES: usize = 50;
+        let total_count = user_memory.entries.len();
+        let memories_subset: Vec<&MemoryEntry> = if total_count > MAX_REVIEW_MEMORIES {
+            // 取最新的 N 条记忆进行审查
+            user_memory.entries.iter().rev().take(MAX_REVIEW_MEMORIES).collect()
+        } else {
+            user_memory.entries.iter().collect()
+        };
+        let memories_text: Vec<String> = memories_subset.iter().map(|e| {
             let imp = match e.importance {
                 Importance::Permanent => "永久",
                 Importance::Important => "重要",
@@ -92,7 +100,12 @@ pub fn ai_review_all() {
         });
 
         let mut context_parts = Vec::new();
-        context_parts.push(format!("# 现有记忆\n{}", memories_text.join("\n")));
+        let header = if total_count > MAX_REVIEW_MEMORIES {
+            format!("# 现有记忆 (共{}条，显示最新{}条)\n{}", total_count, MAX_REVIEW_MEMORIES, memories_text.join("\n"))
+        } else {
+            format!("# 现有记忆\n{}", memories_text.join("\n"))
+        };
+        context_parts.push(header);
         if !recent_history.is_empty() {
             context_parts.push(format!("# 最近对话\n{}", recent_history.join("\n")));
         }

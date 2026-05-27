@@ -35,6 +35,14 @@ pub fn ai_generate_message(
         ctx.push(format!("# 你的内心想法（仅作为内部参考，不要直接说出来）\n{}", self_thoughts));
     }
 
+    // 注入内心独白上下文
+    if crate::config::get().humanity.inner_thought_enabled {
+        let thought_ctx = crate::self_memory::inner_thought::get_inner_thought_context(3);
+        if !thought_ctx.is_empty() {
+            ctx.push(thought_ctx);
+        }
+    }
+
     // 关于用户的记忆
     let mem = memory::get_context(user_id, group_id);
     if !mem.is_empty() {

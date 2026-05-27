@@ -83,14 +83,6 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(self_mem);
     }
 
-    // 内心独白上下文
-    if cfg.humanity.inner_thought_enabled {
-        let thought_ctx = self_memory::inner_thought::get_inner_thought_context(3);
-        if !thought_ctx.is_empty() {
-            parts.push(thought_ctx);
-        }
-    }
-
     // ── 关系层：根据亲密度选择性注入 ──
 
     // 关系上下文
