@@ -40,7 +40,7 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
             0.7
         };
         let circadian_energy = if cfg.humanity.circadian_enabled {
-            crate::circadian::calculate().energy_level
+            crate::circadian::get_energy_multiplier()
         } else {
             0.7
         };

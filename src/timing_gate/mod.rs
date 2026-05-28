@@ -254,15 +254,3 @@ pub fn run_timing_gate(
     GateDecision::NoReply
 }
 
-// ── 辅助函数 ────────────────────────────────────────────────────
-
-pub fn has_at_bot(messages: &[&(u64, String, Vec<u64>)], self_qq: u64) -> bool {
-    if self_qq == 0 { return false; }
-    let at_pattern = format!("[CQ:at,qq={}]", self_qq);
-    messages.iter().any(|(_, msg, _)| msg.contains(&at_pattern))
-}
-
-pub fn mentions_bot(messages: &[&(u64, String, Vec<u64>)], bot_name: &str) -> bool {
-    if bot_name.is_empty() { return false; }
-    messages.iter().any(|(_, msg, _)| msg.contains(bot_name))
-}

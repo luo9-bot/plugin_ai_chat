@@ -6,7 +6,7 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::{
-    config, emotion, learner, quota, timing_gate, util, working_memory,
+    config, emotion, learner, quota, social_battery, timing_gate, util, working_memory,
     with_state, with_shared_state, read_shared_state,
     processing_users, MESSAGE_QUEUE, ProcessingTask,
 };
@@ -205,7 +205,12 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
             }
         }
         timing_gate::GateDecision::NoReply => {
-            // TODO
+            // 被动参与：记录社交电量
+            if config::get().humanity.social_battery_enabled {
+                let mut battery = social_battery::load();
+                social_battery::record_passive_participation(&mut battery);
+                social_battery::save(&battery);
+            }
         }
         timing_gate::GateDecision::Wait(_seconds) => {
             // TODO: 实现延迟重新评估

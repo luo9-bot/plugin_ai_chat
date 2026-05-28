@@ -120,6 +120,16 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     // 更新注意力模型
     if config::get().humanity.attention_enabled {
         let mut attn = attention::load_attention();
+
+        // 话题切换检测：检查用户消息是否与当前专注话题相关
+        if !attn.focused_topic.is_empty() && !ai_message.contains(&attn.focused_topic) {
+            // 简单的关键词匹配：如果用户消息不包含当前专注话题，认为话题切换
+            attention::interrupt_flow(&mut attn, &ai_message);
+        } else if attn.focused_topic.is_empty() {
+            // 首次对话，设置专注话题
+            attn.focused_topic = ai_message.clone();
+        }
+
         attention::update_attention(&mut attn, user_id, true);
         attention::save_attention(&attn);
     }

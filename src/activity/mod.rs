@@ -174,14 +174,6 @@ pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
     None
 }
 
-/// 清除用户的活动状态
-pub fn clear_activity(user_id: u64) {
-    let mut guard = ACTIVITY_STATE.lock().unwrap();
-    if let Some(ref mut map) = *guard && map.remove(&user_id).is_some() {
-        debug!(user_id, "activity: cleared");
-    }
-}
-
 /// 获取活动状态的 prompt 上下文
 pub fn get_activity_context(user_id: u64) -> Option<String> {
     let state = get_active_activity(user_id)?;

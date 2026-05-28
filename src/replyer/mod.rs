@@ -335,6 +335,18 @@ fn generate_single_reply(ctx: &ReplyContext) -> Result<String, String> {
     );
 
     let (reply, _) = crate::ai::chat(&system_prompt, "", &[], &user_content)?;
+
+    // 应用错别字（模拟真人打字）
+    let reply = if cfg.humanity.typo_enabled {
+        let typo_config = crate::typo::TypoConfig {
+            error_rate: cfg.humanity.typo_error_rate,
+            ..Default::default()
+        };
+        crate::typo::apply_typos(&reply, &typo_config)
+    } else {
+        reply
+    };
+
     Ok(reply)
 }
 

@@ -689,6 +689,12 @@ pub struct HumanityConfig {
     pub inner_thought_interval_min: u64,
     #[serde(default = "default_inner_thought_interval_max")]
     pub inner_thought_interval_max: u64,
+
+    // 错别字
+    #[serde(default = "default_true")]
+    pub typo_enabled: bool,
+    #[serde(default = "default_typo_error_rate")]
+    pub typo_error_rate: f64,
 }
 
 impl Default for HumanityConfig {
@@ -726,6 +732,8 @@ impl Default for HumanityConfig {
             inner_thought_enabled: true,
             inner_thought_interval_min: default_inner_thought_interval_min(),
             inner_thought_interval_max: default_inner_thought_interval_max(),
+            typo_enabled: true,
+            typo_error_rate: default_typo_error_rate(),
         }
     }
 }
@@ -870,6 +878,7 @@ fn default_association_jump_probability() -> f32 { 0.05 }
 fn default_catchphrase_probability() -> f32 { 0.1 }
 fn default_inner_thought_interval_min() -> u64 { 300 }
 fn default_inner_thought_interval_max() -> u64 { 900 }
+fn default_typo_error_rate() -> f64 { 0.3 }
 
 /// 表情包配置
 #[derive(Debug, Clone, Deserialize)]

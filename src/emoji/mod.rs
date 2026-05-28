@@ -46,35 +46,6 @@ pub fn is_emoji_only(text: &str) -> bool {
     meaningful.len() < 2
 }
 
-/// 清理文本中的 emoji（用于记忆存储前处理）
-///
-/// 保留文字内容，只移除 emoji 字符
-pub fn clean_for_memory(text: &str) -> String {
-    strip_emoji(text)
-}
-
-/// 清理 AI 输出中的 emoji（用于发送前处理）
-///
-/// 移除 emoji 并清理多余空白
-pub fn clean_for_output(text: &str) -> String {
-    let cleaned = strip_emoji(text);
-    // 清理因 emoji 移除产生的多余空格
-    let mut result = String::new();
-    let mut last_was_space = false;
-    for c in cleaned.chars() {
-        if c.is_whitespace() {
-            if !last_was_space {
-                result.push(c);
-            }
-            last_was_space = true;
-        } else {
-            result.push(c);
-            last_was_space = false;
-        }
-    }
-    result.trim().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,9 +66,4 @@ mod tests {
         assert!(!is_emoji_only("好吃😋"));
     }
 
-    #[test]
-    fn test_clean_for_output() {
-        assert_eq!(clean_for_output("hello 😍 world"), "hello world");
-        assert_eq!(clean_for_output("😋好吃"), "好吃");
-    }
 }
