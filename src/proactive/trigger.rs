@@ -11,6 +11,7 @@ use super::runtime::{
     is_quiet_hour, check_date_reminders,
 };
 use super::generate::{generate_mood_message, generate_greeting};
+use super::motivation;
 
 /// 群级最近发送的消息列表（用于内容去重）
 /// group_id -> Vec<(content_fingerprint, timestamp)>
@@ -246,7 +247,32 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         }
     }
 
-    // ── 触发路径 2: 随机化间隔的主动消息 ────────────────────────
+    // ── 触发路径 2: 动机驱动的主动消息 ────────────────────────
+    // 基于内在动机（分享欲、关心欲、好奇心等）决定是否说话
+    let min_motivation_wait = (interval / 3).max(300); // 最短 5 分钟或 interval/3
+    if time_since_last > min_motivation_wait && time_since_reply > 60 {
+        let dominant = motivation::get_dominant_motivation();
+        if let Some((motivation_type, strength)) = dominant {
+            // 动机强度超过阈值才触发
+            let threshold = 0.4;
+            if strength >= threshold {
+                let motivation_ctx = motivation::get_motivation_context();
+                let msg = generate_greeting(user_id, group_id);
+                if !msg.is_empty() && !is_duplicate_message(group_id, &msg) {
+                    debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");
+                    if sender::safe_send_quiet(group_id, user_id, &msg) {
+                        record_sent(user_id, group_id);
+                        record_group_message(group_id, &msg);
+                        push_proactive_to_history(group_id, user_id, &msg);
+                        motivation::consume_expression();
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── 触发路径 3: 随机化间隔的主动消息 ────────────────────────
     let jitter = 0.5 + pseudo_random(user_id.wrapping_add(now / 60)) * 1.0;
     let effective_interval = (interval as f64 * jitter) as u64;
 

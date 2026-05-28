@@ -117,6 +117,12 @@ pub fn ai_generate_message(
         }
     }
 
+    // 动机上下文
+    let motivation_ctx = crate::proactive::motivation::get_motivation_context();
+    if !motivation_ctx.is_empty() {
+        ctx.push(motivation_ctx);
+    }
+
     // 人设
     let personality = crate::personality::get_prompt_context();
     if !personality.is_empty() {
