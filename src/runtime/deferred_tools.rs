@@ -94,9 +94,10 @@ impl DeferredToolState {
         }
 
         let mut lines = vec!["<system-reminder>".to_string()];
-        lines.push("以下工具已注册但需要先调用 tool_search 发现后才能使用：".to_string());
+        lines.push("以下工具需要先调用 tool_search 发现后才能使用。当用户提到相关需求时请主动搜索：".to_string());
         for spec in &undiscovered {
-            lines.push(format!("- {}: {}", spec.name, spec.description));
+            let keywords = spec.keywords.join("/");
+            lines.push(format!("- {} (关键词: {}): {}", spec.name, keywords, spec.description));
         }
         lines.push("</system-reminder>".to_string());
         lines.join("\n")

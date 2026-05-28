@@ -78,15 +78,13 @@ impl PlannerLoopEngine {
                 serde_json::json!({"type":"object","properties":{"query":{"type":"string","description":"搜索关键词，如工具名称或功能描述"}},"required":["query"]})),
             ToolSpec::visible("finish", "结束本轮推理，不回复。",
                 serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]})),
+            ToolSpec::visible("send_sticker",
+                "发送表情包来辅助表达情绪。当语言不够到位、用户要求发表情包、或对话氛围需要时使用。不需要指定情绪，系统会自动选择。发送失败时请用文字表达，不要输出[图片]。",
+                serde_json::json!({"type":"object","properties":{}})),
         ];
 
         // deferred 工具
-        let deferred_tools = vec![
-            ToolSpec::deferred("send_sticker",
-                "【非必需工具】仅在需要强化情绪表达时偶尔使用。不要每次回复都调用。当文字表达已足够时，应优先使用reply工具。",
-                serde_json::json!({"type":"object","properties":{"emotion":{"type":"string","description":"想要表达的情绪，如'开心'、'难过'、'搞笑'"}},"required":["emotion"]}),
-                vec!["表情", "sticker", "emoji", "表情包", "图片"]),
-        ];
+        let deferred_tools: Vec<ToolSpec> = vec![];
 
         for spec in visible_tools {
             self.tool_specs.insert(spec.name.clone(), spec);
@@ -167,11 +165,18 @@ impl PlannerLoopEngine {
                 if m.is_empty() { format!("用户 {} 没有已知的人物信息", uid) } else { m }
             }
             "send_sticker" => {
-                let emotion = args.get("emotion").and_then(|v| v.as_str()).unwrap_or("开心");
-                let context = format!("用户消息: {}", ctx.user_message);
-                match crate::sticker::send_sticker(ctx.group_id, ctx.user_id, emotion, &context, recent_hashes) {
+                // 构建上下文：最近聊天记录
+                let history = crate::read_shared_state(|s| {
+                    s.get_history_clone(ctx.group_id, ctx.user_id)
+                });
+                let context_texts: Vec<String> = history.iter()
+                    .rev()
+                    .take(5)
+                    .map(|(role, content)| format!("{}: {}", role, content))
+                    .collect();
+                match crate::sticker::send_sticker(ctx.group_id, ctx.user_id, &context_texts, recent_hashes) {
                     Ok(desc) => format!("已发送表情包: {}", desc),
-                    Err(e) => format!("发送表情包失败: {}", e),
+                    Err(e) => format!("表情包发送失败（{}）。请直接用文字回复表达情绪，不要输出[图片]。", e),
                 }
             }
             "tool_search" => {

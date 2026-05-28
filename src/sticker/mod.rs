@@ -15,17 +15,18 @@ use tracing::info;
 
 /// 发送表情包（供 Planner tool 调用）
 ///
-/// 使用 VLM 从候选中选择最合适的表情包，然后通过 SDK 发送。
+/// 使用 VLM 子代理从候选网格中选择最合适的表情包，然后通过 SDK 发送。
 pub fn send_sticker(
     group_id: u64,
     user_id: u64,
-    target_emotion: &str,
-    context: &str,
+    context_texts: &[String],
     recent_hashes: &[String],
 ) -> Result<String, String> {
-    // 使用 VLM 选择最合适的表情包
-    let selection = manager::select_sticker_vlm(context, target_emotion, recent_hashes)
-        .ok_or_else(|| "没有可用的表情包".to_string())?;
+    let context = context_texts.join("\n");
+
+    // 使用 VLM 子代理从候选网格中选择
+    let selection = manager::select_sticker_vlm(&context, recent_hashes)
+        .ok_or_else(|| "没有可用的表情包，请用文字表达情绪".to_string())?;
 
     // 读取图片文件路径
     let data_dir = crate::config::data_dir();
@@ -41,9 +42,7 @@ pub fn send_sticker(
             luo9_sdk::Bot::send_private_msg(user_id, msg);
         }
     } else {
-        // 文件不存在时发送文本描述
-        let msg = format!("[表情包: {}]", selection.description);
-        crate::sender::send_msg(group_id, user_id, &msg);
+        return Err(format!("表情包文件缺失，请用文字表达情绪"));
     }
 
     // 更新使用次数
@@ -58,8 +57,8 @@ pub fn send_sticker(
 
     info!(
         hash = %selection.hash[..16.min(selection.hash.len())],
-        emotion = target_emotion,
         description = %selection.description,
+        reason = %selection.reason,
         "sticker: sent"
     );
 
@@ -73,7 +72,7 @@ pub fn get_sticker_context() -> String {
         return String::new();
     }
     format!(
-        "# 表情包系统\n你有 {} 个可用的表情包。当对话需要情感表达时，可以调用 send_sticker 工具发送合适的表情包。",
+        "# 表情包系统\n你有 {} 个可用的表情包。当语言不够到位、用户要求发表情包、或对话氛围需要时，直接调用 send_sticker 工具。系统会自动选择最合适的表情包。如果发送失败，请用文字表达情绪，不要输出[图片]。",
         registered
     )
 }

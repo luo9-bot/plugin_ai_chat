@@ -173,7 +173,6 @@ pub fn is_sticker_cq(cq_message: &str) -> bool {
 /// 4. 解析选择结果
 pub fn select_sticker_vlm(
     context: &str,
-    target_emotion: &str,
     exclude_hashes: &[String],
 ) -> Option<StickerSelection> {
     let store = load_store();
@@ -195,8 +194,8 @@ pub fn select_sticker_vlm(
         .map(|e| data_dir.join(&e.path).to_string_lossy().to_string())
         .collect();
 
-    // 构建 VLM 请求：多张图片 + 选择 prompt
-    let selection = select_with_vlm(&image_paths, context, target_emotion);
+    // 构建 VLM 请求：网格图 + 上下文选择 prompt
+    let selection = select_with_vlm(&image_paths, context);
 
     match selection {
         Some((index, reason)) => {
@@ -204,7 +203,6 @@ pub fn select_sticker_vlm(
                 let selected = sampled[index];
                 debug!(
                     hash = %selected.hash[..16.min(selected.hash.len())],
-                    emotion = target_emotion,
                     reason = %reason,
                     "sticker: vlm selected"
                 );
@@ -215,7 +213,6 @@ pub fn select_sticker_vlm(
                     reason,
                 })
             } else {
-                // 索引越界，fallback 到第一个
                 let selected = sampled[0];
                 Some(StickerSelection {
                     hash: selected.hash.clone(),
@@ -226,8 +223,15 @@ pub fn select_sticker_vlm(
             }
         }
         None => {
-            // VLM 失败，fallback 到情绪标签匹配
-            select_sticker_by_emotion(target_emotion, &candidates)
+            // VLM 失败，fallback 到随机选择
+            let idx = (crate::util::now_millis() as usize) % sampled.len();
+            let selected = sampled[idx];
+            Some(StickerSelection {
+                hash: selected.hash.clone(),
+                path: selected.path.clone(),
+                description: selected.description.clone(),
+                reason: "VLM 选择失败，随机选取".to_string(),
+            })
         }
     }
 }
@@ -373,7 +377,6 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
 fn select_with_vlm(
     image_paths: &[String],
     context: &str,
-    target_emotion: &str,
 ) -> Option<(usize, String)> {
     let cfg = crate::config::get();
     if !cfg.vision.enabled() || image_paths.is_empty() {
@@ -396,12 +399,11 @@ fn select_with_vlm(
     let prompt = format!(
         "你是洛玖的临时表情包选择子代理。\n\n\
          当前对话上下文：\n{}\n\n\
-         目标情绪：{}\n\n\
          上面是 {} 个候选表情包，排列成 {}×{} 网格（按顺序编号 1-{}）。\n\
-         请根据对话情境和目标情绪，选择最合适的一个。\n\
+         请根据对话情境和语气，选择最合适的一个表情包。\n\
          只返回 JSON：{{\"index\": N, \"reason\": \"选择原因\"}}\n\
          N 为候选列表中的序号（从 1 开始）。",
-        context, target_emotion, image_paths.len(), cols, rows, image_paths.len()
+        context, image_paths.len(), cols, rows, image_paths.len()
     );
 
     let request_body = serde_json::json!({
