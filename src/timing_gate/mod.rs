@@ -130,7 +130,25 @@ pub fn run_timing_gate(
         "- wait: 暂停等待一段时间，然后重新评估。用于用户可能还有话要说的情况。"
     };
     prompt_vars.insert("timing_gate_wait_rule", wait_rule);
-    prompt_vars.insert("group_chat_attention_block", "");
+
+    // 构建 group_chat_attention_block
+    let attention_block = if context.is_group {
+        let group_prompt = cfg.conversation.group_chat_prompt.trim();
+        if group_prompt.is_empty() {
+            String::new()
+        } else {
+            format!("在该聊天中的注意事项：\n{}", group_prompt)
+        }
+    } else {
+        let private_prompt = cfg.conversation.private_chat_prompt.trim();
+        if private_prompt.is_empty() {
+            String::new()
+        } else {
+            format!("在该聊天中的注意事项：\n{}", private_prompt)
+        }
+    };
+    prompt_vars.insert("group_chat_attention_block", &attention_block);
+
     let intrusiveness_str = format!("{:.1}", context.intrusiveness_weight);
     prompt_vars.insert("intrusiveness_weight", &intrusiveness_str);
     let prompt = crate::prompt::PromptManager::get().render("luo9_timing_gate", &prompt_vars);

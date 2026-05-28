@@ -124,6 +124,12 @@ pub struct ConversationConfig {
     /// 对同一用户的回复冷却时间 (秒)，防止连续回复刷屏，默认 15
     #[serde(default = "default_reply_cooldown_secs")]
     pub reply_cooldown_secs: u64,
+    /// 群聊额外提示，会注入到 timing_gate prompt 中
+    #[serde(default = "default_group_chat_prompt")]
+    pub group_chat_prompt: String,
+    /// 私聊额外提示，会注入到 timing_gate prompt 中
+    #[serde(default = "default_private_chat_prompt")]
+    pub private_chat_prompt: String,
 }
 
 impl Default for ConversationConfig {
@@ -137,6 +143,8 @@ impl Default for ConversationConfig {
             intrusiveness_weight: default_intrusiveness_weight(),
             action_descriptions: default_action_descriptions(),
             reply_cooldown_secs: default_reply_cooldown_secs(),
+            group_chat_prompt: default_group_chat_prompt(),
+            private_chat_prompt: default_private_chat_prompt(),
         }
     }
 }
@@ -768,6 +776,15 @@ fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
 fn default_action_descriptions() -> bool { true }
 fn default_reply_cooldown_secs() -> u64 { 15 }
+fn default_group_chat_prompt() -> String {
+    "你正在qq群里聊天，下面是群里正在聊的内容。\n\
+     回复尽量简短一些。最好一次对一个话题进行回复。\n\
+     控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。".to_string()
+}
+fn default_private_chat_prompt() -> String {
+    "你正在聊天，下面是正在聊的内容。\n\
+     回复尽量简短一些。请注意把握聊天内容。".to_string()
+}
 fn default_segment_minutes() -> u32 { 5 }
 fn default_quota_segments() -> Vec<QuotaSegment> {
     vec![
