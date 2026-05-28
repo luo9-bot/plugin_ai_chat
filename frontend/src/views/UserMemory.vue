@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>用户记忆</h3>
         <div class="header-actions">
@@ -36,7 +36,7 @@
     </div>
 
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd = false">
-      <div class="glass-card modal">
+      <div class="card modal">
         <h3 style="margin-bottom:16px">添加用户记忆</h3>
         <label>用户 ID</label><input v-model="addUid" class="glass-input" style="margin-bottom:12px" />
         <label>内容</label><textarea v-model="addContent" class="glass-input" style="margin-bottom:12px"></textarea>
@@ -90,22 +90,21 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .header-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .sep { color: var(--text-3); font-size: 12px; }
-.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
+.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--glass-border); }
-td { padding: 8px 12px; border-bottom: 1px solid var(--glass-border); }
+th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 tr:hover td { background: var(--surface-hover); }
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .truncate { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

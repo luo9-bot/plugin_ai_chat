@@ -1,22 +1,22 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card">
+      <div class="card">
         <div class="stat-value">{{ weekly.done }}/{{ weekly.total }}</div>
         <div class="stat-label">周计划完成</div>
         <div class="bar-wrap"><div class="bar" :style="{ width: weeklyPct + '%' }"></div></div>
       </div>
-      <div class="glass-card">
+      <div class="card">
         <div class="stat-value">{{ monthly.done }}/{{ monthly.total }}</div>
         <div class="stat-label">月计划完成</div>
         <div class="bar-wrap"><div class="bar" :style="{ width: monthlyPct + '%' }"></div></div>
       </div>
-      <div class="glass-card">
+      <div class="card">
         <div class="stat-value">{{ pushHistory.length }}</div>
         <div class="stat-label">累计推动</div>
         <div class="stat-sub">历史推动记录</div>
       </div>
-      <div class="glass-card">
+      <div class="card">
         <div class="stat-value">{{ pushes.length }}</div>
         <div class="stat-label">今日待推进</div>
         <div class="stat-sub">{{ pushState.pushed_today?.length || 0 }} 项已推送</div>
@@ -24,7 +24,7 @@
     </div>
 
     <div class="plan-grid">
-      <div class="glass-card">
+      <div class="card">
         <div class="card-header">
           <h3>本周计划 <span class="badge" v-if="weekly.week_start">{{ weekly.week_start }}</span></h3>
         </div>
@@ -46,7 +46,7 @@
         </div>
       </div>
 
-      <div class="glass-card">
+      <div class="card">
         <div class="card-header">
           <h3>本月目标 <span class="badge" v-if="monthly.month">{{ monthly.month }}</span></h3>
         </div>
@@ -68,7 +68,7 @@
       </div>
     </div>
 
-    <div class="glass-card push-card" v-if="pushes.length">
+    <div class="card push-card" v-if="pushes.length">
       <div class="card-header">
         <h3>今日推动 <span class="badge">{{ pushes.length }}</span></h3>
       </div>
@@ -80,7 +80,7 @@
       </div>
     </div>
 
-    <div class="glass-card" v-if="pushHistory.length">
+    <div class="card" v-if="pushHistory.length">
       <div class="card-header">
         <h3>推动历史 <span class="badge">{{ pushHistory.length }} 条</span></h3>
       </div>
@@ -98,7 +98,7 @@
       </div>
     </div>
 
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header"><h3>计划系统说明</h3></div>
       <div class="info-list">
         <div class="info-item">📅 每日计划：每天早上自动生成当日任务</div>
@@ -185,7 +185,6 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 <style scoped>
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 16px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--primary-glow); color: var(--primary); }
@@ -209,8 +208,8 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .push-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--glass-border); }
-td { padding: 6px 12px; border-bottom: 1px solid var(--glass-border); }
+th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
 tr:hover td { background: var(--surface-hover); }
 .mono { font-family: monospace; font-size: 11px; color: var(--text-2); white-space: nowrap; }
 .tag-kind { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: var(--primary-glow); color: var(--primary); }

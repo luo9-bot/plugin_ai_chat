@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>对话管理</h3>
         <div class="header-actions">
@@ -63,14 +63,13 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
 .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
+.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .empty { text-align: center; padding: 20px; color: var(--text-3); font-size: 13px; }
 .section-label { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }

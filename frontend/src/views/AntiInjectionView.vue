@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>防注入系统</h3>
         <button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button>
@@ -57,18 +57,17 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--glass-border); }
-td { padding: 8px 12px; border-bottom: 1px solid var(--glass-border); }
+th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 tr:hover td { background: var(--surface-hover); }
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .bar-wrap { height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }

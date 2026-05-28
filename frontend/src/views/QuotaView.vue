@@ -1,14 +1,14 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card" v-if="quota.enabled !== undefined">
+      <div class="card" v-if="quota.enabled !== undefined">
         <div class="stat-value" :style="{ color: quota.enabled ? 'var(--success)' : 'var(--text-3)' }">{{ quota.enabled ? '已启用' : '已禁用' }}</div>
         <div class="stat-label">配额系统</div>
         <div class="stat-sub">{{ quota.segment_minutes || 5 }} 分钟/段</div>
       </div>
     </div>
 
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header"><h3>用户兴趣分数</h3><button class="btn btn-ghost btn-sm" @click="load">↻ 刷新</button></div>
       <div v-if="!userList.length" class="empty">暂无用户数据</div>
       <div v-else class="user-grid">
@@ -48,14 +48,13 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 16px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .stat-value { font-size: 24px; font-weight: 700; }
 .stat-label { font-size: 13px; color: var(--text-2); margin-top: 4px; }
 .stat-sub { font-size: 11px; color: var(--text-3); }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
 .user-grid { display: flex; flex-direction: column; gap: 6px; }

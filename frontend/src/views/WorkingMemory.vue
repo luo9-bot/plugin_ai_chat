@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>工作记忆 <span class="badge">群聊消息流</span></h3>
         <div class="header-actions">
@@ -74,14 +74,13 @@ onUnmounted(() => { clearInterval(interval); window.removeEventListener('refresh
 </script>
 
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .header-actions { display: flex; gap: 8px; }
 .badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--primary-glow); color: var(--primary); }
-.glass-input, .glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; }
+.glass-input, .glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition); }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .empty { text-align: center; padding: 40px; color: var(--text-3); }
 .msg-flow { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; }

@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card" v-for="s in stats" :key="s.label">
+      <div class="card" v-for="s in stats" :key="s.label">
         <div class="stat-icon" :style="{ color: s.color }" v-html="s.icon"></div>
         <div class="stat-value">{{ s.value ?? '-' }}</div>
         <div class="stat-label">{{ s.label }}</div>
@@ -17,7 +17,7 @@
     </div>
 
     <div class="card-row">
-      <div class="glass-card half" v-if="data?.social_battery">
+      <div class="card half" v-if="data?.social_battery">
         <h3>社交电量</h3>
         <div class="battery-visual">
           <div class="battery-fill" :style="{ width: data.social_battery.percentage * 100 + '%', background: batteryColor }"></div>
@@ -31,7 +31,7 @@
         </div>
       </div>
 
-      <div class="glass-card half" v-if="data?.circadian">
+      <div class="card half" v-if="data?.circadian">
         <h3>昼夜节律</h3>
         <div class="rhythm-bars">
           <div v-for="r in rhythmBars" :key="r.label" class="rhythm-row">
@@ -48,7 +48,7 @@
     </div>
 
     <div class="card-row">
-      <div class="glass-card half" v-if="data?.attention">
+      <div class="card half" v-if="data?.attention">
         <h3>注意力</h3>
         <div class="kv-grid">
           <div class="kv"><span>注意力水平</span><strong>{{ (data.attention.attention_level * 100).toFixed(0) }}%</strong></div>
@@ -58,7 +58,7 @@
         </div>
       </div>
 
-      <div class="glass-card half" v-if="data?.cognitive_biases">
+      <div class="card half" v-if="data?.cognitive_biases">
         <h3>认知偏差</h3>
         <div class="kv-grid">
           <div class="kv"><span>确认偏误</span><strong>{{ data.cognitive_biases.confirmation_bias.toFixed(2) }}</strong></div>
@@ -70,14 +70,14 @@
       </div>
     </div>
 
-    <div class="glass-card" v-if="data?.motivation">
+    <div class="card" v-if="data?.motivation">
       <h3>主动消息动机</h3>
       <div class="motivation-badge">
         当前最强动机: <strong>{{ data.motivation.type }}</strong> (强度: {{ data.motivation.strength.toFixed(2) }})
       </div>
     </div>
 
-    <div class="glass-card" v-if="data?.inner_thoughts?.length">
+    <div class="card" v-if="data?.inner_thoughts?.length">
       <h3>内心独白 <span class="badge-sm">{{ data.inner_thoughts.length }}条</span></h3>
       <div class="thought-list">
         <div v-for="(t, i) in data.inner_thoughts" :key="i" class="thought-item" :class="{ faded: t.faded }">
@@ -95,7 +95,7 @@
       </div>
     </div>
 
-    <div v-if="!data || (!data.social_battery && !data.circadian && !data.attention)" class="glass-card">
+    <div v-if="!data || (!data.social_battery && !data.circadian && !data.attention)" class="card">
       <div class="empty">人性化功能未启用，请在配置中开启相关选项</div>
     </div>
   </div>
@@ -167,8 +167,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; margin-bottom: 24px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
-.glass-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .stat-icon { margin-bottom: 8px; }
 .stat-value { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
 .stat-label { font-size: 13px; color: var(--text-2); margin-top: 4px; font-weight: 500; }
@@ -176,7 +175,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .card-row { display: flex; gap: 16px; }
 .half { flex: 1; min-width: 0; }
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.kv { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--glass-border); }
+.kv { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .kv span { color: var(--text-2); }
 .kv strong { font-weight: 600; }
 .battery-visual { height: 24px; background: var(--surface); border-radius: 6px; overflow: hidden; margin-bottom: 12px; }
@@ -189,7 +188,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .rhythm-pct { width: 36px; font-size: 11px; color: var(--text-2); text-align: right; flex-shrink: 0; }
 .section-title { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
 .toggle-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-.toggle-chip { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: var(--surface); border: 1px solid var(--glass-border); color: var(--text-3); }
+.toggle-chip { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); color: var(--text-3); }
 .toggle-chip.on { background: var(--primary-glow); border-color: var(--primary); color: var(--primary); }
 .motivation-badge { font-size: 14px; padding: 12px; background: var(--surface-hover); border-radius: var(--radius-sm); }
 .thought-list { display: flex; flex-direction: column; gap: 10px; }

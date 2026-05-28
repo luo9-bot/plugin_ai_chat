@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card" v-for="s in summaryCards" :key="s.label">
+      <div class="card" v-for="s in summaryCards" :key="s.label">
         <div class="stat-value" :style="{ color: s.color }">{{ s.value }}</div>
         <div class="stat-label">{{ s.label }}</div>
         <div class="stat-sub">{{ s.sub }}</div>
@@ -9,7 +9,7 @@
     </div>
 
     <div class="chart-grid">
-      <div class="glass-card chart-card">
+      <div class="card chart-card">
         <h3 class="card-title">Token 分布</h3>
         <div class="chart-container">
           <svg viewBox="0 0 160 160" width="170" height="170">
@@ -29,7 +29,7 @@
         </div>
       </div>
 
-      <div class="glass-card chart-card">
+      <div class="card chart-card">
         <h3 class="card-title">调用分布</h3>
         <div class="chart-container">
           <svg viewBox="0 0 160 160" width="170" height="170">
@@ -49,7 +49,7 @@
       </div>
     </div>
 
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>按 Prompt 类型统计</h3>
         <select v-model="sortKey" class="glass-select">
@@ -76,7 +76,7 @@
       </div>
     </div>
 
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header"><h3>最近调用</h3></div>
       <div v-if="!recent.length" class="empty">暂无记录</div>
       <div v-else class="table-wrap">
@@ -154,10 +154,9 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 16px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
-.glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; }
+.glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; }
 .stat-value { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
 .stat-label { font-size: 13px; color: var(--text-2); margin-top: 4px; }
 .stat-sub { font-size: 11px; color: var(--text-3); }
@@ -169,7 +168,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
-.prompt-row { padding: 10px 0; border-bottom: 1px solid var(--glass-border); }
+.prompt-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .prompt-row:last-child { border-bottom: none; }
 .pr-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; text-transform: capitalize; }
 .pr-bars { display: flex; gap: 16px; font-size: 12px; margin-bottom: 6px; }
@@ -182,8 +181,8 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .bar-ct { background: #8b5cf6; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
-th { text-align: left; padding: 8px 10px; font-weight: 600; font-size: 10px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--glass-border); }
-td { padding: 6px 10px; border-bottom: 1px solid var(--glass-border); }
+th { text-align: left; padding: 8px 10px; font-weight: 600; font-size: 10px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
 tr:hover td { background: var(--surface-hover); }
 .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--primary-glow); color: var(--primary); }
 </style>

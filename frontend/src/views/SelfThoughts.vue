@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>自我记忆 <span class="badge">{{ thoughts.length }} 条</span></h3>
         <div class="header-actions">
@@ -34,7 +34,7 @@
     </div>
 
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd = false">
-      <div class="glass-card modal">
+      <div class="card modal">
         <h3 style="margin-bottom:16px">添加自我记忆</h3>
         <label>分类</label><select v-model="addCategory" class="glass-select" style="margin-bottom:12px;width:100%">
           <option value="reflection">反思</option><option value="experience">经历</option><option value="plan">计划</option><option value="feeling">感受</option>
@@ -88,21 +88,20 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .header-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .sep { color: var(--text-3); font-size: 12px; }
 .badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--primary-glow); color: var(--primary); }
-.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
+.glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
 .timeline { position: relative; padding-left: 24px; }
-.timeline::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; width: 2px; background: var(--glass-border); }
+.timeline::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; width: 2px; background: var(--border); }
 .timeline-item { position: relative; margin-bottom: 12px; }
 .timeline-dot { position: absolute; left: -20px; top: 16px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); z-index: 1; }
 .timeline-card { padding: 12px 16px; border-radius: var(--radius-sm); background: var(--surface-hover); }

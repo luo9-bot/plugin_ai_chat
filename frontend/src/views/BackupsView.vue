@@ -1,13 +1,13 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="glass-card" v-for="(count, type) in counts" :key="type">
+      <div class="card" v-for="(count, type) in counts" :key="type">
         <div class="stat-value">{{ count }}</div>
         <div class="stat-label">{{ typeLabel(type) }}</div>
       </div>
     </div>
 
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header">
         <h3>备份详情</h3>
         <div class="header-actions">
@@ -94,16 +94,15 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .card-header h3 { font-size: 15px; font-weight: 600; }
 .header-actions { display: flex; gap: 8px; align-items: center; }
-.glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
+.glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
 .stat-value { font-size: 24px; font-weight: 700; color: var(--primary); }
 .stat-label { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; }
 .empty { text-align: center; padding: 24px; color: var(--text-3); }

@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="glass-card">
+    <div class="card">
       <div class="card-header"><h3>远程同步</h3></div>
       <div v-if="!status" class="empty">加载中...</div>
       <div v-else>
@@ -34,14 +34,13 @@ async function pushNow() {
 onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 </script>
 <style scoped>
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
 .card-header h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .empty { text-align: center; padding: 24px; color: var(--text-3); }
 .config-grid { display: flex; flex-direction: column; gap: 8px; }
-.config-item { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid var(--glass-border); }
+.config-item { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
 .config-item label { color: var(--text-2); }
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 </style>

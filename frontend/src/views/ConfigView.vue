@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="config-layout">
-      <div class="config-nav glass-card">
+      <div class="config-nav card">
         <div class="nav-section" v-for="sec in sections" :key="sec.id">
           <div class="nav-item"
             :class="{ active: activeSection === sec.id }"
@@ -13,7 +13,7 @@
       </div>
 
       <div class="config-content">
-        <div class="glass-card" v-if="config">
+        <div class="card" v-if="config">
           <div class="card-header">
             <h3><span class="sec-dot" :style="{ background: currentSection.color }"></span> {{ currentSection.label }}</h3>
             <button class="btn btn-ghost btn-sm" @click="openEdit">✏️ 编辑</button>
@@ -39,11 +39,11 @@
             </div>
           </div>
         </div>
-        <div class="glass-card" v-else>
+        <div class="card" v-else>
           <div class="empty">加载配置中...</div>
         </div>
 
-        <div class="glass-card notice-card">
+        <div class="card notice-card">
           <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M10 2l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V5l7-3z" stroke="currentColor" stroke-width="1.5"/><path d="M9 9h2v5H9zM9 6h2v2H9z" fill="currentColor"/></svg>
           <span>修改配置后点击「保存」再「重新载入配置」即可生效，无需重启。</span>
           <button class="btn btn-primary btn-sm" @click="reloadConfig" style="margin-left:auto;flex-shrink:0">🔄 重新载入配置</button>
@@ -52,7 +52,7 @@
     </div>
 
     <div v-if="showEdit" class="modal-overlay" @click.self="showEdit = false">
-      <div class="glass-card modal">
+      <div class="card modal">
         <h3 style="margin-bottom:16px">编辑 {{ currentSection.label }}</h3>
         <div class="edit-fields">
           <div v-for="f in currentSection.fields" :key="f.key" class="edit-field">
@@ -342,19 +342,17 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .config-layout { display: flex; gap: 20px; align-items: flex-start; }
-.config-nav { width: 200px; padding: 12px; position: sticky; top: 84px; flex-shrink: 0; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
 .nav-section { margin-bottom: 2px; }
 .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius-xs); font-size: 12px; font-weight: 500; cursor: pointer; transition: var(--transition); color: var(--text-2); }
 .nav-item:hover { background: var(--surface-hover); color: var(--text); }
 .nav-item.active { background: var(--primary); color: white; }
 .nav-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .config-content { flex: 1; min-width: 0; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-header h3 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .sec-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .field-list { display: flex; flex-direction: column; }
-.field-item { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); font-size: 13px; }
+.field-item { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .field-item:last-child { border-bottom: none; }
 .field-label { width: 150px; color: var(--text-2); font-weight: 500; flex-shrink: 0; }
 .field-value { flex: 1; display: flex; align-items: center; gap: 6px; }
@@ -367,7 +365,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .notice-card { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); line-height: 1.5; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition); }
 .btn-primary { background: var(--primary); color: white; }
-.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--glass-border); }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .empty { text-align: center; padding: 32px; color: var(--text-3); }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; }
@@ -375,7 +373,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .edit-fields { display: flex; flex-direction: column; gap: 12px; }
 .edit-field { display: flex; flex-direction: column; gap: 4px; }
 .edit-field label { font-size: 12px; font-weight: 600; color: var(--text-2); }
-.glass-input, .glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; width: 100%; }
+.glass-input, .glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; width: 100%; }
 .glass-input:focus, .glass-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 

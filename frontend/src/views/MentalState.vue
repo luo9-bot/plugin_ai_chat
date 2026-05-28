@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="section-grid">
-      <div class="glass-card">
+      <div class="card">
         <div class="card-header"><h3>担忧 <span class="badge">{{ concerns.length }}</span></h3></div>
         <div v-if="!concerns.length" class="empty">暂无担忧</div>
         <div v-else class="card-list">
@@ -12,7 +12,7 @@
           </div>
         </div>
       </div>
-      <div class="glass-card">
+      <div class="card">
         <div class="card-header"><h3>考量 <span class="badge">{{ deliberations.length }}</span></h3></div>
         <div v-if="!deliberations.length" class="empty">暂无考量</div>
         <div v-else class="card-list">
@@ -44,7 +44,6 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 <style scoped>
 .section-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
-.glass-card { padding: 20px; border-radius: var(--radius); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
 .card-header h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--primary-glow); color: var(--primary); }
 .empty { text-align: center; padding: 32px; color: var(--text-3); font-size: 13px; }
