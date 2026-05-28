@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "plugin_ai_chat"
-version = "5.2.0-beta.10"
+version = "5.2.0-beta.11"
 dependencies = [
  "aho-corasick",
  "base64",
