@@ -519,7 +519,7 @@ impl Default for InputFilterConfig {
     fn default() -> Self {
         Self {
             max_message_length: 2000,
-            sensitive_action: "replace".to_string(),
+            sensitive_action: "block".to_string(),
         }
     }
 }
@@ -535,7 +535,7 @@ pub struct OutputFilterConfig {
 impl Default for OutputFilterConfig {
     fn default() -> Self {
         Self {
-            action: "replace".to_string(),
+            action: "block".to_string(),
         }
     }
 }
@@ -782,7 +782,7 @@ fn default_typing_speed() -> f64 { 5.0 }
 fn default_max_typing_delay() -> u64 { 4000 }
 fn default_reply_follow_up_secs() -> u64 { 300 }
 fn default_intrusiveness_weight() -> f32 { 0.3 }
-fn default_action_descriptions() -> bool { true }
+fn default_action_descriptions() -> bool { false }
 fn default_reply_cooldown_secs() -> u64 { 15 }
 fn default_group_chat_prompt() -> String {
     "你正在qq群里聊天，下面是群里正在聊的内容。\n\
@@ -796,13 +796,13 @@ fn default_private_chat_prompt() -> String {
 fn default_segment_minutes() -> u32 { 5 }
 fn default_quota_segments() -> Vec<QuotaSegment> {
     vec![
-        QuotaSegment { start_hour: 0,  end_hour: 6,  max_replies: 0 },
-        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 2 },
-        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 3 },
-        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 5 },
-        QuotaSegment { start_hour: 14, end_hour: 16, max_replies: 1 },
-        QuotaSegment { start_hour: 16, end_hour: 20, max_replies: 2 },
-        QuotaSegment { start_hour: 20, end_hour: 24, max_replies: 1 },
+        QuotaSegment { start_hour: 0,  end_hour: 6,  max_replies: 5 },
+        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 20 },
+        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 30 },
+        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 50 },
+        QuotaSegment { start_hour: 14, end_hour: 16, max_replies: 10 },
+        QuotaSegment { start_hour: 16, end_hour: 20, max_replies: 20 },
+        QuotaSegment { start_hour: 20, end_hour: 24, max_replies: 10 },
     ]
 }
 fn default_log_level() -> String { "info".into() }
@@ -820,7 +820,7 @@ fn default_quiet_end() -> u32 { 7 }
 fn default_proactive_interval() -> u64 { 7200 }
 fn default_max_ignore() -> u32 { 3 }
 fn default_low_mood_multiplier() -> f64 { 2.0 }
-fn default_check_interval() -> u64 { 120 }
+fn default_check_interval() -> u64 { 60 }
 fn default_reflection_interval() -> u64 { 1800 }
 fn default_max_thoughts() -> usize { 8 }
 fn default_post_conversation_delay() -> u64 { 120 }
@@ -842,8 +842,8 @@ fn default_msg_already() -> String { "已经开启啦".into() }
 fn default_forget_success() -> String { "已遗忘对话记录".into() }
 fn default_forget_fail() -> String { "没有找到对话记录".into() }
 fn default_max_message_length() -> usize { 2000 }
-fn default_sensitive_action() -> String { "warn".into() }
-fn default_output_action() -> String { "replace".into() }
+fn default_sensitive_action() -> String { "block".into() }
+fn default_output_action() -> String { "block".into() }
 fn default_max_messages_per_minute() -> u32 { 20 }
 fn default_max_messages_per_hour() -> u32 { 200 }
 fn default_reputation_threshold() -> f32 { 0.3 }

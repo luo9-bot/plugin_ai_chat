@@ -1260,12 +1260,14 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
                 Ok(v) => v,
                 Err(e) => return err(400, &format!("invalid json: {}", e)),
             };
-            // 读取现有配置以保留被脱敏的字段
+            // 读取现有配置以保留未发送的字段
             let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
             let existing_cfg: serde_json::Value = serde_yaml::from_str(&existing).unwrap_or(serde_json::json!({}));
 
-            // 合并：新配置中包含 "..." 的字段保留原值
-            let mut merged = new_cfg.clone();
+            // 深合并：新配置中未发送的嵌套字段保留原值
+            let mut merged = deep_merge(&existing_cfg, &new_cfg);
+
+            // 脱敏字段还原：包含 "..." 的 api_key 保留原值
             if let (Some(new_obj), Some(old_obj)) = (merged.as_object_mut(), existing_cfg.as_object()) {
                 // api_key
                 if let Some(key) = new_obj.get("api_key").and_then(|v| v.as_str())
@@ -1572,4 +1574,33 @@ pub fn handle_info() -> Response<std::io::Cursor<Vec<u8>>> {
         "version": env!("CARGO_PKG_VERSION"),
         "build_time": option_env!("BUILD_TIME").unwrap_or("dev"),
     }))
+}
+
+/// 深合并两个 JSON 对象
+/// - 对于两个都是 Object 的 key：递归合并
+/// - 对于其他情况：新值覆盖旧值
+/// 这样前端发送部分嵌套字段时，不会丢失未发送的字段
+fn deep_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json::Value {
+    match (base, patch) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(patch_map)) => {
+            let mut result = base_map.clone();
+            for (key, patch_val) in patch_map {
+                if let Some(base_val) = result.get(key) {
+                    // 两边都是 Object → 递归深合并
+                    if base_val.is_object() && patch_val.is_object() {
+                        result.insert(key.clone(), deep_merge(base_val, patch_val));
+                    } else {
+                        // 其他类型（包括 Array）：新值覆盖
+                        result.insert(key.clone(), patch_val.clone());
+                    }
+                } else {
+                    // patch 中有而 base 中没有的 key：直接插入
+                    result.insert(key.clone(), patch_val.clone());
+                }
+            }
+            serde_json::Value::Object(result)
+        }
+        // 非 Object 类型：直接返回 patch
+        _ => patch.clone(),
+    }
 }
