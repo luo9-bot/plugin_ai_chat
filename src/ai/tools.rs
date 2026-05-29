@@ -427,3 +427,28 @@ pub fn monthly_plan_tool() -> Tool {
         },
     }
 }
+
+/// 话题分类工具
+pub fn topic_classify_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "classify_topic".to_string(),
+            description: "将消息分类到话题类别".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "enum": [
+                            "greeting", "food", "status_check", "activity_invite",
+                            "weather", "care", "share", "emotion", "question", "other"
+                        ],
+                        "description": "话题类别"
+                    }
+                },
+                "required": ["topic"]
+            }),
+        },
+    }
+}

@@ -50,6 +50,27 @@ pub fn ai_generate_message(
         }
     }
 
+    // 回复状态：bot 最近的消息有没有人回复
+    let (reply_status, last_topic) = crate::proactive::trigger::check_reply_status(group_id);
+    let reply_ctx = match reply_status {
+        crate::proactive::trigger::ReplyStatus::RepliedToBot => {
+            "# 你刚才说的话有没有人回复\n情况：有人回复了你。对话正在进行中，可以自然接话。".to_string()
+        }
+        crate::proactive::trigger::ReplyStatus::OthersTalking => {
+            format!(
+                "# 你刚才说的话有没有人回复\n情况：有人在聊天但没有回复你。你上次说的是关于「{}」的话题。不要插嘴，除非你真的有话说。",
+                last_topic.as_deref().unwrap_or("未知")
+            )
+        }
+        crate::proactive::trigger::ReplyStatus::NoReply => {
+            format!(
+                "# 你刚才说的话有没有人回复\n情况：没有人回复你。你上次说的是关于「{}」的话题。请不要再说类似的话题，想说话就说点完全不同的事，否则选择 skip。",
+                last_topic.as_deref().unwrap_or("未知")
+            )
+        }
+    };
+    ctx.push(reply_ctx);
+
     // 关于用户的记忆
     let mem = memory::get_context(user_id, group_id);
     if !mem.is_empty() {

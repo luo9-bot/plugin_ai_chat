@@ -899,9 +899,9 @@ dependencies = [
 
 [[package]]
 name = "luo9_sdk"
-version = "0.6.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "575d9f7b3b7c14c3cc7260593c6554cedd858fa564d22bf8ccde297dd2a54400"
+checksum = "fcd93e98f323571c996527f2b1c8c23a0f1295219d286c587bf0cc90f17ad16b"
 dependencies = [
  "libc",
  "libloading",

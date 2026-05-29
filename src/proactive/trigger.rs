@@ -13,6 +13,17 @@ use super::runtime::{
 use super::generate::{generate_mood_message, generate_greeting};
 use super::motivation;
 
+/// Bot 主动消息的回复状态
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplyStatus {
+    /// 有人回复了 bot 的消息（面向 bot）
+    RepliedToBot,
+    /// 有人在聊天但不是回复 bot
+    OthersTalking,
+    /// 没人回复
+    NoReply,
+}
+
 /// 群级最近发送的消息列表（用于内容去重）
 /// group_id -> Vec<(content_fingerprint, timestamp)>
 static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, Vec<(String, u64)>>>> = Mutex::new(None);
@@ -53,6 +64,111 @@ fn fingerprints_similar(a: &str, b: &str) -> bool {
     overlap_ratio >= 0.6
 }
 
+/// 消息话题分类（AI 驱动）
+fn classify_message_topic(msg: &str) -> String {
+    let clean: String = msg.chars()
+        .filter(|c| !c.is_whitespace() && *c != '|' && *c != '^')
+        .collect();
+    if clean.is_empty() {
+        return "other".to_string();
+    }
+
+    // 快速规则首 pass：明显的话题直接返回，避免 AI 调用
+    if clean.contains("早") || clean.contains("晚安") || clean.contains("你好") {
+        return "greeting".to_string();
+    }
+
+    // AI 分类
+    let prompt = crate::prompt::PromptManager::get().raw("topic_classify");
+    let user_content = format!("请分类这条消息：\n{}", clean);
+    match crate::ai::analyze_with_tools(
+        prompt,
+        &user_content,
+        &[crate::ai::topic_classify_tool()],
+        Some(serde_json::json!("auto")),
+    ) {
+        Ok(parsed) => {
+            parsed.get("topic")
+                .and_then(|v| v.as_str())
+                .unwrap_or("other")
+                .to_string()
+        }
+        Err(_) => "other".to_string(),
+    }
+}
+
+/// 检查 bot 最近的主动消息是否得到了回复
+///
+/// 人类逻辑：
+/// - 我说了话，有人回我 → 可以继续聊
+/// - 我说了话，别人在聊天但没理我 → 不要插嘴
+/// - 我说了话，没人理 → 闭嘴
+pub fn check_reply_status(group_id: u64) -> (ReplyStatus, Option<String>) {
+    let self_qq = crate::config::get().self_qq;
+    if self_qq == 0 { return (ReplyStatus::NoReply, None); }
+
+    let history = crate::read_shared_state(|s| s.get_history_clone(group_id, 0));
+
+    // 从后往前找 bot 的最后一条消息
+    let mut last_bot_idx: Option<usize> = None;
+    let mut last_bot_content = String::new();
+    for (i, (role, content)) in history.iter().enumerate().rev() {
+        if role == "assistant" {
+            last_bot_idx = Some(i);
+            last_bot_content = content.clone();
+            break;
+        }
+    }
+
+    let bot_idx = match last_bot_idx {
+        Some(i) => i,
+        None => return (ReplyStatus::NoReply, None),
+    };
+
+    // 收集 bot 消息之后的所有用户消息
+    let after_bot: Vec<&(String, String)> = history.iter().skip(bot_idx + 1).collect();
+
+    if after_bot.is_empty() {
+        return (ReplyStatus::NoReply, Some(classify_message_topic(&last_bot_content)));
+    }
+
+    // 检查是否有用户消息是面向 bot 的
+    let bot_name = crate::config::get().bot_name.clone();
+    let at_pattern = format!("[CQ:at,qq={}]", self_qq);
+
+    for (role, content) in &after_bot {
+        if role != "user" { continue; }
+        if content.contains(&at_pattern) || (!bot_name.is_empty() && content.contains(&bot_name)) {
+            return (ReplyStatus::RepliedToBot, None);
+        }
+    }
+
+    // 有用户消息但没有面向 bot → 别人在聊天
+    (ReplyStatus::OthersTalking, Some(classify_message_topic(&last_bot_content)))
+}
+
+/// 根据回复状态和话题判断是否应该跳过
+///
+/// 人类逻辑：如果我说了话没人回复，我不会再重复说同类话题。
+fn should_skip_by_topic(reply_status: &ReplyStatus, last_topic: &Option<String>, new_msg: &str) -> bool {
+    if *reply_status != ReplyStatus::NoReply {
+        return false; // 有人回复了或别人在聊，不跳过
+    }
+    let last = match last_topic {
+        Some(t) => t,
+        None => return false, // 没有上次话题，不跳过
+    };
+    let new_topic = classify_message_topic(new_msg);
+    if last == "other" || new_topic == "other" {
+        return false; // 无法分类的话题不跳过
+    }
+    if *last == new_topic {
+        debug!(topic = %last, "proactive: no reply + same topic, skipping");
+        return true;
+    }
+    false
+}
+
 /// 检查消息是否与近期发送过的消息相似
 fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
     let fp = content_fingerprint(msg);
@@ -85,6 +201,19 @@ fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
                 if fingerprints_similar(&entry_fp, &fp) {
                     return true;
                 }
+            }
+        }
+    }
+
+    // 检查 3: 对话历史中 bot 自己最近 1800 秒的消息（覆盖私聊主动消息）
+    if self_qq > 0 {
+        let now = crate::util::now_secs();
+        let history = crate::read_shared_state(|s| s.get_history_clone(group_id, 0));
+        for (role, content) in history.iter().rev().take(10) {
+            if role != "assistant" { continue; }
+            let entry_fp = content_fingerprint(content);
+            if fingerprints_similar(&entry_fp, &fp) {
+                return true;
             }
         }
     }
@@ -163,6 +292,10 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     let time_since_last = now.saturating_sub(state.last_sent);
     let time_since_reply = now.saturating_sub(state.last_user_reply);
 
+    // ── 回复状态检测：bot 最近的消息有没有人回复？ ──
+    let (reply_status, last_topic) = check_reply_status(group_id);
+    debug!(user_id, group_id, ?reply_status, ?last_topic, "proactive: reply status");
+
     // 最低保底: 被无视太多次就别再烦了
     if state.ignore_count >= max_ignore {
         let cooldown = interval * (state.ignore_count as u64);
@@ -223,7 +356,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     // ── 触发路径 1: 情绪冲动 ────────────────────────────────────
     // 情绪强烈时，不等固定间隔，随机概率触发
-    // 但最低也要超过 interval/2，防止太随意
+    // 回复状态影响：没人回复+同话题 → skip；别人在聊 → 允许（情绪强烈可插话）
     let min_impulse_wait = (interval / 2).max(600);
     if time_since_last > min_impulse_wait && time_since_reply > min_impulse_wait {
         let impulse_prob = mood_impulse_probability(&emo);
@@ -235,6 +368,10 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             }
             if is_duplicate_message(group_id, &msg) {
                 debug!(user_id, group_id, msg = %msg, "proactive: duplicate mood message, skipping");
+                return;
+            }
+            if should_skip_by_topic(&reply_status, &last_topic, &msg) {
+                debug!(user_id, group_id, msg = %msg, "proactive: no reply + same topic mood, skipping");
                 return;
             }
             debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
@@ -258,7 +395,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             if strength >= threshold {
                 let motivation_ctx = motivation::get_motivation_context();
                 let msg = generate_greeting(user_id, group_id);
-                if !msg.is_empty() && !is_duplicate_message(group_id, &msg) {
+                if !msg.is_empty() && !is_duplicate_message(group_id, &msg) && !should_skip_by_topic(&reply_status, &last_topic, &msg) {
                     debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");
                     if sender::safe_send_quiet(group_id, user_id, &msg) {
                         record_sent(user_id, group_id);
@@ -283,6 +420,17 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
     };
 
     if time_since_last >= mood_adjusted && time_since_reply >= mood_adjusted {
+        // 路径 3：如果没人回复 bot 的消息，直接跳过（不说同类话题）
+        if reply_status == ReplyStatus::NoReply {
+            debug!(user_id, group_id, "proactive: no reply to last message, skipping periodic greeting");
+            return;
+        }
+        // 别人在聊天但没回复 bot → 不插嘴
+        if reply_status == ReplyStatus::OthersTalking {
+            debug!(user_id, group_id, "proactive: others talking, not replying to bot, skipping");
+            return;
+        }
+
         let msg = generate_greeting(user_id, group_id);
         if msg.is_empty() {
             return;
