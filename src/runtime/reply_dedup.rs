@@ -4,8 +4,39 @@
 /// 1. ReplyEffectTracker → 追踪回复后用户反馈
 /// 2. reply_follow_up_secs → 冷却控制
 /// 3. Sticker 去重 → exclude_hashes 参数
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
+
+// ── 全局 thread_local 实例（消息队列串行处理，thread_local 足够） ──
+thread_local! {
+    static GLOBAL_DEDUP: RefCell<ReplyDedupTracker> = RefCell::new(ReplyDedupTracker::new());
+}
+
+/// 在全局 tracker 中记录一条已发送的回复
+pub fn record(group_id: u64, user_id: u64, text: &str) {
+    GLOBAL_DEDUP.with(|d| d.borrow_mut().record_reply(group_id, user_id, text));
+}
+
+/// 检查是否与最近发送的回复重复（精确哈希 + 相似度）
+pub fn is_duplicate(group_id: u64, text: &str) -> bool {
+    GLOBAL_DEDUP.with(|d| d.borrow().has_recent_similar_reply(group_id, text, 0.85))
+}
+
+/// 检查是否满足最小回复间隔
+pub fn is_min_interval_met() -> bool {
+    GLOBAL_DEDUP.with(|d| d.borrow().is_min_interval_met())
+}
+
+/// 记录一条已发送的表情包
+pub fn record_sticker(group_id: u64, hash: &str) {
+    GLOBAL_DEDUP.with(|d| d.borrow_mut().record_sticker(group_id, hash));
+}
+
+/// 获取最近的表情包哈希列表（用于排除）
+pub fn get_recent_sticker_hashes(group_id: u64, max_age_secs: u64) -> Vec<String> {
+    GLOBAL_DEDUP.with(|d| d.borrow().get_recent_sticker_hashes(group_id, max_age_secs))
+}
 
 /// 一条已发送的回复记录
 #[derive(Debug, Clone)]

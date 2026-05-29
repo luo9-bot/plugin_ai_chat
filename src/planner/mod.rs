@@ -244,11 +244,7 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
         engine.deferred_state.discovered_tool_names.clear();
 
         // 获取去重跟踪器中的最近表情哈希
-        use crate::runtime::reply_dedup::ReplyDedupTracker;
-        thread_local! {
-            static DEDUP: std::cell::RefCell<ReplyDedupTracker> = std::cell::RefCell::new(ReplyDedupTracker::new());
-        }
-        let recent_hashes = DEDUP.with(|d| d.borrow().get_recent_sticker_hashes(ctx.group_id, 300));
+        let recent_hashes = crate::runtime::reply_dedup::get_recent_sticker_hashes(ctx.group_id, 300);
 
         // TTL 兼容映射：已被新 DeferredToolState 发现的工具保持可见
         let mut discovered: HashMap<String, usize> = HashMap::new();

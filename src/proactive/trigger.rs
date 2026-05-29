@@ -170,7 +170,9 @@ fn should_skip_by_topic(reply_status: &ReplyStatus, last_topic: &Option<String>,
 }
 
 /// 检查消息是否与近期发送过的消息相似
-fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
+///
+/// `user_id` 用于私聊场景：proactive 消息存储在 (0, user_id) 而非 (0, 0)
+fn is_duplicate_message(group_id: u64, user_id: u64, msg: &str) -> bool {
     let fp = content_fingerprint(msg);
     if fp.is_empty() {
         return false;
@@ -205,15 +207,27 @@ fn is_duplicate_message(group_id: u64, msg: &str) -> bool {
         }
     }
 
-    // 检查 3: 对话历史中 bot 自己最近 1800 秒的消息（覆盖私聊主动消息）
+    // 检查 3: 对话历史中 bot 自己最近的消息
+    // 私聊时检查 (0, user_id) 的历史，群聊时检查 (group_id, 0) 的历史
     if self_qq > 0 {
-        let now = crate::util::now_secs();
+        // 群聊历史
         let history = crate::read_shared_state(|s| s.get_history_clone(group_id, 0));
         for (role, content) in history.iter().rev().take(10) {
             if role != "assistant" { continue; }
             let entry_fp = content_fingerprint(content);
             if fingerprints_similar(&entry_fp, &fp) {
                 return true;
+            }
+        }
+        // 私聊时还需检查特定用户的历史（proactive 消息存储在 (0, user_id)）
+        if group_id == 0 && user_id > 0 {
+            let user_history = crate::read_shared_state(|s| s.get_history_clone(0, user_id));
+            for (role, content) in user_history.iter().rev().take(10) {
+                if role != "assistant" { continue; }
+                let entry_fp = content_fingerprint(content);
+                if fingerprints_similar(&entry_fp, &fp) {
+                    return true;
+                }
             }
         }
     }
@@ -276,7 +290,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     // 日期提醒 -- 最高优先级
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
-        if is_duplicate_message(group_id, &reminder_msg) {
+        if is_duplicate_message(group_id, user_id, &reminder_msg) {
             debug!(user_id, group_id, msg = %reminder_msg, "proactive: duplicate date reminder, skipping");
             return;
         }
@@ -327,7 +341,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             };
             let msg = super::generate::ai_generate_message(trigger, user_id, group_id, &life_emo, &extra_ctx);
             if let Some(msg) = msg {
-                if msg.is_empty() || is_duplicate_message(group_id, &msg) {
+                if msg.is_empty() || is_duplicate_message(group_id, user_id, &msg) {
                     crate::activity::clear_life_event(&life_event);
                     return;
                 }
@@ -366,7 +380,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             if msg.is_empty() {
                 return;
             }
-            if is_duplicate_message(group_id, &msg) {
+            if is_duplicate_message(group_id, user_id, &msg) {
                 debug!(user_id, group_id, msg = %msg, "proactive: duplicate mood message, skipping");
                 return;
             }
@@ -395,7 +409,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             if strength >= threshold {
                 let motivation_ctx = motivation::get_motivation_context();
                 let msg = generate_greeting(user_id, group_id);
-                if !msg.is_empty() && !is_duplicate_message(group_id, &msg) && !should_skip_by_topic(&reply_status, &last_topic, &msg) {
+                if !msg.is_empty() && !is_duplicate_message(group_id, user_id, &msg) && !should_skip_by_topic(&reply_status, &last_topic, &msg) {
                     debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");
                     if sender::safe_send_quiet(group_id, user_id, &msg) {
                         record_sent(user_id, group_id);
@@ -435,7 +449,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         if msg.is_empty() {
             return;
         }
-        if is_duplicate_message(group_id, &msg) {
+        if is_duplicate_message(group_id, user_id, &msg) {
             debug!(user_id, group_id, msg = %msg, time_since_last, "proactive: duplicate, skipping");
             return;
         }
@@ -502,7 +516,7 @@ pub fn check_group_atmosphere(group_id: u64) {
         return;
     }
 
-    if is_duplicate_message(group_id, &msg) {
+    if is_duplicate_message(group_id, 0, &msg) {
         debug!(group_id, msg = %msg, "proactive: duplicate atmosphere message, skipping");
         return;
     }

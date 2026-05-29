@@ -328,8 +328,13 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
                     // 处理定时任务嵌入
                     let final_reply = crate::cron::handle_cron_in_reply(&final_reply, group_id);
 
-                    // 发送回复
+                    // 发送回复（群聊需要去重检查）
                     if group_id > 0 {
+                        // 去重检查：防止短时间内发送相同的回复
+                        if crate::runtime::reply_dedup::is_duplicate(group_id, &final_reply) {
+                            info!(user_id, group_id, "dedup: 检测到重复回复，跳过发送");
+                            return;
+                        }
                         send_group_reply(group_id, user_id, &final_reply);
                     } else {
                         sender::send_with_typing(0, user_id, &final_reply);
@@ -363,11 +368,7 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
 
                     // 去重追踪：记录最近回复内容用于防重复
                     if group_id > 0 {
-                        use crate::runtime::reply_dedup::ReplyDedupTracker;
-                        thread_local! {
-                            static REPLY_DEDUP: std::cell::RefCell<ReplyDedupTracker> = std::cell::RefCell::new(ReplyDedupTracker::new());
-                        }
-                        REPLY_DEDUP.with(|d| d.borrow_mut().record_reply(group_id, user_id, &final_reply));
+                        crate::runtime::reply_dedup::record(group_id, user_id, &final_reply);
                     }
 
                     // 活动状态检测：bot 的回复是否声明了某个活动

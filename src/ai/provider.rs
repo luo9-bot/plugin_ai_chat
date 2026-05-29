@@ -545,6 +545,31 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
 
         // 情况 2: mental_state_generate — { concerns: [], deliberations: [{content: text}] }
         if tool.function.name == "mental_state_generate" {
+            let trimmed = text.trim();
+            // 过滤掉对话回复（短文本、口语化回应），这些不是内心想法
+            let conversational = ["嗯", "嗯嗯", "好的", "去吧", "好", "哦", "好吧", "知道了",
+                "嗯 去吧", "嗯 好", "好的呢", "行", "行吧", "可以", "没问题",
+                "嗯嗯 好的", "收到", "了解", "嗯呐", "对", "是的",
+                "你说是就是吧", "那真好", "下午好呀"];
+            let is_short_response = trimmed.chars().count() <= 15
+                && conversational.iter().any(|c| trimmed.contains(c));
+            // 过滤掉包含括号描述的内容（AI 格式违规，不是真正的内心想法）
+            let has_parenthetical = trimmed.contains('（') || trimmed.contains('(');
+            // 过滤掉看起来像对话回复的内容（包含换行+短句的模式）
+            let lines: Vec<&str> = trimmed.split('\n').collect();
+            let has_conversational_line = lines.iter().any(|line| {
+                let l = line.trim();
+                l.chars().count() <= 10 && conversational.iter().any(|c| l.contains(c))
+            });
+            if is_short_response || has_parenthetical || (has_conversational_line && trimmed.chars().count() < 60) {
+                // 短对话回复或格式违规，跳过不记录为内心想法
+                let wrapped = serde_json::json!({
+                    "concerns": [],
+                    "deliberations": []
+                });
+                debug!("try_wrap_text_for_tools: wrapped as mental_state_generate (skip conversational)");
+                return Ok(wrapped);
+            }
             let wrapped = serde_json::json!({
                 "concerns": [],
                 "deliberations": [{"content": text}]
@@ -583,7 +608,24 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             return Ok(wrapped);
         }
 
-        // 情况 6: proactive_message
+        // 情况 6: decide_reply — AI 直接输出文本而非调用工具
+        if tool.function.name == "decide_reply" {
+            let trimmed = text.trim();
+            // 检测 AI 是否在表达"不想回复"的意图
+            let silent_keywords = ["不回复", "不想回", "不应该回", "不接了", "不参与", "没必要回", "不需要回", "就不回", "我就不回", "不插嘴", "不凑热闹", "不搭话"];
+            let should_not_reply = silent_keywords.iter().any(|k| trimmed.contains(k));
+            if should_not_reply {
+                let wrapped = serde_json::json!({"reply": false, "reason": format!("fallback: AI表达不想回复 - {}", &trimmed[..trimmed.len().min(80)])});
+                debug!("try_wrap_text_for_tools: wrapped as decide_reply (no reply)");
+                return Ok(wrapped);
+            }
+            // 默认认为想回复（AI 输出了内容，通常意味着想说什么）
+            let wrapped = serde_json::json!({"reply": true, "reason": "fallback: AI直接输出文本"});
+            debug!("try_wrap_text_for_tools: wrapped as decide_reply (reply)");
+            return Ok(wrapped);
+        }
+
+        // 情况 7: proactive_message
         if tool.function.name == "proactive_message" {
             let trimmed = text.trim();
             let meaningless = ["没什么要说的", "没有想说的", "没什么想说的", "安静待着", "该安静", "没什么好说的", "不想说话", "先不说了", "先不说话", "下次再说", "不用说话", "不说了", "就不说了"];
