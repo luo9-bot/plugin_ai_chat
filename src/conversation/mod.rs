@@ -15,6 +15,15 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, group_id, content = trimmed, "recv: group msg");
 
+    // ── 自身消息处理：记录到工作记忆，但不触发回复 ──
+    let self_qq = config::get().self_qq;
+    if self_qq > 0 && user_id == self_qq {
+        let text_only = crate::vision::strip_image_cq(trimmed);
+        crate::working_memory::record_bot_reply(group_id, if text_only.is_empty() { "[图片]" } else { &text_only });
+        debug!(user_id, group_id, "self message recorded to working memory");
+        return;
+    }
+
     // ── 自动回复过滤 (完全忽略) ──
     if trimmed.starts_with("[自动回复]") {
         debug!(user_id, group_id, "ignored auto-reply message");
@@ -166,6 +175,14 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 pub fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, content = trimmed, "recv: private msg");
+
+    // ── 自身消息处理：记录到工作记忆，但不触发回复 ──
+    let self_qq = config::get().self_qq;
+    if self_qq > 0 && user_id == self_qq {
+        crate::working_memory::record_bot_reply(0, trimmed);
+        debug!(user_id, "self message recorded to working memory");
+        return;
+    }
 
     // ── 自动回复过滤 (完全忽略) ──
     if trimmed.starts_with("[自动回复]") {
