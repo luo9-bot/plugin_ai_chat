@@ -140,7 +140,6 @@ impl ResponseTiming {
 /// - 根据注意力水平调整回复长度
 /// - 根据电量调整语气活力
 /// - 小概率添加口头禅
-/// - 小概率自我纠正
 pub fn apply_humanity_filter(
     reply: &str,
     attention_level: f32,

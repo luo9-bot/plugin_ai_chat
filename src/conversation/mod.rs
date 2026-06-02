@@ -84,8 +84,6 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
             }
             _ => {}
         }
-    }else{
-        info!("是管理员！");
     }
 
     // ── 管理员专属控制命令 ──

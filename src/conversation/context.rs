@@ -233,10 +233,10 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     }
 
     // 电量相关的行为暗示（自然语言，非数值）
-    if battery_level_frac < 0.3 {
-        parts.push("- 你现在有些疲惫，可以简短回复，不用每条都说很多。如果不想说话可以用表情包代替".into());
-    } else if battery_level_frac < 0.15 {
+    if battery_level_frac < 0.15 {
         parts.push("- 你现在非常累，不想回复的话可以简单说「累了」之类的话".into());
+    } else if battery_level_frac < 0.3 {
+        parts.push("- 你现在有些疲惫，可以简短回复，不用每条都说很多。如果不想说话可以用表情包代替".into());
     }
 
     // 注意力相关的行为暗示
