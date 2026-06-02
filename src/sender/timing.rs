@@ -4,7 +4,6 @@
 //! - 回复延迟 = 基础延迟 + 内容长度 + 随机波动 + 认知复杂度延迟
 //! - 对简单问题（"嗯""好"）延迟极短
 //! - 长回复有概率拆成"先发简短反应，再发完整内容"
-//! - 发送后有概率补发"对了还有一件事..."
 
 use crate::config;
 
@@ -16,12 +15,8 @@ pub struct ResponseTiming {
     pub speed_modifier: f32,
     /// 回复前额外等待（模拟思考）的概率
     pub thinking_pause_probability: f32,
-    /// 发送后补发修正/补充的概率
-    pub follow_up_probability: f32,
     /// 长回复拆成两条的概率
     pub split_reply_probability: f32,
-    /// 自我纠正（"不对，我想说的是..."）的概率
-    pub self_correction_probability: f32,
 }
 
 impl Default for ResponseTiming {
@@ -32,9 +27,7 @@ impl Default for ResponseTiming {
             base_typing_speed: h.base_typing_speed,
             speed_modifier: 1.0,
             thinking_pause_probability: h.thinking_pause_probability,
-            follow_up_probability: h.follow_up_probability,
             split_reply_probability: h.split_reply_probability,
-            self_correction_probability: h.self_correction_probability,
         }
     }
 }
@@ -122,43 +115,6 @@ impl ResponseTiming {
         None
     }
 
-    /// 判断是否应该发送 follow-up 消息
-    pub fn should_follow_up(&self) -> bool {
-        fastrand::f32() < self.follow_up_probability
-    }
-
-    /// 生成 follow-up 内容
-    pub fn generate_follow_up() -> &'static str {
-        const FOLLOW_UPS: &[&str] = &[
-            "对了还有一件事",
-            "啊对了",
-            "等等我想想还有什么",
-            "哦对了我还想说",
-            "还有一个事",
-            "对了",
-        ];
-        let idx = fastrand::usize(0..FOLLOW_UPS.len());
-        FOLLOW_UPS[idx]
-    }
-
-    /// 判断是否应该自我纠正
-    pub fn should_self_correct(&self) -> bool {
-        fastrand::f32() < self.self_correction_probability
-    }
-
-    /// 生成自我纠正前缀
-    pub fn generate_self_correction() -> &'static str {
-        const CORRECTIONS: &[&str] = &[
-            "不对，我想说的是…",
-            "啊说错了，",
-            "emmm好像不太对，",
-            "等等让我重新说，",
-            "不是不是，",
-        ];
-        let idx = fastrand::usize(0..CORRECTIONS.len());
-        CORRECTIONS[idx]
-    }
-
     /// 根据当前状态更新修正系数
     pub fn update_modifiers(
         &mut self,
@@ -220,16 +176,6 @@ pub fn apply_humanity_filter(
         if fastrand::f32() < 0.5 {
             result = format!("{}，{}", catchphrases[idx], result);
         }
-    }
-
-    // 小概率自我纠正
-    let timing = ResponseTiming::default();
-    if timing.should_self_correct() && result.len() > 6 {
-        // 在回复末尾追加纠正
-        let correction = ResponseTiming::generate_self_correction();
-        // 取回复的前几个字
-        let prefix: String = result.chars().take(3).collect();
-        result = format!("{}{}{}", result, correction, prefix);
     }
 
     // 低电量时语气更平淡（减少感叹号和表情相关表达）

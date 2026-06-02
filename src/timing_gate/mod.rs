@@ -167,7 +167,9 @@ pub fn run_timing_gate(
         .map(|(uid, msg, _)| {
             let text = crate::vision::strip_image_cq(msg);
             let display = if text.is_empty() { "[图片]" } else { &text };
-            format!("[user_id:{}] {}", uid, display)
+            let name = crate::person_info::get_display_name(*uid, group_id)
+                .unwrap_or_else(|| "群友".to_string());
+            format!("[{}] {}", name, display)
         })
         .collect();
 

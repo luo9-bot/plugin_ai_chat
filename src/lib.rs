@@ -560,7 +560,9 @@ fn do_self_reflection() {
             "(最近没有消息)".to_string()
         } else {
             let lines: Vec<String> = entries.iter().map(|e| {
-                format!("[用户{}] {}", e.user_id, e.content)
+                let name = person_info::get_display_name(e.user_id, gid)
+                    .unwrap_or_else(|| "群友".to_string());
+                format!("[{}] {}", name, e.content)
             }).collect();
             lines.join("\n")
         };
@@ -733,7 +735,10 @@ fn do_post_conversation_reflection(group_id: u64) {
     // 全部消息都展示，但用 [bot] 和 [user_id:XXX] 清晰区分谁说了什么
     let recent_context: Vec<String> = entries.iter().map(|e| {
         let is_self = self_qq > 0 && e.user_id == self_qq;
-        let who = if is_self { "bot".to_string() } else { format!("user_id:{}", e.user_id) };
+        let who = if is_self { "bot".to_string() } else {
+            person_info::get_display_name(e.user_id, group_id)
+                .unwrap_or_else(|| "群友".to_string())
+        };
         let tag = if e.bot_replied { "[已回复]" } else { "[未回复]" };
         format!("[{}]{} {}", who, tag, e.content)
     }).collect();

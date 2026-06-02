@@ -222,7 +222,11 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
     // 构建 followup 消息文本
     let followup_text: Vec<String> = record.followups.iter()
         .take(5)
-        .map(|f| format!("[user_id:{}] {}", f.user_id, f.content))
+        .map(|f| {
+            let name = crate::person_info::get_display_name(f.user_id, record.group_id)
+                .unwrap_or_else(|| "群友".to_string());
+            format!("[{}] {}", name, f.content)
+        })
         .collect();
 
     let followup_joined = followup_text.join("\n");

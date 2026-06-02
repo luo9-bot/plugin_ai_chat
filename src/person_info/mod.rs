@@ -48,6 +48,22 @@ pub fn get_person_context(user_id: u64) -> String {
     }
 }
 
+/// 获取用户显示名称（用于 AI 上下文，避免暴露原始 user_id）
+///
+/// 优先使用 person_name，其次使用群昵称，都没有则返回 None。
+pub fn get_display_name(user_id: u64, group_id: u64) -> Option<String> {
+    let s = load_store();
+    s.profiles.get(&user_id).and_then(|p| {
+        if !p.person_name.is_empty() {
+            Some(p.person_name.clone())
+        } else if group_id > 0 {
+            p.group_nicknames.get(&group_id).cloned()
+        } else {
+            None
+        }
+    })
+}
+
 pub fn get_group_members_context(group_id: u64, user_ids: &[u64]) -> String {
     let s = load_store();
     let mut lines = Vec::new();

@@ -236,7 +236,9 @@ pub fn run_planner(ctx: &PlannerContext) -> PlannerAction {
     };
 
     let system_prompt = format!("{}\n\n{}", prompt, extra);
-    let mut user_content = format!("# 当前消息\n[user_id:{}] {}", ctx.user_id, ctx.user_message);
+    let sender_name = crate::person_info::get_display_name(ctx.user_id, ctx.group_id)
+        .unwrap_or_else(|| "群友".to_string());
+    let mut user_content = format!("# 当前消息\n[{}] {}", sender_name, ctx.user_message);
 
     ENGINE.with(|engine_cell| {
         let mut engine = engine_cell.borrow_mut();

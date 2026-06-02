@@ -158,7 +158,10 @@ fn get_context_filtered(group_id: u64, max_age_secs: u64, base_count: usize, exc
     while let Some((idx, first)) = iter.next() {
         let is_new = idx >= new_start;
         let is_self = self_qq > 0 && first.user_id == self_qq;
-        let who = if is_self { "bot".to_string() } else { format!("user_id:{}", first.user_id) };
+        let who = if is_self { "bot".to_string() } else {
+            crate::person_info::get_display_name(first.user_id, group_id)
+                .unwrap_or_else(|| "群友".to_string())
+        };
         let tag = if first.bot_replied { "[已回复]" } else { "" };
         let mut block = first.content.clone();
         while let Some((_, next)) = iter.peek() {

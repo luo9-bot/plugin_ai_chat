@@ -41,20 +41,22 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
     // ── 基础层：始终注入 ──
 
     // 对话场景标识：明确告知 AI 当前是私聊还是群聊
+    let display_name = crate::person_info::get_display_name(user_id, group_id)
+        .unwrap_or_else(|| "群友".to_string());
     let scene_info = if group_id == 0 {
         format!(
-            "# 当前对话场景\n你现在正在和 user_id:{} 进行一对一私聊。\
+            "# 当前对话场景\n你现在正在和{}进行一对一私聊。\
              这是私人对话，只有你们两个人。\
              不要使用群聊用语（如「有人一起吗」「大家」等），\
              不要@任何人，像朋友单独聊天一样自然交流。",
-            user_id
+            display_name
         )
     } else {
         format!(
-            "# 当前对话场景\n你现在在群 {} 中和 user_id:{} 对话。\
+            "# 当前对话场景\n你现在在群 {} 中和{}对话。\
              群聊中有多个人，你的回复可能被群里所有人看到。\
              注意区分群聊语境，可以适当简短，不需要每次都深入回复。",
-            group_id, user_id
+            group_id, display_name
         )
     };
 

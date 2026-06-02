@@ -97,13 +97,6 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
         }
     }
 
-    // Follow-up 消息（"对了还有一件事..."）
-    if cfg.humanity.response_timing_enabled && timing.should_follow_up() {
-        let follow_up_delay = fastrand::u64(1500..5000);
-        thread::sleep(Duration::from_millis(follow_up_delay));
-        let follow_up = ResponseTiming::generate_follow_up();
-        raw_send_msg(group_id, user_id, follow_up);
-    }
 }
 
 /// 发送消息 (无延迟)，自动处理 |^| 和换行分割

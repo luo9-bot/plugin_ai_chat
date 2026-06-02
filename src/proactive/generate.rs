@@ -74,7 +74,9 @@ pub fn ai_generate_message(
     // 关于用户的记忆
     let mem = memory::get_context(user_id, group_id);
     if !mem.is_empty() {
-        ctx.push(format!("# 关于用户 user_id:{}\n{}", user_id, mem));
+        let user_name = crate::person_info::get_display_name(user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        ctx.push(format!("# 关于{}的记忆\n{}", user_name, mem));
     }
 
     // 群聊最近消息（所有消息，[bot]标记bot自身，[user_id:XXX]标记用户）

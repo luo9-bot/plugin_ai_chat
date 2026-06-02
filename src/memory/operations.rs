@@ -341,7 +341,9 @@ pub fn get_context(user_id: u64, current_group_id: u64) -> String {
     }
 
     if lines.is_empty() { return String::new(); }
-    format!("# 关于用户{}的记忆\n{}", user_id, lines.join("\n"))
+    let display_name = crate::person_info::get_display_name(user_id, current_group_id)
+        .unwrap_or_else(|| "群友".to_string());
+    format!("# 关于{}的记忆\n{}", display_name, lines.join("\n"))
 }
 
 /// 获取群内其他成员的记忆（交叉引用）
@@ -362,7 +364,9 @@ pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
         lines.append(&mut g_lines);
 
         if !lines.is_empty() {
-            user_blocks.push(format!("用户{}:\n{}", uid, lines.join("\n")));
+            let name = crate::person_info::get_display_name(uid, group_id)
+                .unwrap_or_else(|| "群友".to_string());
+            user_blocks.push(format!("{}:\n{}", name, lines.join("\n")));
         }
     }
 
