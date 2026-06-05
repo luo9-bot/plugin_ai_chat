@@ -119,14 +119,15 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
 
     let results: Vec<Option<Vec<f32>>> = texts
         .iter()
-        .map(|t| {
-            debug!("embedding: sending batch item");
-            embed_single(t)
-        })
+        .map(|t| embed_single(t))
         .collect();
 
     let success_count = results.iter().filter(|r| r.is_some()).count();
-    debug!(total = texts.len(), success = success_count, "embedding: batch completed");
+    if success_count < texts.len() {
+        debug!(total = texts.len(), success = success_count, "embedding: batch completed (partial)");
+    } else {
+        debug!(total = texts.len(), "embedding: batch completed");
+    }
 
     results
 }

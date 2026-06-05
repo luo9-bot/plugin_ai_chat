@@ -60,18 +60,19 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
         }
     }
 
+    // 缺失的 embedding 在后台补充，不阻塞当前检索
     if !missing_indices.is_empty() && crate::config::get().embedding.enabled() {
         let missing_texts: Vec<String> = missing_indices.iter()
             .map(|&i| documents[i].1.clone())
             .collect();
-        let doc_embeddings = embedding::embed_batch(&missing_texts);
-        for (offset, emb_opt) in doc_embeddings.into_iter().enumerate() {
-            if let Some(emb) = emb_opt {
-                let idx = missing_indices[offset];
-                vector_store::add_vector(&documents[idx].1, emb.clone());
-                embeddings.push((documents[idx].0.clone(), emb));
+        std::thread::spawn(move || {
+            let doc_embeddings = embedding::embed_batch(&missing_texts);
+            for (text, emb_opt) in missing_texts.into_iter().zip(doc_embeddings) {
+                if let Some(emb) = emb_opt {
+                    vector_store::add_vector(&text, emb);
+                }
             }
-        }
+        });
     }
 
     if embeddings.is_empty() {

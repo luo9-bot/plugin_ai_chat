@@ -8,6 +8,15 @@ use super::store::{Importance, MemoryEntry, MemoryFile};
 static EMBED_QUEUE: Mutex<Option<Vec<String>>> = Mutex::new(None);
 const EMBED_BATCH_SIZE: usize = 10;
 
+fn flush_embed_batch(texts: Vec<String>) {
+    let embeddings = crate::memory::embedding::embed_batch(&texts);
+    for (text, emb_opt) in texts.into_iter().zip(embeddings) {
+        if let Some(emb) = emb_opt {
+            crate::memory::vector_store::add_vector(&text, emb);
+        }
+    }
+}
+
 fn flush_embed_queue() {
     let batch = {
         let mut guard = EMBED_QUEUE.lock().unwrap();
@@ -16,12 +25,7 @@ fn flush_embed_queue() {
         })
     };
     if let Some(texts) = batch {
-        let embeddings = crate::memory::embedding::embed_batch(&texts);
-        for (text, emb_opt) in texts.into_iter().zip(embeddings.into_iter()) {
-            if let Some(emb) = emb_opt {
-                crate::memory::vector_store::add_vector(&text, emb);
-            }
-        }
+        flush_embed_batch(texts);
     }
 }
 
@@ -31,8 +35,11 @@ fn queue_embedding(content: &str) {
     let queue = guard.get_or_insert_with(Vec::new);
     queue.push(content.to_string());
     if queue.len() >= EMBED_BATCH_SIZE {
+        let batch = std::mem::take(queue);
         drop(guard);
-        flush_embed_queue();
+        std::thread::spawn(move || {
+            flush_embed_batch(batch);
+        });
     }
 }
 
