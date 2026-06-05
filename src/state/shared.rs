@@ -235,6 +235,36 @@ impl SharedState {
         self.contexts.retain(|&(_, uid), _| uid != user_id);
         self.last_reply_times.retain(|&(_, uid), _| uid != user_id);
     }
+
+    /// 清理不活跃的条目，释放内存
+    ///
+    /// - 移除空 history 的 context（已压缩到 summary 的保留）
+    /// - 移除超过 1 小时的 last_reply_times
+    /// - 移除不活跃群的 group_history、last_reviewed_timestamps、last_reflected_content
+    pub fn cleanup_inactive(&mut self, active_groups: &HashSet<u64>) {
+        let one_hour = 3600u64;
+
+        // 清理空 history 且 summary 也为空的 context
+        self.contexts.retain(|_, ctx| {
+            !ctx.history.is_empty() || !ctx.conversation_summary.is_empty()
+        });
+
+        // 清理超过 1 小时的回复时间记录
+        self.last_reply_times.retain(|_, instant| {
+            instant.elapsed().as_secs() < one_hour
+        });
+
+        // 清理不活跃群的相关数据
+        let inactive_groups: Vec<u64> = self.group_history.keys()
+            .filter(|gid| **gid > 0 && !active_groups.contains(gid))
+            .copied()
+            .collect();
+        for gid in inactive_groups {
+            self.group_history.remove(&gid);
+            self.last_reviewed_timestamps.remove(&gid);
+            self.last_reflected_content.remove(&gid);
+        }
+    }
 }
 
 /// 返回长时间对话中需要定期审查的群组 (自由函数，需要跨 State/SharedState 数据)

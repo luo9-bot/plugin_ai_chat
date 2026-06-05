@@ -3,13 +3,31 @@ use tracing::debug;
 use super::operations::add;
 use super::store::Importance;
 
-static RECENT_KEYWORD_EXTRACTS: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> = std::sync::Mutex::new(None);
 const KEYWORD_COOLDOWN_SECS: u64 = 600;
+
+fn keyword_cooldown_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("recent_keywords.json")
+}
+
+fn load_keyword_map() -> std::collections::HashMap<String, u64> {
+    let path = keyword_cooldown_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+fn save_keyword_map(map: &std::collections::HashMap<String, u64>) {
+    let path = keyword_cooldown_path();
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        std::fs::write(path, json).ok();
+    }
+}
 
 fn is_keyword_on_cooldown(user_id: u64, keyword: &str) -> bool {
     let key = format!("{}:{}", user_id, keyword);
-    let guard = RECENT_KEYWORD_EXTRACTS.lock().unwrap();
-    if let Some(ref map) = *guard && let Some(ts) = map.get(&key) {
+    let map = load_keyword_map();
+    if let Some(ts) = map.get(&key) {
         return crate::util::now_secs().saturating_sub(*ts) < KEYWORD_COOLDOWN_SECS;
     }
     false
@@ -17,9 +35,12 @@ fn is_keyword_on_cooldown(user_id: u64, keyword: &str) -> bool {
 
 fn mark_keyword_extracted(user_id: u64, keyword: &str) {
     let key = format!("{}:{}", user_id, keyword);
-    let mut guard = RECENT_KEYWORD_EXTRACTS.lock().unwrap();
-    let map = guard.get_or_insert_with(std::collections::HashMap::new);
-    map.insert(key, crate::util::now_secs());
+    let now = crate::util::now_secs();
+    let mut map = load_keyword_map();
+    map.insert(key, now);
+    // 清理过期条目
+    map.retain(|_, ts| now.saturating_sub(*ts) < KEYWORD_COOLDOWN_SECS);
+    save_keyword_map(&map);
 }
 
 fn looks_ephemeral(message: &str) -> bool {

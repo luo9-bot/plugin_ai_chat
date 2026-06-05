@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::path::PathBuf;
 use std::fs;
 
@@ -48,11 +47,7 @@ struct OldUserMemory {
     pub entries: Vec<OldMemoryEntry>,
 }
 
-// ── 内存缓存 ────────────────────────────────────────────────────
-
-static USER_CACHE: Mutex<Option<HashMap<u64, MemoryFile>>> = Mutex::new(None);
-static GROUP_CACHE: Mutex<Option<HashMap<u64, MemoryFile>>> = Mutex::new(None);
-static GROUP_USER_CACHE: Mutex<Option<HashMap<(u64, u64), MemoryFile>>> = Mutex::new(None);
+// ── 无内存缓存，直接读写磁盘 ─────────────────────────────────────
 
 // ── 文件路径 ────────────────────────────────────────────────────
 
@@ -107,52 +102,33 @@ pub struct MemoryFile {
 // ── CRUD ────────────────────────────────────────────────────────
 
 pub fn load_user_memory(user_id: u64) -> MemoryFile {
-    let mut cache = USER_CACHE.lock().unwrap();
-    let map = cache.get_or_insert_with(HashMap::new);
-    map.entry(user_id).or_insert_with(|| load_json(&user_path(user_id))).clone()
+    load_json(&user_path(user_id))
 }
 
 pub fn save_user_memory(user_id: u64, mem: &MemoryFile) {
     let path = user_path(user_id);
     ensure_dir(&path);
     save_json(&path, mem);
-    let mut cache = USER_CACHE.lock().unwrap();
-    if let Some(ref mut map) = *cache {
-        map.insert(user_id, mem.clone());
-    }
 }
 
 pub fn load_group_memory(group_id: u64) -> MemoryFile {
-    let mut cache = GROUP_CACHE.lock().unwrap();
-    let map = cache.get_or_insert_with(HashMap::new);
-    map.entry(group_id).or_insert_with(|| load_json(&group_memory_path(group_id))).clone()
+    load_json(&group_memory_path(group_id))
 }
 
 pub fn save_group_memory(group_id: u64, mem: &MemoryFile) {
     let path = group_memory_path(group_id);
     ensure_dir(&path);
     save_json(&path, mem);
-    let mut cache = GROUP_CACHE.lock().unwrap();
-    if let Some(ref mut map) = *cache {
-        map.insert(group_id, mem.clone());
-    }
 }
 
 pub fn load_group_user_memory(group_id: u64, user_id: u64) -> MemoryFile {
-    let key = (group_id, user_id);
-    let mut cache = GROUP_USER_CACHE.lock().unwrap();
-    let map = cache.get_or_insert_with(HashMap::new);
-    map.entry(key).or_insert_with(|| load_json(&group_user_path(group_id, user_id))).clone()
+    load_json(&group_user_path(group_id, user_id))
 }
 
 pub fn save_group_user_memory(group_id: u64, user_id: u64, mem: &MemoryFile) {
     let path = group_user_path(group_id, user_id);
     ensure_dir(&path);
     save_json(&path, mem);
-    let mut cache = GROUP_USER_CACHE.lock().unwrap();
-    if let Some(ref mut map) = *cache {
-        map.insert((group_id, user_id), mem.clone());
-    }
 }
 
 /// 初始化：迁移旧数据 + 创建文件夹

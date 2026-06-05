@@ -451,6 +451,12 @@ fn check_periodic() {
     let expire_hours = config::get().memory.working_memory_expire_hours;
     working_memory::cleanup(expire_hours * 3600);
 
+    // SharedState 清理不活跃条目（释放内存）
+    {
+        let inactive_groups: std::collections::HashSet<u64> = with_state(|s| s.active_groups.clone());
+        with_shared_state(|s| s.cleanup_inactive(&inactive_groups));
+    }
+
     // 刷新挂起的 embedding 批量写入
     memory::flush_pending_embeddings();
 

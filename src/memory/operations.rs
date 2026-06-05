@@ -240,19 +240,37 @@ pub fn forget_all(user_id: u64) {
     }
 }
 
-// ── 注入冷却 ────────────────────────────────────────────────────
+// ── 注入冷却（磁盘持久化） ──────────────────────────────────────
 
-static RECENTLY_INJECTED: std::sync::Mutex<Option<HashMap<String, u64>>> = std::sync::Mutex::new(None);
 const INJECTION_COOLDOWN_SECS: u64 = 1800;
 
 fn inject_key(user_id: u64, group_id: u64, content: &str) -> String {
     format!("{}:{}:{}", user_id, group_id, content)
 }
 
+fn recently_injected_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("recently_injected.json")
+}
+
+fn load_injected_map() -> HashMap<String, u64> {
+    let path = recently_injected_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+fn save_injected_map(map: &HashMap<String, u64>) {
+    let path = recently_injected_path();
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        std::fs::write(path, json).ok();
+    }
+}
+
 fn is_recently_injected(user_id: u64, group_id: u64, content: &str) -> bool {
     let key = inject_key(user_id, group_id, content);
-    let guard = RECENTLY_INJECTED.lock().unwrap();
-    if let Some(ref map) = *guard && let Some(ts) = map.get(&key) {
+    let map = load_injected_map();
+    if let Some(ts) = map.get(&key) {
         return crate::util::now_secs().saturating_sub(*ts) < INJECTION_COOLDOWN_SECS;
     }
     false
@@ -260,9 +278,12 @@ fn is_recently_injected(user_id: u64, group_id: u64, content: &str) -> bool {
 
 fn mark_injected(user_id: u64, group_id: u64, content: &str) {
     let key = inject_key(user_id, group_id, content);
-    let mut guard = RECENTLY_INJECTED.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(key, crate::util::now_secs());
+    let now = crate::util::now_secs();
+    let mut map = load_injected_map();
+    map.insert(key, now);
+    // 清理过期条目
+    map.retain(|_, ts| now.saturating_sub(*ts) < INJECTION_COOLDOWN_SECS);
+    save_injected_map(&map);
 }
 
 // ── 上下文读取 ───────────────────────────────────────────────────

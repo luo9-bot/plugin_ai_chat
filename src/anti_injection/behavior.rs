@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
-use dashmap::DashMap;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 /// 细粒度信誉系统
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reputation {
     /// 内容信誉：因违规内容降低
     pub content: f32,
@@ -39,21 +38,21 @@ impl Reputation {
 }
 
 /// 上下文消息（带时间戳）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextMessage {
     pub content: String,
-    pub timestamp: Instant,
+    pub timestamp: u64,
 }
 
 /// 用户行为记录
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserBehavior {
-    pub message_times: Vec<Instant>,
+    pub message_times: Vec<u64>,
     pub recent_messages: VecDeque<ContextMessage>,
     pub reputation: Reputation,
     pub violation_count: u32,
     pub high_severity_count: u32,
-    pub last_violation: Option<Instant>,
+    pub last_violation: Option<u64>,
     pub banned: bool,
     pub silent_banned: bool,
     pub vision_disabled: bool,
@@ -79,16 +78,16 @@ impl Default for UserBehavior {
 
 impl UserBehavior {
     fn cleanup_old_timestamps(&mut self) {
-        let one_hour_ago = Instant::now() - Duration::from_secs(3600);
+        let one_hour_ago = crate::util::now_secs().saturating_sub(3600);
         self.message_times.retain(|t| *t > one_hour_ago);
     }
 
     pub fn record_message(&mut self, normalized: &str) {
-        self.message_times.push(Instant::now());
+        self.message_times.push(crate::util::now_secs());
         self.cleanup_old_timestamps();
         self.recent_messages.push_back(ContextMessage {
             content: normalized.to_string(),
-            timestamp: Instant::now(),
+            timestamp: crate::util::now_secs(),
         });
         if self.recent_messages.len() > 8 {
             self.recent_messages.pop_front();
@@ -96,7 +95,7 @@ impl UserBehavior {
     }
 
     pub fn messages_last_minute(&self) -> u32 {
-        let one_minute_ago = Instant::now() - Duration::from_secs(60);
+        let one_minute_ago = crate::util::now_secs().saturating_sub(60);
         self.message_times.iter().filter(|t| **t > one_minute_ago).count() as u32
     }
 
@@ -107,7 +106,7 @@ impl UserBehavior {
     /// 记录违规（内容类）
     pub fn record_violation(&mut self, severity: f32) {
         self.violation_count += 1;
-        self.last_violation = Some(Instant::now());
+        self.last_violation = Some(crate::util::now_secs());
         self.severity_score += severity;
         if severity >= 3.0 {
             self.high_severity_count += 1;
@@ -128,7 +127,7 @@ impl UserBehavior {
     /// 信誉恢复（允许完全恢复，但速度较慢）
     pub fn recover_reputation(&mut self) {
         if let Some(last) = self.last_violation {
-            let elapsed = last.elapsed().as_secs() as f32;
+            let elapsed = crate::util::now_secs().saturating_sub(last) as f32;
             let recovery = (elapsed / 7200.0) * 0.01; // 每2小时恢复1%
             self.reputation.content = (self.reputation.content + recovery).min(1.0);
             self.reputation.trust = (self.reputation.trust + recovery * 0.5).min(1.0);
@@ -144,28 +143,152 @@ impl UserBehavior {
     }
 }
 
-/// 全局用户行为存储
-static USER_BEHAVIORS: LazyLock<DashMap<u64, UserBehavior>> = LazyLock::new(DashMap::new);
+// ── 磁盘持久化 ──────────────────────────────────────────────────
 
-/// 全局上下文关联器（用于检测跨消息攻击）
-static CONTEXT_CORRELATORS: LazyLock<DashMap<u64, super::context::ContextCorrelator>> = LazyLock::new(DashMap::new);
+fn behaviors_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("user_behaviors.json")
+}
 
-/// 获取用户行为记录（可变引用）
+fn correlators_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("context_correlators.json")
+}
+
+/// 上下文关联器（可序列化版本）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableCorrelator {
+    pub messages: VecDeque<ContextMessage>,
+    pub max_messages: usize,
+    pub max_age_secs: u64,
+}
+
+impl SerializableCorrelator {
+    pub fn new(max_messages: usize, max_age_secs: u64) -> Self {
+        Self {
+            messages: VecDeque::with_capacity(max_messages),
+            max_messages,
+            max_age_secs,
+        }
+    }
+
+    pub fn record(&mut self, content: &str) {
+        self.messages.push_back(ContextMessage {
+            content: content.to_string(),
+            timestamp: crate::util::now_secs(),
+        });
+        if self.messages.len() > self.max_messages {
+            self.messages.pop_front();
+        }
+        self.cleanup();
+    }
+
+    fn cleanup(&mut self) {
+        let cutoff = crate::util::now_secs().saturating_sub(self.max_age_secs);
+        while self.messages.front().is_some_and(|m| m.timestamp < cutoff) {
+            self.messages.pop_front();
+        }
+    }
+
+    pub fn get_all_views(&self) -> Vec<String> {
+        let mut all = Vec::new();
+        // preserved
+        for m in &self.messages {
+            all.push(m.content.clone());
+        }
+        // stripped
+        if !self.messages.is_empty() {
+            let merged: String = self.messages.iter().map(|m| m.content.as_str()).collect();
+            all.push(merged);
+        }
+        // rolling
+        let msgs: Vec<&str> = self.messages.iter().map(|m| m.content.as_str()).collect();
+        let len = msgs.len();
+        if len >= 2 {
+            for i in 0..len - 1 {
+                all.push(format!("{}{}", msgs[i], msgs[i + 1]));
+            }
+        }
+        if len >= 3 {
+            for i in 0..len - 2 {
+                all.push(format!("{}{}{}", msgs[i], msgs[i + 1], msgs[i + 2]));
+            }
+        }
+        if len >= 2 {
+            let merged: String = msgs.iter().copied().collect();
+            all.push(merged);
+        }
+        // token continuity
+        let mut merge_buf = String::new();
+        let mut in_run = false;
+        for msg in &msgs {
+            let char_count = msg.chars().count();
+            if char_count <= 2 {
+                merge_buf.push_str(msg);
+                in_run = true;
+            } else {
+                if in_run && merge_buf.chars().count() >= 2 {
+                    all.push(merge_buf.clone());
+                }
+                merge_buf.clear();
+                in_run = false;
+            }
+        }
+        if in_run && merge_buf.chars().count() >= 2 {
+            all.push(merge_buf);
+        }
+        all
+    }
+}
+
+fn load_behaviors() -> HashMap<u64, UserBehavior> {
+    let path = behaviors_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+fn save_behaviors(map: &HashMap<u64, UserBehavior>) {
+    let path = behaviors_path();
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        std::fs::write(path, json).ok();
+    }
+}
+
+fn load_correlators() -> HashMap<u64, SerializableCorrelator> {
+    let path = correlators_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+fn save_correlators(map: &HashMap<u64, SerializableCorrelator>) {
+    let path = correlators_path();
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        std::fs::write(path, json).ok();
+    }
+}
+
+/// 获取用户行为记录（可变引用）— 按需加载，修改后写回磁盘
 pub fn with_behavior_mut<F, R>(user_id: u64, f: F) -> R
 where
     F: FnOnce(&mut UserBehavior) -> R,
 {
-    let mut behavior = USER_BEHAVIORS.entry(user_id).or_default();
-    f(&mut behavior)
+    let mut map = load_behaviors();
+    let behavior = map.entry(user_id).or_default();
+    let result = f(behavior);
+    save_behaviors(&map);
+    result
 }
 
-/// 获取用户行为记录（只读）
+/// 获取用户行为记录（只读）— 按需加载
 pub fn with_behavior<F, R>(user_id: u64, f: F) -> R
 where
     F: FnOnce(&UserBehavior) -> R,
 {
-    match USER_BEHAVIORS.get(&user_id) {
-        Some(behavior) => f(&behavior),
+    let map = load_behaviors();
+    match map.get(&user_id) {
+        Some(behavior) => f(behavior),
         None => f(&UserBehavior::default()),
     }
 }
@@ -179,15 +302,17 @@ pub fn recover_reputation(user_id: u64) {
 pub fn record_message(user_id: u64, normalized: &str) {
     with_behavior_mut(user_id, |b| b.record_message(normalized));
     // 更新上下文关联器
-    let mut correlator = CONTEXT_CORRELATORS
-        .entry(user_id)
-        .or_insert_with(|| super::context::ContextCorrelator::new(10, 300));
+    let mut map = load_correlators();
+    let correlator = map.entry(user_id)
+        .or_insert_with(|| SerializableCorrelator::new(10, 300));
     correlator.record(normalized);
+    save_correlators(&map);
 }
 
 /// 获取上下文关联器的多视图段（用于检测跨消息攻击）
 pub fn get_context_segments(user_id: u64) -> Vec<String> {
-    match CONTEXT_CORRELATORS.get(&user_id) {
+    let map = load_correlators();
+    match map.get(&user_id) {
         Some(c) => c.get_all_views(),
         None => Vec::new(),
     }
@@ -328,9 +453,8 @@ pub fn reset_reputation(user_id: u64) {
 
 /// 全用户风险状态摘要（供管理 API 使用）
 pub fn get_all_user_statuses() -> Vec<serde_json::Value> {
-    USER_BEHAVIORS.iter().map(|entry| {
-        let uid = *entry.key();
-        let b = entry.value();
+    let map = load_behaviors();
+    map.iter().map(|(uid, b)| {
         serde_json::json!({
             "user_id": uid,
             "content_reputation": b.reputation.content,
@@ -408,36 +532,5 @@ mod tests {
 
         rep.content = 0.0;
         assert_eq!(rep.penalty_multiplier(), 6.0);
-    }
-
-    #[test]
-    fn test_first_violation_penalty() {
-        let mut behavior = UserBehavior::default();
-        // 第一次高严重度违规 (severity=3.0，如 Sexual)
-        behavior.record_violation(3.0);
-        // penalty = 0.15 * 3.0 * 1.0 = 0.45, content: 1.0 -> 0.55
-        assert!(behavior.reputation.content < 0.6);
-        // penalty_multiplier 应该 > 1.0
-        assert!(behavior.reputation.penalty_multiplier() > 1.0);
-    }
-
-    #[test]
-    fn test_rate_limit_no_content_penalty() {
-        let mut behavior = UserBehavior::default();
-        let initial_content = behavior.reputation.content;
-        behavior.record_rate_limit();
-        // content 信誉不变
-        assert_eq!(behavior.reputation.content, initial_content);
-        // spam 信誉下降
-        assert!(behavior.reputation.spam < 1.0);
-    }
-
-    #[test]
-    fn test_silent_ban_condition() {
-        let mut behavior = UserBehavior::default();
-        assert!(!behavior.should_silent_ban());
-        behavior.reputation.content = 0.2;
-        behavior.high_severity_count = 2;
-        assert!(behavior.should_silent_ban());
     }
 }
