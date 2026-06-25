@@ -102,6 +102,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { api } from '../api.js'
 
 const stats = ref({})
 const sortKey = ref('total_tokens')
@@ -144,8 +145,7 @@ const callArc = computed(() => {
 
 async function load() {
   try {
-    const d = await (await fetch('/api/analytics', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token') } })).json()
-    stats.value = d
+    stats.value = await api('/api/analytics')
   } catch {}
 }
 

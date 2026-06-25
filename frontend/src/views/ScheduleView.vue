@@ -147,7 +147,6 @@ async function toggleWeekly(i) {
   try {
     const res = await api('/api/schedule', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'toggle', kind: 'weekly', index: i })
     })
     if (res.ok !== undefined) {
@@ -166,7 +165,6 @@ async function toggleMonthly(i) {
   try {
     const res = await api('/api/schedule', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'toggle', kind: 'monthly', index: i })
     })
     if (res.ok !== undefined) {
