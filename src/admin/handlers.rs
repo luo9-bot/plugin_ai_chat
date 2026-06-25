@@ -1172,20 +1172,32 @@ pub fn handle_anti_injection(
             }))
         }
         Method::Post => {
-            // POST /api/anti-injection/unban - 解封用户
-            // POST /api/anti-injection/enable-vision - 启用识图
-            // POST /api/anti-injection/reset-reputation - 重置信誉
-            let action = segs.first().unwrap_or(&"");
-            let params: serde_json::Value = match serde_json::from_slice(body) {
-                Ok(v) => v,
-                Err(e) => return err(400, &format!("invalid json: {}", e)),
-            };
-            let user_id = match params.get("user_id").and_then(|v| v.as_u64()) {
-                Some(id) => id,
-                None => return err(400, "missing user_id"),
+            // 支持两种格式：
+            //   POST /api/anti-injection/{user_id}/{action}  (前端实际调用)
+            //   POST /api/anti-injection/{action} + body { user_id }  (旧格式)
+            let (user_id, action) = if segs.len() >= 2 {
+                // 新格式: /api/anti-injection/{user_id}/{action}
+                let uid = match segs[0].parse::<u64>() {
+                    Ok(u) => u,
+                    Err(_) => return err(400, "invalid user_id"),
+                };
+                (uid, segs[1])
+            } else if segs.len() == 1 {
+                // 旧格式: /api/anti-injection/{action} + body
+                let params: serde_json::Value = match serde_json::from_slice(body) {
+                    Ok(v) => v,
+                    Err(e) => return err(400, &format!("invalid json: {}", e)),
+                };
+                let uid = match params.get("user_id").and_then(|v| v.as_u64()) {
+                    Some(id) => id,
+                    None => return err(400, "missing user_id"),
+                };
+                (uid, segs[0])
+            } else {
+                return err(400, "path required");
             };
 
-            match *action {
+            match action {
                 "unban" => {
                     crate::anti_injection::unban_user(user_id);
                     ok(serde_json::json!({"success": true, "message": format!("用户{}已解封", user_id)}))
