@@ -65,6 +65,11 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
         return;
     }
 
+    let imp_str = match importance {
+        Importance::Permanent => "permanent",
+        Importance::Important => "important",
+        Importance::Normal => "normal",
+    };
     let now = crate::util::now_secs();
     let content_preview: String = content.chars().take(40).collect();
 
@@ -109,6 +114,9 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
 
     queue_embedding(content);
     crate::memory::graph::update_graph_from_memory(user_id, content);
+
+    let loc = if group_id == 0 { "global" } else { &format!("group_{}", group_id) };
+    super::ops_log::record("add", user_id, group_id, content, imp_str, &format!("saved ({})", loc));
 }
 
 /// 添加群级别记忆（存 groups/{gid}/group.json）
@@ -117,6 +125,11 @@ pub fn add_group_memory(group_id: u64, content: &str, importance: Importance) {
     if mem.entries.iter().any(|e| e.content == content) {
         return;
     }
+    let imp_str = match importance {
+        Importance::Permanent => "permanent",
+        Importance::Important => "important",
+        Importance::Normal => "normal",
+    };
     let now = crate::util::now_secs();
     mem.entries.push(MemoryEntry {
         content: content.to_string(),
@@ -127,6 +140,8 @@ pub fn add_group_memory(group_id: u64, content: &str, importance: Importance) {
     });
     crate::memory::store::save_group_memory(group_id, &mem);
     debug!(group_id, content = %content.chars().take(40).collect::<String>(), "memory: saved (group level)");
+
+    super::ops_log::record("add_group", 0, group_id, content, imp_str, "saved (group level)");
 }
 
 pub fn flush_pending_embeddings() { flush_embed_queue(); }
@@ -180,8 +195,10 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
         }
     }
 
-    if total > 0 { vec![format!("已遗忘 {} 条记忆", total)] }
-    else { vec!["没有找到匹配的记忆".to_string()] }
+    if total > 0 {
+        super::ops_log::record("forget", user_id, 0, pattern, "normal", &format!("forgot {} entries", total));
+        vec![format!("已遗忘 {} 条记忆", total)]
+    } else { vec!["没有找到匹配的记忆".to_string()] }
 }
 
 pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
@@ -219,11 +236,15 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
         }
     }
 
-    if count > 0 { debug!(user_id, old, new, count, "memory: corrected entries"); }
+    if count > 0 {
+        debug!(user_id, old, new, count, "memory: corrected entries");
+        super::ops_log::record("correct", user_id, 0, old, "normal", &format!("corrected {} entries: {} -> {}", count, old, new));
+    }
     count
 }
 
 pub fn forget_all(user_id: u64) {
+    super::ops_log::record("forget_all", user_id, 0, "*", "normal", "forget all memories");
     let mem = crate::memory::store::load_user_memory(user_id);
     if !mem.entries.is_empty() {
         for entry in &mem.entries { crate::memory::vector_store::remove_vector(&entry.content); }

@@ -30,7 +30,9 @@ pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)])
         Ok(summary) => {
             let summary = summary.trim();
             if !summary.is_empty() && summary.len() > 10 {
-                add(user_id, group_id, &format!("曾谈论: {}", summary), Importance::Normal);
+                let content = format!("曾谈论: {}", summary);
+                super::ops_log::record("auto_summarize", user_id, group_id, &content, "normal", "AI summarized conversation");
+                add(user_id, group_id, &content, Importance::Normal);
             }
         }
         Err(_) => {
@@ -131,6 +133,7 @@ pub fn ai_review_all() {
                 if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
                     for remove in removes {
                         if let Some(content) = remove.as_str() {
+                            super::ops_log::record("review_remove", user_id, 0, content, "normal", "AI review: removed outdated memory");
                             memory.entries.retain(|e| !e.content.contains(content));
                         }
                     }
@@ -149,6 +152,7 @@ pub fn ai_review_all() {
                             _ => Importance::Normal,
                         };
                         if let Some(entry) = memory.entries.iter_mut().find(|e| e.content.contains(old)) {
+                            super::ops_log::record("review_update", user_id, 0, old, imp_str, &format!("updated: {} -> {}", old, new));
                             entry.content = new.to_string();
                             entry.importance = importance;
                         }
@@ -167,6 +171,7 @@ pub fn ai_review_all() {
                             _ => Importance::Normal,
                         };
                         if !memory.entries.iter().any(|e| e.content == content) {
+                            super::ops_log::record("review_add", user_id, 0, content, imp_str, "AI review: added new memory");
                             let now = crate::util::now_secs();
                             memory.entries.push(MemoryEntry {
                                 content: content.to_string(),

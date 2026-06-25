@@ -99,6 +99,7 @@ import AntiInjectionView from './views/AntiInjectionView.vue'
 import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SyncView from './views/SyncView.vue'
+import MemoryOpsLog from './views/MemoryOpsLog.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import HumanityView from './views/HumanityView.vue'
@@ -123,6 +124,7 @@ const I = {
   archive: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="6" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 4a1 1 0 011-1h14a1 1 0 011 1v2H2V4z" stroke="currentColor" stroke-width="1.5"/><path d="M8 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   backups: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a5 5 0 00-4.5 2.8A4 4 0 003 10a4 4 0 004 4h1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 3a5 5 0 014.5 2.8A4 4 0 0117 10a4 4 0 01-4 4h-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 10v5M7 12.5l3-2.5 3 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   sync: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M14.5 5.5A6.5 6.5 0 104 10.5M14.5 2v3.5H11M5.5 14.5A6.5 6.5 0 0016 9.5M5.5 18V14.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  'memory-ops-log': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14v14H3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7h6M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="currentColor" opacity="0.6"/></svg>',
 }
 
 const loggedIn = ref(false)
@@ -145,6 +147,7 @@ const tabs = [
   { id: 'self-thoughts', name: '自我记忆', icon: I['self-thoughts'], desc: '内心想法', comp: SelfThoughts },
   { id: 'memory', name: '用户记忆', icon: I.memory, desc: '长期记忆', comp: UserMemory },
   { id: 'working-memory', name: '工作记忆', icon: I['working-memory'], desc: '短期工作记忆', comp: WorkingMemory },
+  { id: 'memory-ops-log', name: '内存监视', icon: I['memory-ops-log'], desc: '内存操作日志', comp: MemoryOpsLog },
   { id: 'emotion', name: '情绪', icon: I.emotion, desc: '情绪状态', comp: EmotionView },
   { id: 'mental-state', name: '心理状态', icon: I['mental-state'], desc: 'Bot 心理', comp: MentalState },
   { id: 'proactive', name: '主动对话', icon: I.proactive, desc: '主动消息', comp: ProactiveView },
@@ -159,9 +162,9 @@ const tabs = [
 const navGroups = computed(() => [
   { label: '概览', items: tabs.slice(0, 2) },
   { label: '管理', items: tabs.slice(2, 6) },
-  { label: '数据', items: tabs.slice(6, 10) },
-  { label: '状态', items: tabs.slice(10, 14) },
-  { label: '系统', items: tabs.slice(14) },
+  { label: '数据', items: tabs.slice(6, 11) },
+  { label: '状态', items: tabs.slice(11, 15) },
+  { label: '系统', items: tabs.slice(15) },
 ])
 
 const currentTabMeta = computed(() => tabs.find(t => t.id === currentTab.value))

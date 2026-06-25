@@ -1569,6 +1569,28 @@ pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io:
     }
 }
 
+// ── Handler: 内存操作日志 ──────────────────────────────────────────
+
+pub fn handle_memory_ops_log(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+    match method {
+        Method::Get => {
+            let limit = segs.first()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(500);
+            let logs = crate::memory::ops_log::get_logs(Some(limit));
+            ok(serde_json::json!({ "entries": logs, "total": logs.len() }))
+        }
+        Method::Post => {
+            if segs.first() == Some(&"clear") {
+                crate::memory::ops_log::clear();
+                return ok(serde_json::json!({"ok": true, "message": "日志已清空"}));
+            }
+            err(400, "use /api/memory-ops-log/clear to clear")
+        }
+        _ => err(405, "method not allowed"),
+    }
+}
+
 pub fn handle_info() -> Response<std::io::Cursor<Vec<u8>>> {
     ok(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),

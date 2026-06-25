@@ -194,6 +194,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"dashboard") => handlers::handle_dashboard(),
         Some(&"humanity") => handlers::handle_humanity(),
+        Some(&"memory-ops-log") => handlers::handle_memory_ops_log(&method, &api_segs[1..]),
         Some(&"relationships") => handlers::handle_relationships(&method, &api_segs[1..]),
         Some(&"info") => handlers::handle_info(),
         Some(&"version") => ok(serde_json::json!({"version": env!("CARGO_PKG_VERSION")})),
