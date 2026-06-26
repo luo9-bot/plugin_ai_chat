@@ -203,6 +203,7 @@ const sections = [
       { key: 'anti_injection.behavior.reputation_threshold', label: '信誉阈值', type: 'number' },
       { key: 'anti_injection.behavior.auto_ban', label: '自动封禁', type: 'bool' },
       { key: 'anti_injection.behavior.auto_ban_threshold', label: '封禁触发次数', type: 'number' },
+      { key: 'anti_injection.detection_whitelist', label: '检测白名单(不封禁)', type: 'array' },
     ]
   },
   { id: 'quota', label: '配额', color: '#a3e635',

@@ -48,22 +48,27 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
     // ── 用户行为检查 ──
     behavior::recover_reputation(user_id);
 
-    if behavior::is_banned(user_id) {
-        return DetectionResult {
-            passed: false,
-            issues: vec![SecurityIssue::LowReputation],
-            action: Action::Ban,
-            sanitized: None,
-        };
-    }
+    let is_whitelist = config.detection_whitelist.contains(&user_id);
 
-    if behavior::is_silent_banned(user_id) {
-        return DetectionResult {
-            passed: false,
-            issues: vec![SecurityIssue::LowReputation],
-            action: Action::SilentBan,
-            sanitized: decision::get_sanitized_message(&Action::SilentBan),
-        };
+    // 白名单用户跳过已有的封禁状态检查（但仍进行后续检测）
+    if !is_whitelist {
+        if behavior::is_banned(user_id) {
+            return DetectionResult {
+                passed: false,
+                issues: vec![SecurityIssue::LowReputation],
+                action: Action::Ban,
+                sanitized: None,
+            };
+        }
+
+        if behavior::is_silent_banned(user_id) {
+            return DetectionResult {
+                passed: false,
+                issues: vec![SecurityIssue::LowReputation],
+                action: Action::SilentBan,
+                sanitized: decision::get_sanitized_message(&Action::SilentBan),
+            };
+        }
     }
 
     // 频率限制
@@ -142,26 +147,29 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
         behavior::record_violation(user_id, severity);
         warn!(user_id, issues = ?all_issues, severity, "anti_injection: 违规已记录");
 
-        // 静默封禁检查
-        if behavior::check_and_apply_silent_ban(user_id) {
-            return DetectionResult {
-                passed: false,
-                issues: all_issues,
-                action: Action::SilentBan,
-                sanitized: decision::get_sanitized_message(&Action::SilentBan),
-            };
-        }
+        // 白名单用户不执行封禁（违规已记录，但不执行 Ban/SilentBan）
+        if !is_whitelist {
+            // 静默封禁检查
+            if behavior::check_and_apply_silent_ban(user_id) {
+                return DetectionResult {
+                    passed: false,
+                    issues: all_issues,
+                    action: Action::SilentBan,
+                    sanitized: decision::get_sanitized_message(&Action::SilentBan),
+                };
+            }
 
-        // 自动封禁检查
-        if config.behavior.auto_ban
-            && behavior::check_and_apply_auto_ban(user_id, config.behavior.auto_ban_threshold)
-        {
-            return DetectionResult {
-                passed: false,
-                issues: all_issues,
-                action: Action::Ban,
-                sanitized: None,
-            };
+            // 自动封禁检查
+            if config.behavior.auto_ban
+                && behavior::check_and_apply_auto_ban(user_id, config.behavior.auto_ban_threshold)
+            {
+                return DetectionResult {
+                    passed: false,
+                    issues: all_issues,
+                    action: Action::Ban,
+                    sanitized: None,
+                };
+            }
         }
     }
 

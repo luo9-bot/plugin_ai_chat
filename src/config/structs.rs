@@ -501,6 +501,9 @@ pub struct AntiInjectionConfig {
     /// 行为层配置
     #[serde(default)]
     pub behavior: BehaviorConfig,
+    /// 检测白名单：这些用户仍会进行防注入检测，但不会被封禁（记录违规但不执行 Ban/SilentBan）
+    #[serde(default)]
+    pub detection_whitelist: Vec<u64>,
 }
 
 
