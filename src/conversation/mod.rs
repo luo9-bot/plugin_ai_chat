@@ -8,9 +8,6 @@ pub mod attention;
 use crate::{config, with_state, with_shared_state, read_shared_state, is_admin};
 use tracing::{debug, info, warn};
 
-/// 私聊关闭时间：2026年7月14日 00:00:00 (UTC+8)
-const PRIVATE_CHAT_CLOSE_TS: u64 = 1783958400; // 2026-07-14 00:00:00 UTC+8
-
 pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, group_id, content = trimmed, "recv: group msg");
@@ -258,31 +255,6 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
             }
             _ => {}
         }
-    }
-
-    // ── 私聊关闭检查 (2026-07-14 起) ──
-    let now = crate::util::now_secs();
-    if now >= PRIVATE_CHAT_CLOSE_TS {
-        // 仅允许退出命令
-        match trimmed {
-            "停!" | "关闭对话" => {
-                with_state(|s| {
-                    s.active.remove(&user_id);
-                    s.batches.remove(&(0, user_id));
-                });
-                info!(user_id, "cmd: deactivated private chat (after close date)");
-                crate::sender::send_msg(0, user_id, &config::get().messages.stop.success);
-            }
-            _ => {
-                static ONCE: std::sync::Once = std::sync::Once::new();
-                ONCE.call_once(|| {
-                    info!("private chat closed: date threshold reached");
-                });
-                crate::sender::send_msg(0, user_id,
-                    "私聊服务已于 2026年7月14日 关闭，无法进行私聊对话。\n如有需要，请在群聊中与我互动。");
-            }
-        }
-        return;
     }
 
     // 控制命令

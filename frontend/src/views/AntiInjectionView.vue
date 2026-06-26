@@ -39,14 +39,17 @@ const users = ref([])
 async function load() {
   try {
     const d = await api('/api/anti-injection/users')
-    users.value = d.users || []
+    const list = d.users || []
     // Enrich with status info
-    for (const u of users.value) {
+    for (const u of list) {
       try {
         const detail = await api('/api/anti-injection/' + u.user_id)
         Object.assign(u, detail)
       } catch {}
     }
+    // 按 user_id 排序，保证顺序稳定
+    list.sort((a, b) => a.user_id - b.user_id)
+    users.value = list
   } catch {}
 }
 async function unban(uid) { await api('/api/anti-injection/' + uid + '/unban', { method: 'POST' }); load() }
