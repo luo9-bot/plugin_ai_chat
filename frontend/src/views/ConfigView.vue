@@ -380,8 +380,10 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 
 @media (max-width: 768px) {
   .config-layout { flex-direction: column; }
-  .config-nav { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+  .config-nav { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; }
   .nav-section { display: inline; }
   .nav-section .nav-item { display: inline-flex; margin: 2px; }
+  .field-label { width: 100px; font-size: 12px; }
+  .modal { width: 95vw; max-width: 480px; }
 }
 </style>

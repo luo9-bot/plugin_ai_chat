@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 use crate::config;

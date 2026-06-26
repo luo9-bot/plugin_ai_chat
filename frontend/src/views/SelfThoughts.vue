@@ -8,16 +8,16 @@
           <select v-model="catFilter" class="glass-select">
             <option value="">全部分类</option><option value="reflection">反思</option><option value="experience">经历</option><option value="plan">计划</option><option value="feeling">感受</option>
           </select>
-          <input type="date" v-model="dateFrom" class="glass-input" style="width:130px" />
+          <input type="date" v-model="dateFrom" class="glass-input date-input" />
           <span class="sep">~</span>
-          <input type="date" v-model="dateTo" class="glass-input" style="width:130px" />
+          <input type="date" v-model="dateTo" class="glass-input date-input" />
           <button class="btn btn-primary btn-sm" @click="showAdd = true">＋添加</button>
           <a class="btn btn-ghost btn-sm" href="/api/self-thoughts/export" target="_blank">📥 导出</a>
         </div>
       </div>
       <div v-if="!filtered.length" class="empty">暂无自我记忆</div>
       <div v-else class="timeline">
-        <div v-for="(t, i) in filtered" :key="t._idx" class="timeline-item">
+        <div v-for="t in filtered" :key="t._idx" class="timeline-item">
           <div class="timeline-dot" :style="{ background: catColor(t.category) }"></div>
           <div class="timeline-card">
             <div class="tl-header">
@@ -94,6 +94,8 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .sep { color: var(--text-3); font-size: 12px; }
 .badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--primary-glow); color: var(--primary); }
 .glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
+.date-input { width: 130px; }
+@media (max-width: 768px) { .header-actions { gap: 4px; } .date-input { width: 100px; } }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-primary { background: var(--primary); color: white; }
 .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }

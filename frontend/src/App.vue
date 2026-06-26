@@ -103,6 +103,8 @@ import MemoryOpsLog from './views/MemoryOpsLog.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import HumanityView from './views/HumanityView.vue'
+import NarrativeSelfView from './views/NarrativeSelfView.vue'
+import RelationshipsView from './views/RelationshipsView.vue'
 
 const I = {
   dashboard: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="3" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>',
@@ -125,6 +127,8 @@ const I = {
   backups: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a5 5 0 00-4.5 2.8A4 4 0 003 10a4 4 0 004 4h1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 3a5 5 0 014.5 2.8A4 4 0 0117 10a4 4 0 01-4 4h-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 10v5M7 12.5l3-2.5 3 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   sync: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M14.5 5.5A6.5 6.5 0 104 10.5M14.5 2v3.5H11M5.5 14.5A6.5 6.5 0 0016 9.5M5.5 18V14.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   'memory-ops-log': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14v14H3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7h6M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="currentColor" opacity="0.6"/></svg>',
+  'narrative-self': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a4 4 0 00-4 4v2a4 4 0 008 0V6a4 4 0 00-4-4z" stroke="currentColor" stroke-width="1.5"/><path d="M4 14c0-2 2.7-4 6-4s6 2 6 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  relationships: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M3 17c0-2.2 1.8-4 4-4s4 1.8 4 4M9 17c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.5"/></svg>',
 }
 
 const loggedIn = ref(false)
@@ -152,6 +156,8 @@ const tabs = [
   { id: 'mental-state', name: '心理状态', icon: I['mental-state'], desc: 'Bot 心理', comp: MentalState },
   { id: 'proactive', name: '主动对话', icon: I.proactive, desc: '主动消息', comp: ProactiveView },
   { id: 'humanity', name: '人性化', icon: I.humanity, desc: '人性化状态监控', comp: HumanityView },
+  { id: 'narrative-self', name: '叙事自我', icon: I['narrative-self'], desc: '自我认知与时间线', comp: NarrativeSelfView },
+  { id: 'relationships', name: '关系', icon: I.relationships, desc: '关系动力学', comp: RelationshipsView },
   { id: 'blocklist', name: '黑名单', icon: I.blocklist, desc: '用户管理', comp: BlocklistView },
   { id: 'anti-injection', name: '防注入', icon: I['anti-injection'], desc: '安全防护', comp: AntiInjectionView },
   { id: 'archive', name: '归档', icon: I.archive, desc: '数据归档', comp: ArchiveView },
@@ -163,8 +169,8 @@ const navGroups = computed(() => [
   { label: '概览', items: tabs.slice(0, 2) },
   { label: '管理', items: tabs.slice(2, 6) },
   { label: '数据', items: tabs.slice(6, 11) },
-  { label: '状态', items: tabs.slice(11, 15) },
-  { label: '系统', items: tabs.slice(15) },
+  { label: '状态', items: tabs.slice(11, 17) },
+  { label: '系统', items: tabs.slice(17) },
 ])
 
 const currentTabMeta = computed(() => tabs.find(t => t.id === currentTab.value))

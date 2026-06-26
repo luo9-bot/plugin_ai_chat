@@ -8,6 +8,20 @@
       </div>
     </div>
 
+    <div class="card" v-if="motivation">
+      <div class="card-header"><h3>🎯 动机系统</h3></div>
+      <div class="motivation-grid">
+        <div class="motivation-item" v-for="m in motivationList" :key="m.label">
+          <span class="motivation-label">{{ m.label }}</span>
+          <div class="motivation-bar-wrap"><div class="motivation-bar" :style="{ width: m.value * 100 + '%', background: m.color }"></div></div>
+          <span class="motivation-pct">{{ (m.value * 100).toFixed(0) }}%</span>
+        </div>
+      </div>
+      <div class="motivation-current" v-if="motivation.type">
+        当前最强动机: <strong>{{ motivation.type }}</strong> ({{ (motivation.strength * 100).toFixed(0) }}%)
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <h3>主动消息配置</h3>
@@ -67,14 +81,29 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api.js'
 
 const config = ref(null)
 const userStates = ref([])
 const isEnabled = ref(false)
+const motivation = ref(null)
 
 const statCards = ref([{ label: '活跃用户', value: '-', sub: '主动对话', color: '#6366f1' }])
+
+const motivationList = computed(() => {
+  if (!motivation.value) return []
+  // 从 motivation 数据中提取各维度
+  const m = motivation.value
+  return [
+    { label: '分享欲', value: m.urge_to_share || 0, color: '#6366f1' },
+    { label: '关心欲', value: m.caring_check_in || 0, color: '#ec4899' },
+    { label: '延续话题', value: m.open_thread_pull || 0, color: '#f59e0b' },
+    { label: '表达欲', value: m.accumulated_expression || 0, color: '#34d399' },
+    { label: '社交需求', value: m.social_need || 0, color: '#8b5cf6' },
+    { label: '好奇心', value: m.curiosity_drive || 0, color: '#06b6d4' },
+  ]
+})
 
 function fmtTime(ts) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleString('zh-CN') }
 
@@ -94,8 +123,12 @@ async function load() {
     // Load config separately
     try {
       config.value = await api('/api/proactive/config')
-      // RuntimeConfig.enabled is Option<bool>, null means use default
       isEnabled.value = config.value?.enabled != null ? config.value.enabled : true
+    } catch {}
+    // Load motivation data from proactive motivation file
+    try {
+      const h = await api('/api/humanity')
+      motivation.value = h.motivation || null
     } catch {}
   } catch {}
 }
@@ -146,4 +179,11 @@ tr:hover td { background: var(--surface-hover); }
 .badge-state.ok { background: rgba(52,211,153,0.15); color: var(--success); }
 .badge-state.tired { background: rgba(251,191,36,0.15); color: var(--warning); }
 .hint { font-size: 11px; color: var(--text-3); margin-left: 4px; }
+.motivation-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.motivation-item { display: flex; align-items: center; gap: 8px; }
+.motivation-label { width: 56px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+.motivation-bar-wrap { flex: 1; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }
+.motivation-bar { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.motivation-pct { width: 36px; font-size: 11px; color: var(--text-3); text-align: right; flex-shrink: 0; }
+.motivation-current { font-size: 13px; padding: 8px 12px; background: var(--surface-hover); border-radius: var(--radius-xs); }
 </style>

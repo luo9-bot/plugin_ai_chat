@@ -407,7 +407,7 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             // 动机强度超过阈值才触发
             let threshold = 0.4;
             if strength >= threshold {
-                let motivation_ctx = motivation::get_motivation_context();
+                let _motivation_ctx = motivation::get_motivation_context();
                 let msg = generate_greeting(user_id, group_id);
                 if !msg.is_empty() && !is_duplicate_message(group_id, user_id, &msg) && !should_skip_by_topic(&reply_status, &last_topic, &msg) {
                     debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");

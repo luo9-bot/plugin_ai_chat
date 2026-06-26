@@ -195,6 +195,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"humanity") => handlers::handle_humanity(),
         Some(&"memory-ops-log") => handlers::handle_memory_ops_log(&method, &api_segs[1..]),
         Some(&"relationships") => handlers::handle_relationships(&method, &api_segs[1..]),
+        Some(&"narrative-self") => handlers::handle_narrative_self(&method, &api_segs[1..], &body),
         Some(&"info") => handlers::handle_info(),
         Some(&"version") => ok(serde_json::json!({"version": env!("CARGO_PKG_VERSION")})),
         _ => err(404, "not found"),

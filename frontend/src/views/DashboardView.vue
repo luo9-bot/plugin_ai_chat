@@ -185,4 +185,12 @@ onUnmounted(() => { clearInterval(interval); window.removeEventListener('refresh
   color: var(--primary); font-family: system-ui, sans-serif; font-weight: 500;
 }
 .empty-sm { text-align: center; padding: 20px; color: var(--text-3); font-size: 13px; }
+@media (max-width: 768px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .chart-grid { grid-template-columns: 1fr; }
+  .chart-container { flex-direction: column; }
+}
+@media (max-width: 480px) {
+  .stat-grid { grid-template-columns: 1fr; }
+}
 </style>

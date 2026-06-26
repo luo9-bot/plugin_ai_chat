@@ -3,8 +3,6 @@
 //! 替代硬编码 if-else 决策，用多力叠加的概率性行为选择。
 //! 复杂行为从简单底层规则中自然涌现。
 
-use serde::{Deserialize, Serialize};
-
 /// 行为力——驱动行为的内部力量
 #[derive(Debug, Clone)]
 pub struct BehaviorForce {

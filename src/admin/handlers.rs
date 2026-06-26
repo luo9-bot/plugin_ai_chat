@@ -1542,6 +1542,8 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
         })).collect::<Vec<_>>())
     } else { None };
 
+    let narrative = crate::narrative_self::get_narrative_summary();
+
     ok(serde_json::json!({
         "social_battery": battery,
         "circadian": circadian,
@@ -1550,6 +1552,7 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
         "motivation": motivation,
         "relationship_count": rel_count,
         "inner_thoughts": inner_thoughts,
+        "narrative_self": narrative,
         "config_enabled": {
             "social_battery": cfg.humanity.social_battery_enabled,
             "circadian": cfg.humanity.circadian_enabled,
@@ -1567,17 +1570,103 @@ pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io:
     if *method != Method::Get {
         return err(405, "method not allowed");
     }
+    if let Some(uid) = segs.first() {
+        // 单用户详细关系数据（包含新维度）
+        let uid_num: u64 = match uid.parse() {
+            Ok(v) => v,
+            Err(_) => return err(400, "invalid user_id"),
+        };
+        let summary = crate::person_info::relationship::get_relationship_summary(uid_num);
+        return ok(summary);
+    }
     let rel_path = config::data_dir().join("relationships.json");
     let data = std::fs::read_to_string(&rel_path).unwrap_or_else(|_| "{}".into());
     let store: serde_json::Value = serde_json::from_str(&data).unwrap_or(serde_json::json!({"relationships": {}}));
-    if let Some(uid) = segs.first() {
-        let rels = store.get("relationships").and_then(|v| v.as_object());
-        match rels.and_then(|r| r.get(*uid)) {
-            Some(rel) => ok(rel.clone()),
-            None => err(404, "relationship not found"),
+    ok(store)
+}
+
+// ── Handler: 叙事自我 ──────────────────────────────────────────
+
+pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    match method {
+        Method::Get => {
+            let summary = crate::narrative_self::get_narrative_summary();
+            ok(summary)
         }
-    } else {
-        ok(store)
+        Method::Post => {
+            let action = match segs.first() {
+                Some(a) => *a,
+                None => return err(400, "action required: event, value, concern, identity, narrative"),
+            };
+            let body_val: serde_json::Value = match parse_json(body) {
+                Ok(v) => v,
+                Err(e) => return err(400, &e),
+            };
+            match action {
+                "event" => {
+                    let content = match body_val.get("content").and_then(|v| v.as_str()) {
+                        Some(c) if !c.is_empty() => c,
+                        _ => return err(400, "content required"),
+                    };
+                    let significance = body_val.get("significance").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                    let event_type_str = body_val.get("event_type").and_then(|v| v.as_str()).unwrap_or("Daily");
+                    let event_type = match event_type_str {
+                        "Conversation" => crate::narrative_self::TimelineEventType::Conversation,
+                        "Emotional" => crate::narrative_self::TimelineEventType::Emotional,
+                        "Learning" => crate::narrative_self::TimelineEventType::Learning,
+                        "Relationship" => crate::narrative_self::TimelineEventType::Relationship,
+                        "SelfDiscovery" => crate::narrative_self::TimelineEventType::SelfDiscovery,
+                        _ => crate::narrative_self::TimelineEventType::Daily,
+                    };
+                    let related_user = body_val.get("related_user").and_then(|v| v.as_u64());
+                    crate::narrative_self::add_timeline_event(content, event_type, significance, related_user);
+                    ok(serde_json::json!({"ok": true}))
+                }
+                "value" => {
+                    let content = match body_val.get("content").and_then(|v| v.as_str()) {
+                        Some(c) if !c.is_empty() => c,
+                        _ => return err(400, "content required"),
+                    };
+                    let strength = body_val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                    crate::narrative_self::add_value(content, strength, Some("manual"));
+                    ok(serde_json::json!({"ok": true}))
+                }
+                "concern" => {
+                    let content = match body_val.get("content").and_then(|v| v.as_str()) {
+                        Some(c) if !c.is_empty() => c,
+                        _ => return err(400, "content required"),
+                    };
+                    let type_str = body_val.get("type").and_then(|v| v.as_str()).unwrap_or("Topic");
+                    let concern_type = match type_str {
+                        "Person" => crate::narrative_self::ConcernType::Person,
+                        "Event" => crate::narrative_self::ConcernType::Event,
+                        "SelfState" => crate::narrative_self::ConcernType::SelfState,
+                        _ => crate::narrative_self::ConcernType::Topic,
+                    };
+                    let strength = body_val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                    crate::narrative_self::add_ongoing_concern(content, concern_type, strength);
+                    ok(serde_json::json!({"ok": true}))
+                }
+                "identity" => {
+                    let content = match body_val.get("content").and_then(|v| v.as_str()) {
+                        Some(c) if !c.is_empty() => c,
+                        _ => return err(400, "content required"),
+                    };
+                    crate::narrative_self::update_core_identity(content);
+                    ok(serde_json::json!({"ok": true}))
+                }
+                "narrative" => {
+                    let content = match body_val.get("content").and_then(|v| v.as_str()) {
+                        Some(c) if !c.is_empty() => c,
+                        _ => return err(400, "content required"),
+                    };
+                    crate::narrative_self::update_current_narrative(content);
+                    ok(serde_json::json!({"ok": true}))
+                }
+                _ => err(400, "unknown action: use event, value, concern, identity, or narrative"),
+            }
+        }
+        _ => err(405, "method not allowed"),
     }
 }
 

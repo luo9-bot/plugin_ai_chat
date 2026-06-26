@@ -30,6 +30,7 @@ pub mod replyer;
 pub mod runtime;
 pub mod schedule;
 pub mod self_memory;
+pub mod narrative_self;
 pub mod circadian;
 pub mod social_battery;
 #[cfg(feature = "plugin")]

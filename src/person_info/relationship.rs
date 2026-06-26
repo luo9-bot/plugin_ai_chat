@@ -93,6 +93,27 @@ pub struct SharedMemory {
     pub created_at: u64,
 }
 
+/// 关系事件类型
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RelationEvent {
+    /// 被忽视（bot 主动说话但没被回复）
+    Ignored,
+    /// 被关心（对方主动关心 bot）
+    Cared,
+    /// 冲突（争吵、不愉快）
+    Conflict,
+    /// 和解（冲突后的修复）
+    Reconciliation,
+    /// 新鲜信息（对方分享了新东西）
+    NewInfo,
+    /// 重复话题（对方又说了同样的话）
+    Repetitive,
+    /// 共同经历（一起做了什么）
+    SharedExperience,
+    /// 被尊重（对方认真对待 bot 的话）
+    Respected,
+}
+
 /// 关系数据模型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relationship {
@@ -105,6 +126,18 @@ pub struct Relationship {
     pub rapport: f32,
     /// 好感度
     pub affection: f32,
+    /// 互惠感——对方是否也在主动（0.0=完全被动，1.0=非常主动）
+    #[serde(default)]
+    pub reciprocity: f32,
+    /// 紧张度——冲突后上升，和解后下降
+    #[serde(default)]
+    pub tension: f32,
+    /// 烦躁度——对重复行为的容忍度下降
+    #[serde(default)]
+    pub annoyance: f32,
+    /// 对这个人的好奇心
+    #[serde(default)]
+    pub curiosity: f32,
     /// 对用户的"印象"（自然语言）
     pub impression: String,
     /// 用户喜欢的交流方式
@@ -115,6 +148,9 @@ pub struct Relationship {
     pub perceived_attitude: String,
     /// 上次交互时间
     pub last_interaction: u64,
+    /// 上次 bot 主动说话但没被回复的时间
+    #[serde(default)]
+    pub last_ignored_at: u64,
     /// 缺席冷却速率
     pub absence_cooling_rate: f32,
     /// 关系类型
@@ -129,6 +165,20 @@ pub struct Relationship {
     pub positive_interactions: u32,
     /// 消极交互次数
     pub negative_interactions: u32,
+    /// 连续被忽视次数
+    #[serde(default)]
+    pub ignore_streak: u32,
+    /// 最近关系事件（保留最近20条）
+    #[serde(default)]
+    pub recent_events: Vec<RelationEventRecord>,
+}
+
+/// 关系事件记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationEventRecord {
+    pub event: RelationEvent,
+    pub timestamp: u64,
+    pub detail: Option<String>,
 }
 
 impl Default for Relationship {
@@ -140,11 +190,16 @@ impl Default for Relationship {
             intimacy: 0.0,
             rapport: 0.0,
             affection: 0.3,
+            reciprocity: 0.5,
+            tension: 0.0,
+            annoyance: 0.0,
+            curiosity: 0.3,
             impression: String::new(),
             communication_style: CommStyle::Default,
             shared_memories: Vec::new(),
             perceived_attitude: "neutral".to_string(),
             last_interaction: now,
+            last_ignored_at: 0,
             absence_cooling_rate: 0.01,
             relationship_type: RelationshipType::Stranger,
             created_at: now,
@@ -152,6 +207,8 @@ impl Default for Relationship {
             interaction_count: 0,
             positive_interactions: 0,
             negative_interactions: 0,
+            ignore_streak: 0,
+            recent_events: Vec::new(),
         }
     }
 }
@@ -219,16 +276,13 @@ pub fn record_interaction(user_id: u64, positive: bool) {
 
     // 1. 信任更新（非对称：建立慢，崩塌快）
     if positive {
-        // 信任缓慢建立
         rel.trust = (rel.trust + 0.01).min(1.0);
     } else {
-        // 信任崩塌更快
         rel.trust = (rel.trust - 0.05).max(0.0);
     }
 
     // 2. 亲密度更新（天花板效应）
     let intimacy_gain = if positive { 0.02 } else { -0.01 };
-    // 天花板效应：亲密度越高，增长越慢
     let ceiling_factor = 1.0 - rel.intimacy * 0.8;
     rel.intimacy = (rel.intimacy + intimacy_gain * ceiling_factor).clamp(0.0, 1.0);
 
@@ -240,18 +294,19 @@ pub fn record_interaction(user_id: u64, positive: bool) {
         rel.rapport = (rel.rapport + 0.005).min(1.0);
     }
 
-    // 5. 关系类型自动升级
-    rel.relationship_type = if rel.intimacy > 0.8 && rel.trust > 0.7 {
-        RelationshipType::Confidant
-    } else if rel.intimacy > 0.6 {
-        RelationshipType::Close
-    } else if rel.intimacy > 0.3 || rel.interaction_count > 20 {
-        RelationshipType::Regular
-    } else if rel.interaction_count > 3 {
-        RelationshipType::Acquaintance
-    } else {
-        RelationshipType::Stranger
-    };
+    // 5. 紧张度自然衰减（每次正常互动降低一点）
+    rel.tension = (rel.tension - 0.02).max(0.0);
+
+    // 6. 烦躁度自然衰减
+    rel.annoyance = (rel.annoyance - 0.01).max(0.0);
+
+    // 7. 好奇心：积极互动增加好奇心
+    if positive {
+        rel.curiosity = (rel.curiosity + 0.01).min(1.0);
+    }
+
+    // 8. 关系类型自动升级（考虑新维度）
+    rel.relationship_type = compute_relationship_type(&rel);
 
     rel.updated_at = now;
 
@@ -260,12 +315,110 @@ pub fn record_interaction(user_id: u64, positive: bool) {
         trust = rel.trust,
         intimacy = rel.intimacy,
         rapport = rel.rapport,
+        reciprocity = rel.reciprocity,
+        tension = rel.tension,
+        annoyance = rel.annoyance,
         interactions = rel.interaction_count,
         rel_type = ?rel.relationship_type,
         "relationship: updated"
     );
 
     save_relationship(&rel);
+}
+
+/// 记录关系事件
+pub fn record_relation_event(user_id: u64, event: RelationEvent, detail: Option<&str>) {
+    let mut rel = get_relationship(user_id);
+    let now = crate::util::now_secs();
+
+    match event {
+        RelationEvent::Ignored => {
+            rel.ignore_streak += 1;
+            rel.last_ignored_at = now;
+            // 连续被忽视 → 互惠感下降
+            rel.reciprocity = (rel.reciprocity - 0.05 * rel.ignore_streak as f32).max(0.0);
+            // 少量紧张度上升
+            rel.tension = (rel.tension + 0.02).min(1.0);
+        }
+        RelationEvent::Cared => {
+            rel.ignore_streak = 0;
+            rel.reciprocity = (rel.reciprocity + 0.03).min(1.0);
+            rel.tension = (rel.tension - 0.05).max(0.0);
+            rel.affection = (rel.affection + 0.02).min(1.0);
+        }
+        RelationEvent::Conflict => {
+            rel.tension = (rel.tension + 0.15).min(1.0);
+            rel.trust = (rel.trust - 0.08).max(0.0);
+            rel.affection = (rel.affection - 0.05).max(0.0);
+        }
+        RelationEvent::Reconciliation => {
+            rel.tension = (rel.tension - 0.2).max(0.0);
+            rel.trust = (rel.trust + 0.03).min(1.0);
+        }
+        RelationEvent::NewInfo => {
+            rel.curiosity = (rel.curiosity + 0.05).min(1.0);
+            rel.annoyance = (rel.annoyance - 0.03).max(0.0);
+        }
+        RelationEvent::Repetitive => {
+            rel.annoyance = (rel.annoyance + 0.08).min(1.0);
+            rel.curiosity = (rel.curiosity - 0.02).max(0.0);
+        }
+        RelationEvent::SharedExperience => {
+            rel.intimacy = (rel.intimacy + 0.04).min(1.0);
+            rel.rapport = (rel.rapport + 0.02).min(1.0);
+        }
+        RelationEvent::Respected => {
+            rel.trust = (rel.trust + 0.02).min(1.0);
+            rel.reciprocity = (rel.reciprocity + 0.02).min(1.0);
+        }
+    }
+
+    // 记录事件
+    rel.recent_events.push(RelationEventRecord {
+        event,
+        timestamp: now,
+        detail: detail.map(|s| s.to_string()),
+    });
+    // 保留最近20条
+    if rel.recent_events.len() > 20 {
+        rel.recent_events.remove(0);
+    }
+
+    // 重新计算关系类型
+    rel.relationship_type = compute_relationship_type(&rel);
+    rel.updated_at = now;
+
+    save_relationship(&rel);
+    debug!(user_id, event = ?rel.recent_events.last().map(|e| &e.event), "relationship: event recorded");
+}
+
+/// 根据多维度计算关系类型
+fn compute_relationship_type(rel: &Relationship) -> RelationshipType {
+    // 对立关系：高紧张度
+    if rel.tension > 0.6 && rel.affection < 0.3 {
+        return RelationshipType::Antagonistic;
+    }
+    // 仰慕关系：高好感 + 低互惠（对方不太主动但 bot 很喜欢）
+    if rel.affection > 0.7 && rel.reciprocity < 0.3 {
+        return RelationshipType::Admiring;
+    }
+    // 知己：高亲密 + 高信任 + 高默契
+    if rel.intimacy > 0.8 && rel.trust > 0.7 && rel.rapport > 0.5 {
+        return RelationshipType::Confidant;
+    }
+    // 亲近
+    if rel.intimacy > 0.6 && rel.tension < 0.3 {
+        return RelationshipType::Close;
+    }
+    // 常客
+    if rel.intimacy > 0.3 || rel.interaction_count > 20 {
+        return RelationshipType::Regular;
+    }
+    // 认识
+    if rel.interaction_count > 3 {
+        return RelationshipType::Acquaintance;
+    }
+    RelationshipType::Stranger
 }
 
 /// 缺席冷却：长时间不互动后更新关系
@@ -437,6 +590,28 @@ pub fn get_relationship_context(user_id: u64) -> String {
         lines.push("- 你们之间很有默契，一个眼神就能懂对方的意思".to_string());
     }
 
+    // 互惠感提示
+    if rel.reciprocity < 0.2 {
+        lines.push("- 你感觉对方不太主动，可能需要减少主动频率".to_string());
+    } else if rel.reciprocity > 0.8 {
+        lines.push("- 你们之间的互动很平衡，双方都在主动".to_string());
+    }
+
+    // 紧张度提示
+    if rel.tension > 0.5 {
+        lines.push("- 你们之间有一些紧张感，注意分寸".to_string());
+    }
+
+    // 烦躁度提示
+    if rel.annoyance > 0.5 {
+        lines.push("- 你对这个人有些不耐烦，回复可以简短一些".to_string());
+    }
+
+    // 好奇心提示
+    if rel.curiosity > 0.7 {
+        lines.push("- 你对这个人很好奇，可以多问问Ta的事".to_string());
+    }
+
     // 印象
     if !rel.impression.is_empty() {
         lines.push(format!("- 你对Ta的印象: {}", rel.impression));
@@ -447,6 +622,37 @@ pub fn get_relationship_context(user_id: u64) -> String {
     } else {
         format!("# 你和这个人的关系\n{}", lines.join("\n"))
     }
+}
+
+/// 获取关系摘要（用于 WebUI 显示）
+pub fn get_relationship_summary(user_id: u64) -> serde_json::Value {
+    let rel = get_relationship(user_id);
+    serde_json::json!({
+        "user_id": rel.user_id,
+        "trust": rel.trust,
+        "intimacy": rel.intimacy,
+        "rapport": rel.rapport,
+        "affection": rel.affection,
+        "reciprocity": rel.reciprocity,
+        "tension": rel.tension,
+        "annoyance": rel.annoyance,
+        "curiosity": rel.curiosity,
+        "relationship_type": rel.relationship_type.as_str(),
+        "interaction_count": rel.interaction_count,
+        "positive_interactions": rel.positive_interactions,
+        "negative_interactions": rel.negative_interactions,
+        "ignore_streak": rel.ignore_streak,
+        "last_interaction": rel.last_interaction,
+        "impression": rel.impression,
+        "shared_memories_count": rel.shared_memories.len(),
+        "recent_events": rel.recent_events.iter().rev().take(5).map(|e| {
+            serde_json::json!({
+                "event": format!("{:?}", e.event),
+                "timestamp": e.timestamp,
+                "detail": e.detail,
+            })
+        }).collect::<Vec<_>>(),
+    })
 }
 
 /// 设置对用户的印象

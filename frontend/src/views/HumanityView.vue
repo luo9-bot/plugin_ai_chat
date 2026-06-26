@@ -70,10 +70,24 @@
       </div>
     </div>
 
-    <div class="card" v-if="data?.motivation">
-      <h3>主动消息动机</h3>
-      <div class="motivation-badge">
-        当前最强动机: <strong>{{ data.motivation.type }}</strong> (强度: {{ data.motivation.strength.toFixed(2) }})
+    <div class="card-row">
+      <div class="card half" v-if="data?.motivation">
+        <h3>主动消息动机</h3>
+        <div class="motivation-badge">
+          当前最强动机: <strong>{{ data.motivation.type }}</strong> (强度: {{ data.motivation.strength.toFixed(2) }})
+        </div>
+      </div>
+      <div class="card half" v-if="data?.narrative_self?.core_identity">
+        <h3>叙事自我</h3>
+        <div class="narrative-preview">
+          <div class="narrative-line"><span class="narrative-label">自我认知</span> {{ data.narrative_self.core_identity || '—' }}</div>
+          <div class="narrative-line" v-if="data.narrative_self.current_narrative"><span class="narrative-label">当前叙事</span> {{ data.narrative_self.current_narrative }}</div>
+          <div class="narrative-stats">
+            <span>💎 {{ data.narrative_self.stats?.values_count || 0 }} 价值观</span>
+            <span>👁️ {{ data.narrative_self.stats?.concerns_count || 0 }} 关注</span>
+            <span>📅 {{ data.narrative_self.stats?.timeline_count || 0 }} 时间线</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -199,5 +213,9 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .sep { color: var(--text-3); }
 .badge-sm { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--primary-glow); color: var(--primary); font-weight: 500; margin-left: 6px; }
 .empty { text-align: center; padding: 40px; color: var(--text-3); }
+.narrative-preview { font-size: 13px; }
+.narrative-line { margin-bottom: 6px; line-height: 1.5; }
+.narrative-label { font-weight: 600; color: var(--text-2); margin-right: 6px; }
+.narrative-stats { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-3); }
 @media (max-width: 768px) { .card-row { flex-direction: column; } }
 </style>
