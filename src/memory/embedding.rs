@@ -111,16 +111,24 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 ///
 /// 注意：多模态向量化 API 不支持旧版批量返回格式，
 /// 每个 input 数组整体只返回一个向量，因此需要逐个调用。
+/// 为避免内存溢出，限制每批最大处理数量。
 pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
     let cfg = crate::config::get();
     if !cfg.embedding.enabled() || texts.is_empty() {
         return vec![None; texts.len()];
     }
 
-    let results: Vec<Option<Vec<f32>>> = texts
-        .iter()
-        .map(|t| embed_single(t))
-        .collect();
+    // 限制批次大小，避免一次性处理过多导致内存溢出
+    const MAX_BATCH_SIZE: usize = 50;
+    let mut results = Vec::with_capacity(texts.len());
+
+    for chunk in texts.chunks(MAX_BATCH_SIZE) {
+        let chunk_results: Vec<Option<Vec<f32>>> = chunk
+            .iter()
+            .map(|t| embed_single(t))
+            .collect();
+        results.extend(chunk_results);
+    }
 
     let success_count = results.iter().filter(|r| r.is_some()).count();
     if success_count < texts.len() {

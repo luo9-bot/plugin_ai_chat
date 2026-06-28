@@ -1235,6 +1235,34 @@ pub fn handle_config(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
             Err(e) => return err(500, &e),
         }
     }
+    // GET /api/config/raw — 返回原始 YAML 文本
+    if *method == Method::Get && segs.first() == Some(&"raw") {
+        let config_path = config::data_dir().join("config.yaml");
+        return match std::fs::read_to_string(&config_path) {
+            Ok(content) => ok(serde_json::json!({"content": content})),
+            Err(_) => err(404, "config.yaml not found"),
+        };
+    }
+    // PUT /api/config/raw — 保存原始 YAML 文本
+    if *method == Method::Put && segs.first() == Some(&"raw") {
+        let body_val: serde_json::Value = match parse_json(body) {
+            Ok(v) => v,
+            Err(e) => return err(400, &e),
+        };
+        let content = match body_val.get("content").and_then(|v| v.as_str()) {
+            Some(c) => c,
+            None => return err(400, "content required"),
+        };
+        // 验证 YAML 语法
+        if let Err(e) = serde_yaml::from_str::<serde_json::Value>(content) {
+            return err(400, &format!("YAML 语法错误: {}", e));
+        }
+        let config_path = config::data_dir().join("config.yaml");
+        if let Err(e) = std::fs::write(&config_path, content) {
+            return err(500, &format!("写入失败: {}", e));
+        }
+        return ok(serde_json::json!({"ok": true, "message": "配置已保存，点击「重新载入配置」生效"}));
+    }
     // 原有的 config GET/PUT 逻辑
     handle_config_main(method, body)
 }

@@ -50,13 +50,13 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
         return Vec::new();
     }
 
-    let vector_map = vector_store::all_vectors();
+    // 逐个检查向量，避免全量克隆 HashMap
     let mut embeddings: Vec<(String, Vec<f32>)> = Vec::with_capacity(documents.len());
     let mut missing_indices: Vec<usize> = Vec::new();
 
     for (i, (id, content)) in documents.iter().enumerate() {
-        if let Some(emb) = vector_map.get(content) {
-            embeddings.push((id.clone(), emb.clone()));
+        if let Some(emb) = vector_store::get_vector(content) {
+            embeddings.push((id.clone(), emb));
         } else {
             missing_indices.push(i);
         }

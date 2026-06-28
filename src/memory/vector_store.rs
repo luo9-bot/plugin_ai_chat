@@ -100,11 +100,11 @@ pub struct VectorStore {
     dim: usize,
     trained: bool,
     quant_params: Option<QuantParams>,
-    /// 主索引：int64 ID -> (content_hash, 原始向量或量化向量)
+    /// 主索引：int64 ID -> content
     id_to_content: HashMap<i64, String>,
-    /// content -> 原始向量（用于Flat回退和训练）
+    /// content -> 原始向量（仅在未训练时使用，训练后清空以节省内存）
     raw_vectors: HashMap<String, Vec<f32>>,
-    /// 量化后的向量（SQ8训练完成后使用）
+    /// 量化后的向量（SQ8训练完成后使用，训练后是唯一的向量存储）
     quantized_vectors: HashMap<String, Vec<u8>>,
     /// 储水池（渐进训练用）
     reservoir: Vec<Vec<f32>>,
@@ -153,31 +153,59 @@ impl VectorStore {
         let mut vec = vector;
         l2_normalize(&mut vec);
 
-        let exists = self.raw_vectors.contains_key(content);
-        self.raw_vectors.insert(content.to_string(), vec.clone());
+        // 检查是否已存在（同时检查两个存储）
+        let exists = self.raw_vectors.contains_key(content)
+            || self.quantized_vectors.contains_key(content);
+
+        if exists {
+            // 更新已有向量
+            if self.trained {
+                if let Some(ref params) = self.quant_params {
+                    let q = params.quantize(&vec);
+                    self.quantized_vectors.insert(content.to_string(), q);
+                }
+            } else {
+                self.raw_vectors.insert(content.to_string(), vec.clone());
+            }
+            self.id_to_content.insert(id, content.to_string());
+            return true;
+        }
+
+        // 新向量
+        self.total_added += 1;
         self.id_to_content.insert(id, content.to_string());
 
-        if !exists {
-            self.total_added += 1;
-            // 写缓冲区
-            self.write_buffer
-                .push((id, content.to_string(), vec.clone()));
-            // 储水池采样
-            self.reservoir_seen += 1;
-            if self.reservoir.len() < RESERVOIR_CAPACITY {
-                self.reservoir.push(vec);
-            } else {
-                // 随机替换
-                let j = fastrand::usize(0..=self.reservoir_seen);
-                if j < RESERVOIR_CAPACITY {
-                    self.reservoir[j] = vec;
-                }
+        if self.trained {
+            // 已训练，直接量化存储
+            if let Some(ref params) = self.quant_params {
+                let q = params.quantize(&vec);
+                self.quantized_vectors.insert(content.to_string(), q);
             }
-            // 尝试训练
-            if !self.trained && self.reservoir.len() >= MIN_TRAIN_SAMPLES {
-                self.train();
+        } else {
+            // 未训练，存储原始向量
+            self.raw_vectors.insert(content.to_string(), vec.clone());
+        }
+
+        // 写缓冲区
+        self.write_buffer.push((id, content.to_string(), vec.clone()));
+
+        // 储水池采样
+        self.reservoir_seen += 1;
+        if self.reservoir.len() < RESERVOIR_CAPACITY {
+            self.reservoir.push(vec);
+        } else {
+            // 随机替换
+            let j = fastrand::usize(0..=self.reservoir_seen);
+            if j < RESERVOIR_CAPACITY {
+                self.reservoir[j] = vec;
             }
         }
+
+        // 尝试训练
+        if !self.trained && self.reservoir.len() >= MIN_TRAIN_SAMPLES {
+            self.train();
+        }
+
         true
     }
 
@@ -188,22 +216,26 @@ impl VectorStore {
         }
         let params = QuantParams::from_samples(&self.reservoir);
         // 量化所有已有向量
-        let mut quantized = HashMap::new();
+        let mut quantized = HashMap::with_capacity(self.raw_vectors.len());
         for (content, raw) in &self.raw_vectors {
             let q = params.quantize(raw);
             quantized.insert(content.clone(), q);
         }
+        let raw_count = self.raw_vectors.len();
         self.quant_params = Some(params);
         self.quantized_vectors = quantized;
+        // 释放原始向量存储，节省内存（训练后只使用量化向量）
+        self.raw_vectors.clear();
+        self.raw_vectors.shrink_to_fit();
         self.trained = true;
         debug!(
-            vectors = self.raw_vectors.len(),
+            vectors = raw_count,
             dim = self.dim,
-            "vector_store: SQ8 training completed"
+            "vector_store: SQ8 training completed, raw vectors released"
         );
     }
 
-    /// 搜索 top_k 最相似向量（余弦相似度）
+    /// 搜索 top_k 最相似向量（余弦相似度，未训练时使用）
     fn search(&self, query: &[f32], top_k: usize) -> Vec<SearchResult> {
         if self.raw_vectors.is_empty() || query.is_empty() {
             return Vec::new();
@@ -232,26 +264,32 @@ impl VectorStore {
         results
     }
 
-    /// 使用 SQ8 近似搜索
+    /// 使用 SQ8 近似搜索（直接在量化空间计算，避免临时分配）
     fn search_quantized(&self, query: &[f32], top_k: usize) -> Vec<SearchResult> {
         let params = match &self.quant_params {
             Some(p) => p,
             None => return self.search(query, top_k),
         };
 
-        let quantized_query = params.quantize(query);
-        let query_deq = params.dequantize(&quantized_query);
+        if self.quantized_vectors.is_empty() || query.is_empty() {
+            return Vec::new();
+        }
 
+        // 量化查询向量（只量化一次）
+        let quantized_query = params.quantize(query);
+
+        // 直接在量化空间计算点积（近似但避免为每个向量 dequantize）
         let mut results: Vec<SearchResult> = self
             .quantized_vectors
             .iter()
             .map(|(content, qvec)| {
-                let deq = params.dequantize(qvec);
-                let dot: f32 = query_deq.iter().zip(deq.iter()).map(|(a, b)| a * b).sum();
-                let score = dot as f64;
+                // 在 u8 空间直接计算点积，然后用量化参数缩放
+                let dot: u32 = quantized_query.iter().zip(qvec.iter())
+                    .map(|(&a, &b)| a as u32 * b as u32)
+                .sum();
                 SearchResult {
                     content: content.clone(),
-                    score,
+                    score: dot as f64,
                 }
             })
             .collect();
@@ -262,9 +300,12 @@ impl VectorStore {
     }
 
     /// 查询是否包含某 content
-    #[allow(dead_code)]
     fn contains(&self, content: &str) -> bool {
-        self.raw_vectors.contains_key(content)
+        if self.trained {
+            self.quantized_vectors.contains_key(content)
+        } else {
+            self.raw_vectors.contains_key(content)
+        }
     }
 
     /// 移除向量
@@ -284,7 +325,11 @@ impl VectorStore {
 
     /// 返回数据量
     fn len(&self) -> usize {
-        self.raw_vectors.len()
+        if self.trained {
+            self.quantized_vectors.len()
+        } else {
+            self.raw_vectors.len()
+        }
     }
 }
 
@@ -410,7 +455,18 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
 
 fn save_to_disk(store: &VectorStore) {
     let path = vectors_path();
-    let mut buf = Vec::new();
+
+    // 计算数据量和预分配容量
+    let count = if store.trained {
+        store.quantized_vectors.len()
+    } else {
+        store.raw_vectors.len()
+    };
+    let entry_size = if store.trained { store.dim } else { store.dim * 4 };
+    let header_size = 14; // magic(4) + version(4) + dimension(4) + trained(1) + count(4) = 17, 但对齐后约 14+
+    let quant_params_size = if store.trained { store.dim * 8 } else { 0 };
+    let estimated = header_size + quant_params_size + count * (8 + entry_size);
+    let mut buf = Vec::with_capacity(estimated);
 
     // Header
     buf.extend_from_slice(&MAGIC.to_le_bytes());
@@ -429,19 +485,20 @@ fn save_to_disk(store: &VectorStore) {
     }
 
     // 数据
-    let count = store.raw_vectors.len();
     buf.extend_from_slice(&(count as u32).to_le_bytes());
 
-    for (content, raw) in &store.raw_vectors {
-        let id = VectorStore::generate_id(content);
-        buf.extend_from_slice(&id.to_le_bytes());
-
-        if store.trained {
-            if let Some(ref params) = store.quant_params {
-                let q = params.quantize(raw);
-                buf.extend_from_slice(&q);
-            }
-        } else {
+    if store.trained {
+        // 训练后：直接写入量化向量
+        for (content, qvec) in &store.quantized_vectors {
+            let id = VectorStore::generate_id(content);
+            buf.extend_from_slice(&id.to_le_bytes());
+            buf.extend_from_slice(qvec);
+        }
+    } else {
+        // 未训练：写入原始向量
+        for (content, raw) in &store.raw_vectors {
+            let id = VectorStore::generate_id(content);
+            buf.extend_from_slice(&id.to_le_bytes());
             for &v in raw {
                 buf.extend_from_slice(&v.to_le_bytes());
             }
@@ -503,11 +560,18 @@ pub fn add_vector(content: &str, embedding: Vec<f32>) {
     }
 }
 
-/// 按内容获取向量
+/// 按内容获取向量（训练后返回反量化向量）
 pub fn get_vector(content: &str) -> Option<Vec<f32>> {
     let guard = STORE.lock().unwrap();
     let store = guard.as_ref()?;
-    store.raw_vectors.get(content).cloned()
+    if store.trained {
+        // 训练后，从量化向量反量化
+        let qvec = store.quantized_vectors.get(content)?;
+        let params = store.quant_params.as_ref()?;
+        Some(params.dequantize(qvec))
+    } else {
+        store.raw_vectors.get(content).cloned()
+    }
 }
 
 /// 搜索最相似向量
@@ -521,11 +585,21 @@ pub fn search(query: &[f32], top_k: usize) -> Vec<SearchResult> {
     }
 }
 
-/// 按 content 匹配获取所有向量
+/// 按 content 匹配获取所有向量（已弃用，避免全量克隆）
+#[allow(dead_code)]
 pub fn all_vectors() -> HashMap<String, Vec<f32>> {
     let guard = STORE.lock().unwrap();
     let store = guard.as_ref().expect("vector_store not initialized");
-    store.raw_vectors.clone()
+    if store.trained {
+        // 训练后，反量化所有向量（仅用于兼容，不推荐使用）
+        store.quantized_vectors.iter()
+            .filter_map(|(content, qvec)| {
+                store.quant_params.as_ref().map(|p| (content.clone(), p.dequantize(qvec)))
+            })
+            .collect()
+    } else {
+        store.raw_vectors.clone()
+    }
 }
 
 /// 移除向量
