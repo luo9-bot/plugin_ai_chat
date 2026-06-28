@@ -23,7 +23,7 @@ pub(crate) fn store_path() -> std::path::PathBuf { crate::config::data_dir().joi
 pub(crate) fn load_store() -> LearnerStore {
     let mut g = STORE.lock().unwrap();
     if g.is_none() { *g = Some(crate::util::load_json(&store_path())); }
-    g.clone().unwrap_or_default()
+    g.as_ref().cloned().unwrap_or_default()
 }
 
 pub(crate) fn save_store(store: &LearnerStore) {

@@ -227,11 +227,17 @@ impl VectorStore {
         // 释放原始向量存储，节省内存（训练后只使用量化向量）
         self.raw_vectors.clear();
         self.raw_vectors.shrink_to_fit();
+        // 释放储水池（训练完成后不再需要）
+        self.reservoir.clear();
+        self.reservoir.shrink_to_fit();
+        // 清空写缓冲区（训练后新向量直接量化存储）
+        self.write_buffer.clear();
+        self.write_buffer.shrink_to_fit();
         self.trained = true;
         debug!(
             vectors = raw_count,
             dim = self.dim,
-            "vector_store: SQ8 training completed, raw vectors released"
+            "vector_store: SQ8 training completed, raw vectors/reservoir/buffer released"
         );
     }
 
@@ -528,13 +534,16 @@ pub fn init() {
         return;
     }
 
+    let vector_count = vectors.len();
     let mut store = VectorStore::new(dim);
     let mut has_content = false;
-    for (id_str, vec) in &vectors {
+
+    // 直接移动数据，避免不必要的克隆
+    for (id_str, vec) in vectors {
         // 尝试恢复 content，如果没有就用 ID 字符串
-        store.raw_vectors.insert(id_str.clone(), vec.clone());
+        store.raw_vectors.insert(id_str.clone(), vec);
         if let Ok(id) = id_str.parse::<i64>() {
-            store.id_to_content.insert(id, id_str.clone());
+            store.id_to_content.insert(id, id_str);
         }
         store.total_added += 1;
         has_content = true;
@@ -545,7 +554,7 @@ pub fn init() {
     }
 
     *guard = Some(store);
-    debug!("vector_store: initialized from disk, {} vectors, dim={}", vectors.len(), dim);
+    debug!("vector_store: initialized from disk, {} vectors, dim={}", vector_count, dim);
 }
 
 /// 添加向量（content 作为唯一键）
