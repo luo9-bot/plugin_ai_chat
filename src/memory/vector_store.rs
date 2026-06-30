@@ -19,9 +19,9 @@ use tracing::{debug, warn};
 use sha1::Digest;
 use super::embedding::l2_normalize;
 
-// ── 文件格式 ────────────────────────────────────────────────────
+// ── 文件格式 v2 ─────────────────────────────────────────────────
 // [magic: u32 = 0x56435452] ("VCTR")
-// [version: u32 = 1]
+// [version: u32 = 2]
 // [dimension: u32]
 // [trained: u8] (0=未训练用Flat, 1=已训练用SQ8)
 // [quant_params: 仅 trained=1 时存在]
@@ -29,7 +29,8 @@ use super::embedding::l2_normalize;
 //   [maxs: f32[dimension]]
 // [count: u32]
 // entries: [
-//   [id: u64]
+//   [content_len: u32]
+//   [content: bytes[content_len]]
 //   [vector_data: 取决于 trained]:
 //     trained=0: [f32[dimension]] (raw)
 //     trained=1: [u8[dimension]] (quantized)
@@ -37,7 +38,7 @@ use super::embedding::l2_normalize;
 // ]
 
 const MAGIC: u32 = 0x56435452;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// SQ8 训练所需的最小样本数
 const MIN_TRAIN_SAMPLES: usize = 40;
 /// 储水池采样上限
@@ -364,7 +365,7 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
 
     let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
     let version = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    if magic != MAGIC || version != VERSION {
+    if magic != MAGIC || (version != 1 && version != 2) {
         warn!("vector_store: invalid file header");
         return (HashMap::new(), 0);
     }
@@ -415,14 +416,27 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
     let mut vectors = HashMap::with_capacity(count);
 
     for _ in 0..count {
-        if offset + 8 > data.len() {
-            break;
-        }
-        let _id = i64::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-            data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
-        ]);
-        offset += 8;
+        // v2: 读取 content 作为 key
+        let key = if version >= 2 {
+            if offset + 4 > data.len() { break; }
+            let content_len = u32::from_le_bytes([
+                data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+            ]) as usize;
+            offset += 4;
+            if offset + content_len > data.len() { break; }
+            let content = String::from_utf8_lossy(&data[offset..offset + content_len]).into_owned();
+            offset += content_len;
+            content
+        } else {
+            // v1: 读取 id，用 id 字符串作为 key
+            if offset + 8 > data.len() { break; }
+            let id = i64::from_le_bytes([
+                data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+                data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+            ]);
+            offset += 8;
+            id.to_string()
+        };
 
         if trained {
             if let Some(ref params) = quant_params {
@@ -431,8 +445,7 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
                 }
                 let qvec: Vec<u8> = data[offset..offset + dim].to_vec();
                 let deq = params.dequantize(&qvec);
-                // content 无法从文件恢复，这里用 ID 的字符串形式
-                vectors.insert(_id.to_string(), deq);
+                vectors.insert(key, deq);
                 offset += dim;
             }
         } else {
@@ -449,31 +462,32 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
                     data[byte_offset + 3],
                 ]));
             }
-            vectors.insert(_id.to_string(), vec);
+            vectors.insert(key, vec);
             offset += dim * 4;
         }
     }
 
-    debug!(count = vectors.len(), dim, trained, "vector_store: loaded from disk");
+    debug!(count = vectors.len(), dim, trained, version, "vector_store: loaded from disk");
     (vectors, dim)
 }
 
 fn save_to_disk(store: &VectorStore) {
     let path = vectors_path();
 
-    // 计算数据量和预分配容量
+    // 计算数据量和预分配容量（v2: 每个 entry 多 4 字节 content_len + content 本身）
     let count = if store.trained {
         store.quantized_vectors.len()
     } else {
         store.raw_vectors.len()
     };
     let entry_size = if store.trained { store.dim } else { store.dim * 4 };
-    let header_size = 14; // magic(4) + version(4) + dimension(4) + trained(1) + count(4) = 17, 但对齐后约 14+
+    let header_size = 17; // magic(4) + version(4) + dimension(4) + trained(1) + count(4)
     let quant_params_size = if store.trained { store.dim * 8 } else { 0 };
-    let estimated = header_size + quant_params_size + count * (8 + entry_size);
+    // 预估 content 平均长度 100 字节
+    let estimated = header_size + quant_params_size + count * (4 + 100 + entry_size);
     let mut buf = Vec::with_capacity(estimated);
 
-    // Header
+    // Header (v2)
     buf.extend_from_slice(&MAGIC.to_le_bytes());
     buf.extend_from_slice(&VERSION.to_le_bytes());
     buf.extend_from_slice(&(store.dim as u32).to_le_bytes());
@@ -495,15 +509,17 @@ fn save_to_disk(store: &VectorStore) {
     if store.trained {
         // 训练后：直接写入量化向量
         for (content, qvec) in &store.quantized_vectors {
-            let id = VectorStore::generate_id(content);
-            buf.extend_from_slice(&id.to_le_bytes());
+            let content_bytes = content.as_bytes();
+            buf.extend_from_slice(&(content_bytes.len() as u32).to_le_bytes());
+            buf.extend_from_slice(content_bytes);
             buf.extend_from_slice(qvec);
         }
     } else {
         // 未训练：写入原始向量
         for (content, raw) in &store.raw_vectors {
-            let id = VectorStore::generate_id(content);
-            buf.extend_from_slice(&id.to_le_bytes());
+            let content_bytes = content.as_bytes();
+            buf.extend_from_slice(&(content_bytes.len() as u32).to_le_bytes());
+            buf.extend_from_slice(content_bytes);
             for &v in raw {
                 buf.extend_from_slice(&v.to_le_bytes());
             }

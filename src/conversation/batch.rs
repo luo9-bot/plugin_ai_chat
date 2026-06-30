@@ -112,14 +112,18 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         return;
     }
 
-    // ── 第三步：AI 辅助危机检测（关键词未命中时，检测隐晦表达） ──
+    // ── 第三步：AI 辅助危机检测（仅对关键词命中的消息调用 AI） ──
+    // 先做关键词粗筛，只有命中时才调用 AI，避免每条消息都消耗 API
     for item in remaining.iter() {
         let (user_id, messages, timestamps): &(u64, String, Vec<u64>) = item;
-        if let Some(level) = emotion::detect_crisis_ai(messages) {
-            tracing::warn!(user_id = *user_id, group_id, level = ?level, "crisis: 群聊危机信号(AI检测)，强制回复");
-            emotion::update_crisis(*user_id, level);
-            process_message(*user_id, group_id, messages, timestamps);
-            handled_users.insert(*user_id);
+        let keyword_level = emotion::detect_crisis(messages);
+        if keyword_level.is_crisis() {
+            if let Some(level) = emotion::detect_crisis_ai(messages) {
+                tracing::warn!(user_id = *user_id, group_id, level = ?level, "crisis: 群聊危机信号(AI检测)，强制回复");
+                emotion::update_crisis(*user_id, level);
+                process_message(*user_id, group_id, messages, timestamps);
+                handled_users.insert(*user_id);
+            }
         }
     }
 
