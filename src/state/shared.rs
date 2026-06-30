@@ -130,45 +130,54 @@ impl SharedState {
     }
 
     /// 向用户历史追加一条消息。
-    /// 超出窗口大小时，用 AI 对最早的消息做摘要压缩（而非简单丢弃），
-    /// 保留重要信息的同时控制 token 消耗。
+    /// 超出窗口大小时，将需要压缩的数据提取出来，在锁外调用 AI，
+    /// 然后重新获取锁写回摘要。避免持锁调用 AI 导致死锁。
     pub fn push_history(&mut self, group_id: u64, user_id: u64, role: &str, content: &str, max_pairs: usize) {
         let ctx = self.get_or_create_context(group_id, user_id);
         ctx.history.push((role.to_string(), content.to_string()));
         if ctx.history.len() > max_pairs * 2 {
-            // 窗口过大时，取最早的一半消息请求 AI 压缩为摘要
             let keep_recent = max_pairs as usize;
             let compress_end = ctx.history.len().saturating_sub(keep_recent);
             if compress_end > 2 {
+                // 提取需要压缩的数据和现有摘要
                 let to_compress: Vec<String> = ctx.history[..compress_end].iter()
                     .map(|(r, c)| format!("[{}] {}", r, c))
                     .collect();
-                let prompt_text = to_compress.join("\n");
-                // 异步 AI 摘要：如果已有历史摘要，合并后再压缩
                 let existing_summary = ctx.conversation_summary.clone();
+                // 先删除已压缩的部分，释放锁后再调用 AI
+                ctx.history.drain(..compress_end);
+                let prompt_text = to_compress.join("\n");
                 let final_prompt = if existing_summary.is_empty() {
                     prompt_text
                 } else {
                     format!("之前的摘要：{}\n\n新的对话：\n{}", existing_summary, prompt_text)
                 };
-                // 调用 AI 生成摘要（异步触发，不阻塞）
-                let compressed = crate::ai::analyze(
-                    crate::prompt::PromptManager::get().raw("history_attention"),
-                    &final_prompt,
-                );
-                if let Ok(summary) = compressed {
-                    if let Some(json_str) = crate::ai::extract_json(&summary) {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                            if let Some(s) = val.get("summary").and_then(|v| v.as_str()) {
-                                ctx.conversation_summary = s.to_string();
+                // 在锁外调用 AI（避免持锁阻塞主循环）
+                // 注意：此时 self 的可变借用已通过 drain 释放了大部分数据
+                // 但仍持有 &mut self，所以这里先保存 prompt，函数返回后再处理
+                // 实际上我们需要返回 prompt 让调用方在锁外处理
+                // 但由于 push_history 的签名限制，我们改为异步处理
+                let prompt_clone = final_prompt.clone();
+                std::thread::spawn(move || {
+                    let compressed = crate::ai::analyze(
+                        crate::prompt::PromptManager::get().raw("history_attention"),
+                        &prompt_clone,
+                    );
+                    if let Ok(summary) = compressed {
+                        if let Some(json_str) = crate::ai::extract_json(&summary) {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                                if let Some(s) = val.get("summary").and_then(|v| v.as_str()) {
+                                    // 重新获取锁写回摘要
+                                    crate::with_shared_state(|state| {
+                                        let ctx = state.get_or_create_context(group_id, user_id);
+                                        ctx.conversation_summary = s.to_string();
+                                    });
+                                }
                             }
                         }
                     }
-                }
-                // 删除已压缩的部分，保留最近的消息
-                ctx.history.drain(..compress_end);
+                });
             } else {
-                // 只有少量溢出，简单丢弃最旧条目
                 ctx.history.remove(0);
             }
         }

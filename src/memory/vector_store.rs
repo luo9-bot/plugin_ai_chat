@@ -230,9 +230,8 @@ impl VectorStore {
         // 释放储水池（训练完成后不再需要）
         self.reservoir.clear();
         self.reservoir.shrink_to_fit();
-        // 清空写缓冲区（训练后新向量直接量化存储）
-        self.write_buffer.clear();
-        self.write_buffer.shrink_to_fit();
+        // 注意：不清空 write_buffer，保留当前批次的写入记录
+        // write_buffer 用于触发 save_to_disk，清空会导致数据丢失
         self.trained = true;
         debug!(
             vectors = raw_count,

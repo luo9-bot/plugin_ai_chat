@@ -49,7 +49,44 @@ pub fn init() {
     }
 
     let config: Config = match fs::read_to_string(&config_path) {
-        Ok(content) => serde_yaml::from_str(&content).expect("Failed to parse config.yaml"),
+        Ok(content) => match serde_yaml::from_str(&content) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(path = ?config_path, error = %e, "Failed to parse config.yaml, using defaults");
+                Config {
+                    api_key: String::new(),
+                    base_url: "https://api.deepseek.com".into(),
+                    model: "deepseek-chat".into(),
+                    bot_name: default_bot_name(),
+                    prompts: default_prompts(),
+                    self_qq: 0,
+                    admin_qq: 0,
+                    darling_qq: 0,
+                    ai: AiConfig::default(),
+                    conversation: ConversationConfig::default(),
+                    memory: MemoryConfig::default(),
+                    emotion: EmotionConfig::default(),
+                    proactive: ProactiveConfig::default(),
+                    self_reflection: SelfReflectionConfig::default(),
+                    mental_state: MentalStateConfig::default(),
+                    style: StyleConfig::default(),
+                    vision: VisionConfig::default(),
+                    embedding: EmbeddingConfig::default(),
+                    messages: Messages::default(),
+                    log: LogConfig::default(),
+                    sync: SyncConfig::default(),
+                    admin: AdminConfig::default(),
+                    anti_injection: AntiInjectionConfig::default(),
+                    quota: QuotaConfig::default(),
+                    sticker: StickerConfig::default(),
+                    whitelist: Vec::new(),
+                    blacklist: Vec::new(),
+                    auto_start_users: Vec::new(),
+                    auto_start_groups: Vec::new(),
+                    humanity: HumanityConfig::default(),
+                }
+            }
+        },
         Err(e) => {
             debug!(path = ?config_path, error = %e, "failed to read config, using defaults");
             Config {
