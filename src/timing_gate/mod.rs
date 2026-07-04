@@ -206,10 +206,10 @@ pub fn run_timing_gate(
         tools.push(tool_wait());
     }
 
-    // 重试循环
+    // 重试循环（使用快速 API，20秒超时）
     debug!(group_id, "timing_gate: evaluating");
     for attempt in 0..MAX_ATTEMPTS {
-        match crate::ai::analyze_with_tools_named(
+        match crate::ai::analyze_with_tools_named_fast(
             &full_prompt,
             &content,
             &tools,

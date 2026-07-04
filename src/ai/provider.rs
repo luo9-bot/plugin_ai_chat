@@ -23,6 +23,16 @@ fn no_error_agent() -> ureq::Agent {
     ureq::Agent::new_with_config(config)
 }
 
+/// 创建带自定义超时的 Agent（用于 timing_gate 等快速决策场景）
+fn agent_with_timeout(secs: u64) -> ureq::Agent {
+    use std::time::Duration;
+    let config = ureq::config::Config::builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(secs)))
+        .build();
+    ureq::Agent::new_with_config(config)
+}
+
 /// 从 AI 响应中提取 JSON 对象 (处理 <think> 标签、markdown 代码块等)
 pub fn extract_json(raw: &str) -> Option<String> {
     let cleaned = if let Some(pos) = raw.find("</think>") {
@@ -754,6 +764,116 @@ pub fn analyze_with_tools_named(
     }
 
     unreachable!()
+}
+
+/// 快速版 analyze_with_tools_named（用于 timing_gate 等需要快速响应的场景）
+///
+/// 使用更短的超时（20秒），避免长时间阻塞
+pub fn analyze_with_tools_named_fast(
+    system_prompt: &str,
+    user_content: &str,
+    tools: &[Tool],
+    tool_choice: Option<serde_json::Value>,
+) -> Result<(String, serde_json::Value), String> {
+    let cfg = config::get();
+    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+    let tc_value = tool_choice.unwrap_or(serde_json::json!("auto"));
+
+    // 使用 20 秒超时的 agent
+    let agent = agent_with_timeout(20);
+
+    let messages = vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: Some(system_prompt.to_string()),
+            tool_calls: None,
+            reasoning_content: None,
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: Some(user_content.to_string()),
+            tool_calls: None,
+            reasoning_content: None,
+        },
+    ];
+    let tools_summary: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    let req = ChatRequest {
+        model: cfg.model.clone(),
+        messages,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        temperature: cfg.ai.analysis_temperature,
+        top_p: 0.3,
+        max_tokens: cfg.ai.analysis_max_tokens,
+        tools: Some(tools.to_vec()),
+        tool_choice: Some(tc_value.clone()),
+        thinking: Some(serde_json::json!({"type": "disabled"})),
+    };
+
+    let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
+
+    debug!(
+        model = %cfg.model,
+        tools = ?tools_summary,
+        tool_choice = %req.tool_choice.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+        "analyze_with_tools_named_fast: request"
+    );
+
+    let mut resp = agent.post(&url)
+        .header("Authorization", &format!("Bearer {}", cfg.api_key))
+        .header("Content-Type", "application/json")
+        .send(json_body.as_bytes())
+        .map_err(|e| format!("API request failed: {}", e))?;
+
+    let status = resp.status();
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("API read failed: {}", e))?;
+
+    if !(200..300).contains(&status.as_u16()) {
+        return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
+    }
+
+    let body: ChatResponse = serde_json::from_str(&resp_str)
+        .map_err(|e| format!("API parse failed: {}", e))?;
+    let pn = tools.first().map(|t| t.function.name.as_str()).unwrap_or("named");
+    track_usage(&body, pn, &cfg.model);
+
+    let choice = body
+        .choices
+        .into_iter()
+        .next()
+        .ok_or("API returned empty choices")?;
+
+    if let Some(tool_calls) = &choice.message.tool_calls
+        && let Some(first_call) = tool_calls.first() {
+            let name = first_call.function.name.clone();
+            let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
+                .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
+            debug!(name = %name, "analyze_with_tools_named_fast: got tool call");
+            return Ok((name, args));
+        }
+
+    // Fallback: 从文本中提取
+    let mut reply = choice.message.content.unwrap_or_default();
+    if let Some(pos) = reply.find("</think>") {
+        reply = reply[pos + 8..].trim().to_string();
+    }
+
+    // 尝试按工具格式包裹纯文本
+    let reply_trimmed = reply.trim();
+    if !reply_trimmed.is_empty() {
+        for (i, tool) in tools.iter().enumerate() {
+            let single = &tools[i..=i];
+            if let Ok(args) = try_wrap_text_for_tools(reply_trimmed, single) {
+                debug!(name = %tool.function.name, "analyze_with_tools_named_fast: wrapped plain text fallback");
+                return Ok((tool.function.name.clone(), args));
+            }
+        }
+    }
+
+    Err("No tool_calls found in response".to_string())
 }
 
 /// 合并的后处理分析 (记忆提取 + 情绪分析 + 记忆纠错，单次 API 调用)
