@@ -3,6 +3,7 @@
 //! 调用火山引擎多模态向量化 API 生成文本向量。
 //! API 文档: https://www.volcengine.com/docs/82379/1409291
 
+use std::time::Duration;
 use tracing::{debug, warn};
 
 /// Embedding 向量维度（doubao-embedding-vision 默认输出 2048 维）
@@ -50,7 +51,14 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 
     debug!(model = %cfg.embedding.model, "embedding: sending request");
 
-    let mut resp = match ureq::post(&url)
+    // 使用 10 秒超时，避免阻塞消息处理
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
+    );
+
+    let mut resp = match agent.post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.embedding.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())

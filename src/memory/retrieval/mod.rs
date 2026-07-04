@@ -5,7 +5,7 @@
 //! 支持后置图门控、自适应阈值、智能回退
 
 pub mod bm25;
-mod vector;
+pub(crate) mod vector;
 mod fusion;
 pub mod threshold;
 pub mod posterior_graph;
@@ -85,10 +85,11 @@ pub fn dual_path_retrieve(
     // 步骤2: BM25 关键词检索
     let bm25_results = bm25::search(query, &filtered_memories, config.top_k * 2);
 
-    // 步骤3: 向量语义检索
-    let vector_results = if let Some(query_embedding) = vector::embed_query(query) {
+    // 步骤3: 向量语义检索（只使用缓存的查询向量，不阻塞调用 API）
+    let vector_results = if let Some(query_embedding) = vector::get_cached_query_embedding(query) {
         vector::search(&query_embedding, embeddings, config.top_k * 2)
     } else {
+        // 没有缓存的查询向量，跳过向量检索，纯 BM25 结果
         Vec::new()
     };
 

@@ -23,6 +23,7 @@ pub use review::*;
 pub fn init() {
     store::init();
     vector_store::init();
+    retrieval::vector::init_query_cache();
     ops_log::init();
 }
 
@@ -62,7 +63,7 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
         }
     }
 
-    // 缺失的 embedding 在后台补充，不阻塞当前检索
+    // 缺失的文档 embedding 在后台补充，不阻塞当前检索
     if !missing_indices.is_empty() && crate::config::get().embedding.enabled() {
         let missing_texts: Vec<String> = missing_indices.iter()
             .map(|&i| documents[i].1.clone())
@@ -74,6 +75,15 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
                     vector_store::add_vector(&text, emb);
                 }
             }
+        });
+    }
+
+    // 查询向量：如果缓存中没有，在后台生成（不阻塞当前检索）
+    if retrieval::vector::get_cached_query_embedding(query).is_none()
+        && crate::config::get().embedding.enabled() {
+        let query_owned = query.to_string();
+        std::thread::spawn(move || {
+            retrieval::vector::generate_query_embedding(&query_owned);
         });
     }
 
