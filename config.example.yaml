@@ -327,6 +327,10 @@ humanity:
   inner_thought_interval_min: 300  # 最小间隔(秒)
   inner_thought_interval_max: 900  # 最大间隔(秒)
 
+  # 错别字模拟
+  typo_enabled: true               # 是否模拟人类打字时的错别字
+  typo_error_rate: 0.3             # 错别字出现概率 (0.0~1.0)
+
 
 # ── 群聊回复配额 (分时段限制回复次数) ───────────────────────
 # 以 5 分钟为最小配额段，按时段分配每段的最大回复次数
@@ -403,7 +407,7 @@ anti_injection:
     # 自动封禁触发次数
     auto_ban_threshold: 10
   # 检测白名单：这些用户仍会进行防注入检测和违规记录，但不会被封禁
-  # detection_whitelist: [123456789, 987654321]
+  detection_whitelist: []
 
 
 # ── 用户访问控制 ─────────────────────────────────────────────────
