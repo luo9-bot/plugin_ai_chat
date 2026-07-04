@@ -424,17 +424,24 @@ fn check_periodic() {
     debug!(count = all_users.len(), "proactive: checking users");
 
     // 锁已释放，安全调用 proactive/emotion
-    // 所有用户都走 per-user 检查，每个用户有独立的 last_sent/ignore_count 控制
-    for (user_id, group_id) in &all_users {
+    // 情绪衰减是轻量操作，在主循环执行
+    for (user_id, _) in &all_users {
         emotion::decay(*user_id);
-        proactive::check_proactive_messages(*user_id, *group_id);
     }
+    // 主动消息检查移到后台线程，避免阻塞主循环
+    std::thread::spawn(move || {
+        for (user_id, group_id) in &all_users {
+            proactive::check_proactive_messages(*user_id, *group_id);
+        }
+    });
 
-    // 定期记忆审查 (每小时一次)
+    // 定期记忆审查 (每小时一次，移到后台线程避免阻塞主循环)
     let last_review = LAST_MEMORY_REVIEW.load(Ordering::Relaxed);
     if now.saturating_sub(last_review) >= 3600 {
         LAST_MEMORY_REVIEW.store(now, Ordering::Relaxed);
-        memory::ai_review_all();
+        std::thread::spawn(|| {
+            memory::ai_review_all();
+        });
     }
 
     // 兴趣分衰减 (每天一次)
@@ -492,16 +499,18 @@ fn check_periodic() {
         self_memory::add(push, self_memory::ThoughtCategory::Plan);
     }
 
-    // 对话后反思: 对话结束一段时间后回顾刚结束的对话
+    // 对话后反思: 对话结束一段时间后回顾刚结束的对话（后台线程执行）
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
     for group_id in idle_groups {
         with_shared_state(|s| { s.reflected_groups.insert(group_id); });
         with_state(|s| { s.last_review_times.insert(group_id, now); });
-        do_post_conversation_reflection(group_id);
+        std::thread::spawn(move || {
+            do_post_conversation_reflection(group_id);
+        });
     }
 
-    // 长时间对话的定期审查：对话还在继续，但距离上次审查已经很久
+    // 长时间对话的定期审查：对话还在继续，但距离上次审查已经很久（后台线程执行）
     let review_interval = config::get().self_reflection.interval;
     let conv_times = read_shared_state(|s| s.last_conversation_times.clone());
     let active_review_groups = with_state(|s| {
@@ -509,30 +518,36 @@ fn check_periodic() {
     });
     for group_id in active_review_groups {
         with_state(|s| { s.last_review_times.insert(group_id, now); });
-        do_post_conversation_reflection(group_id);
+        std::thread::spawn(move || {
+            do_post_conversation_reflection(group_id);
+        });
     }
 
-    // 内心独白：生成和衰减
+    // 内心独白：生成和衰减（生成移到后台线程）
     if config::get().humanity.inner_thought_enabled {
-        if let Some(thought) = self_memory::inner_thought::try_generate() {
-            debug!(content = %thought.content, "inner_thought: new thought generated");
-            // 有行动潜力的想法加入自我记忆，可能触发主动消息
-            if thought.action_potential > 0.5 {
-                self_memory::add(
-                    &thought.content,
-                    self_memory::ThoughtCategory::Feeling,
-                );
+        std::thread::spawn(|| {
+            if let Some(thought) = self_memory::inner_thought::try_generate() {
+                debug!(content = %thought.content, "inner_thought: new thought generated");
+                // 有行动潜力的想法加入自我记忆，可能触发主动消息
+                if thought.action_potential > 0.5 {
+                    self_memory::add(
+                        &thought.content,
+                        self_memory::ThoughtCategory::Feeling,
+                    );
+                }
             }
-        }
+        });
         self_memory::inner_thought::decay_thoughts();
     }
 
-    // 定时空闲反思 (从配置读取间隔)
+    // 定时空闲反思 (从配置读取间隔，后台线程执行)
     let reflect_interval = config::get().self_reflection.interval;
     let last_reflect = LAST_SELF_REFLECTION.load(Ordering::Relaxed);
     if now.saturating_sub(last_reflect) >= reflect_interval {
         LAST_SELF_REFLECTION.store(now, Ordering::Relaxed);
-        do_self_reflection();
+        std::thread::spawn(|| {
+            do_self_reflection();
+        });
     }
 }
 
