@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::fs;
 use tracing::debug;
 
-use super::init::{CONFIG, PROMPT, DATA_DIR, DEFAULT_CONFIG_YAML};
+use super::init::{CONFIG, PROMPT, DATA_DIR, DEFAULT_CONFIG_YAML, CONFIG_ERROR};
 use super::structs::Config;
 
 pub fn data_dir() -> &'static PathBuf {
@@ -15,13 +15,27 @@ pub fn get() -> Config {
     CONFIG.read().unwrap().as_ref().expect("Config not initialized").clone()
 }
 
+/// 获取配置解析错误信息，为空表示正常
+pub fn error_message() -> String {
+    CONFIG_ERROR.read().unwrap().clone()
+}
+
 /// 重新载入配置文件（热重载，无需重启插件）
 pub fn reload() -> Result<(), String> {
     let config_path = data_dir().join("config.yaml");
     let content = fs::read_to_string(&config_path)
         .map_err(|e| format!("读取配置失败: {}", e))?;
-    let config: Config = serde_yaml::from_str(&content)
-        .map_err(|e| format!("解析配置失败: {}", e))?;
+    let config: Config = match serde_yaml::from_str(&content) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("配置文件解析失败: {}", e);
+            *CONFIG_ERROR.write().unwrap() = msg.clone();
+            return Err(msg);
+        }
+    };
+
+    // 解析成功，清除错误标记
+    *CONFIG_ERROR.write().unwrap() = String::new();
 
     // 更新提示词
     let prompt_path = data_dir().join("prompts").join(&config.prompts);
@@ -95,13 +109,18 @@ pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, S
                 // 检查新值是否是数组（需要替换后续列表项）
                 let new_val = find_nested_value(new_obj, &indent_stack, key);
                 if let Some(serde_json::Value::Array(arr)) = new_val {
-                    output.push_str(line);
-                    output.push('\n');
-                    // 输出新数组的列表项
-                    let item_indent = format!("{}  ", indent_str);
-                    for item in arr {
-                        let item_yaml = value_to_yaml_inline(item);
-                        output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                    if arr.is_empty() {
+                        // 空数组用 [] 内联格式，避免 YAML 将 key: 解析为 null
+                        output.push_str(&format!("{}{}: []\n", indent_str, key));
+                    } else {
+                        output.push_str(line);
+                        output.push('\n');
+                        // 输出新数组的列表项
+                        let item_indent = format!("{}  ", indent_str);
+                        for item in arr {
+                            let item_yaml = value_to_yaml_inline(item);
+                            output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                        }
                     }
                     // 标记跳过后续的模板列表项
                     skip_list_items = true;
@@ -123,17 +142,27 @@ pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, S
             if let Some(val) = new_value {
                 // 检查是否是数组（需要输出为列表格式）
                 if let serde_json::Value::Array(arr) = val {
-                    let comment = extract_inline_comment(old_rest);
-                    if comment.is_empty() {
-                        output.push_str(&format!("{}{}:\n", indent_str, key));
+                    if arr.is_empty() {
+                        // 空数组用 [] 内联格式，避免 YAML 将 key: 解析为 null
+                        let comment = extract_inline_comment(old_rest);
+                        if comment.is_empty() {
+                            output.push_str(&format!("{}{}: []\n", indent_str, key));
+                        } else {
+                            output.push_str(&format!("{}{}: [] {}\n", indent_str, key, comment));
+                        }
                     } else {
-                        output.push_str(&format!("{}{}: {}\n", indent_str, key, comment));
-                    }
-                    // 输出数组项为列表格式
-                    let item_indent = format!("{}  ", indent_str);
-                    for item in arr {
-                        let item_yaml = value_to_yaml_inline(item);
-                        output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                        let comment = extract_inline_comment(old_rest);
+                        if comment.is_empty() {
+                            output.push_str(&format!("{}{}:\n", indent_str, key));
+                        } else {
+                            output.push_str(&format!("{}{}: {}\n", indent_str, key, comment));
+                        }
+                        // 输出数组项为列表格式
+                        let item_indent = format!("{}  ", indent_str);
+                        for item in arr {
+                            let item_yaml = value_to_yaml_inline(item);
+                            output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
+                        }
                     }
                     // 标记跳过后续的模板列表项
                     skip_list_items = true;

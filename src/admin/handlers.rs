@@ -1228,6 +1228,11 @@ pub fn handle_anti_injection(
 // ── 配置管理 ──────────────────────────────────────────────────
 
 pub fn handle_config(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+    // GET /api/config/status — 配置解析状态
+    if *method == Method::Get && segs.first() == Some(&"status") {
+        let err = config::error_message();
+        return ok(serde_json::json!({"ok": err.is_empty(), "error": err}));
+    }
     // POST /api/config/reload — 热重载配置
     if *method == Method::Post && segs.first() == Some(&"reload") {
         match config::reload() {

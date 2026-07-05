@@ -10,6 +10,8 @@ use super::structs::*;
 pub(super) static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
 pub(super) static PROMPT: RwLock<String> = RwLock::new(String::new());
 pub(super) static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+/// 配置解析错误信息，为空表示正常
+pub(super) static CONFIG_ERROR: RwLock<String> = RwLock::new(String::new());
 
 fn to_absolute(p: &PathBuf) -> PathBuf {
     if p.is_absolute() {
@@ -52,7 +54,9 @@ pub fn init() {
         Ok(content) => match serde_yaml::from_str(&content) {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!(path = ?config_path, error = %e, "Failed to parse config.yaml, using defaults");
+                let msg = format!("配置文件解析失败，已使用默认值: {}", e);
+                tracing::error!(path = ?config_path, error = %e, "{}", msg);
+                *CONFIG_ERROR.write().unwrap() = msg;
                 Config {
                     api_key: String::new(),
                     base_url: "https://api.deepseek.com".into(),

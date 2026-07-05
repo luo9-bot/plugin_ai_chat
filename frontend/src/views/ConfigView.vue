@@ -1,5 +1,13 @@
 <template>
   <div>
+    <div v-if="configError" class="config-error-banner">
+      <span class="error-icon">!</span>
+      <div class="error-body">
+        <strong>配置解析异常</strong>
+        <span>{{ configError }}</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" @click="load">刷新</button>
+    </div>
     <div class="config-layout">
       <div class="config-nav card">
         <div class="nav-section" v-for="sec in sections" :key="sec.id">
@@ -82,6 +90,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { api } from '../api.js'
 
 const config = ref(null)
+const configError = ref('')
 const activeSection = ref('general')
 const showEdit = ref(false)
 const editForm = reactive({})
@@ -301,6 +310,10 @@ function openEdit() {
 
 async function load() {
   try { config.value = await api('/api/config') } catch {}
+  try {
+    const s = await api('/api/config/status')
+    configError.value = s.ok ? '' : (s.error || '未知错误')
+  } catch { configError.value = '' }
 }
 
 async function saveConfig() {
@@ -377,6 +390,21 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .glass-input, .glass-select { padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; outline: none; width: 100%; }
 .glass-input:focus, .glass-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+.config-error-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; margin-bottom: 16px;
+  background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius-sm);
+  font-size: 13px; color: #991b1b;
+}
+.error-icon {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+  background: #ef4444; color: white; font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.error-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.error-body strong { font-size: 13px; }
+.error-body span { font-size: 12px; opacity: 0.8; word-break: break-all; }
 
 @media (max-width: 768px) {
   .config-layout { flex-direction: column; }
