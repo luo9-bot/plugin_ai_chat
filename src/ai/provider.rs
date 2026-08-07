@@ -375,6 +375,29 @@ pub fn analyze_with_tools(
     tool_choice: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let cfg = config::get();
+    analyze_with_tools_cfg(
+        system_prompt,
+        user_content,
+        tools,
+        tool_choice,
+        cfg.ai.analysis_temperature,
+        0.3,
+    )
+}
+
+/// 带温度/采样参数的分析调用
+///
+/// 与 `analyze_with_tools` 逻辑完全一致，仅允许调用方指定
+/// temperature 与 top_p（如主动消息生成需要更高随机性时使用）。
+pub fn analyze_with_tools_cfg(
+    system_prompt: &str,
+    user_content: &str,
+    tools: &[Tool],
+    tool_choice: Option<serde_json::Value>,
+    temperature: f64,
+    top_p: f64,
+) -> Result<serde_json::Value, String> {
+    let cfg = config::get();
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
 
     // 精简日志：只显示 tools、tool_choice 和 user content，跳过 system prompt
@@ -410,8 +433,8 @@ pub fn analyze_with_tools(
             messages,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
-            temperature: cfg.ai.analysis_temperature,
-            top_p: 0.3,
+            temperature,
+            top_p,
             max_tokens: cfg.ai.analysis_max_tokens,
             tools: Some(tools.to_vec()),
             tool_choice: Some(tc_value.clone()),

@@ -7,6 +7,8 @@
 
 use tracing::debug;
 
+use crate::working_memory;
+
 /// 回复生成上下文
 pub struct ReplyContext {
     pub user_id: u64,
@@ -113,6 +115,42 @@ fn quick_score(reply: &str, ctx: &ReplyContext) -> f32 {
 
     // 自然的对话长度分布
     score.clamp(0.0, 1.0)
+}
+
+/// 检查回复是否与最近 bot 自己说过的话高度相似（抑制模板化重复表达）
+///
+/// 使用字符重叠度做轻量判断，不调用模型；仅群聊生效。
+fn similar_to_recent_bot_reply(reply: &str, group_id: u64) -> bool {
+    if group_id == 0 {
+        return false;
+    }
+    let self_qq = crate::config::get().self_qq;
+    if self_qq == 0 {
+        return false;
+    }
+
+    let recent = working_memory::get_recent(group_id, 86400, 30);
+    let na: String = reply.chars().filter(|c| !c.is_whitespace()).collect();
+    if na.len() < 4 {
+        return false;
+    }
+    let set_a: std::collections::HashSet<char> = na.chars().collect();
+
+    for entry in recent {
+        if entry.user_id != self_qq {
+            continue;
+        }
+        let nb: String = entry.content.chars().filter(|c| !c.is_whitespace()).collect();
+        if nb.len() < 4 {
+            continue;
+        }
+        let common = nb.chars().filter(|c| set_a.contains(c)).count();
+        let overlap = common as f64 / na.len().max(nb.len()) as f64;
+        if overlap > 0.65 {
+            return true;
+        }
+    }
+    false
 }
 
 /// 生成候选回复（带不同风格/角度）
@@ -222,6 +260,13 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
     // 生成第一个候选
     let first = generate_candidate(ctx, 0)?;
     let first_score = quick_score(&first, ctx);
+    // 与最近说过的话重复 → 视为不合格，强制换候选
+    let first_score = if similar_to_recent_bot_reply(&first, ctx.group_id) {
+        debug!(user_id = ctx.user_id, group_id = ctx.group_id, "satisficing: candidate 1 similar to recent bot reply");
+        0.0
+    } else {
+        first_score
+    };
 
     debug!(
         user_id = ctx.user_id,
@@ -240,6 +285,12 @@ pub fn generate_reply(ctx: &ReplyContext) -> Result<String, String> {
     if n_candidates >= 2 {
         let second = generate_candidate(ctx, 1)?;
         let second_score = quick_score(&second, ctx);
+        let second_score = if similar_to_recent_bot_reply(&second, ctx.group_id) {
+            debug!(user_id = ctx.user_id, group_id = ctx.group_id, "satisficing: candidate 2 similar to recent bot reply");
+            0.0
+        } else {
+            second_score
+        };
 
         debug!(
             user_id = ctx.user_id,
@@ -334,7 +385,21 @@ fn generate_single_reply(ctx: &ReplyContext) -> Result<String, String> {
         "replyer: generating"
     );
 
-    let (reply, _) = crate::ai::chat(&system_prompt, "", &[], &user_content)?;
+    let mut reply = crate::ai::chat(&system_prompt, "", &[], &user_content)?.0;
+
+    // 群聊时避免与最近说过的话高度重复：换一种说法重试一次
+    if ctx.group_id > 0 && similar_to_recent_bot_reply(&reply, ctx.group_id) {
+        debug!(user_id = ctx.user_id, group_id = ctx.group_id, "replyer: similar to recent bot reply, retry with variation");
+        let retry_content = format!(
+            "{}\n\n（提示：你刚才的回复和你最近说过的话太像了，请换一种完全不同的说法，不要重复表达习惯）",
+            user_content
+        );
+        if let Ok((reply2, _)) = crate::ai::chat(&system_prompt, "", &[], &retry_content) {
+            if !similar_to_recent_bot_reply(&reply2, ctx.group_id) {
+                reply = reply2;
+            }
+        }
+    }
 
     // 应用错别字（模拟真人打字）
     let reply = if cfg.humanity.typo_enabled {

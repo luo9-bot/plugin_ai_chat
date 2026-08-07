@@ -152,9 +152,9 @@ fn build_generation_context() -> String {
 
     // 最近自我记忆
     let self_mem = super::store::SelfMemoryStore::load();
-    let recent: Vec<&str> = self_mem.thoughts.iter()
-        .rev()
-        .take(5)
+    // 按主题抽样，避免最近想法堆叠在同一主题（近因效应导致延续同话题）
+    let recent: Vec<&str> = super::store::pick_diverse_thoughts(&self_mem.thoughts, 5)
+        .iter()
         .map(|t| t.content.as_str())
         .collect();
     if !recent.is_empty() {

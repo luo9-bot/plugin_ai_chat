@@ -87,9 +87,10 @@ pub fn ai_generate_message(
         }
 
         // 从工作记忆中单独提取你刚才说过的话，放在显眼位置让 AI 看到
+        // 窗口覆盖 24 小时，避免跨时段重复同一话题
         let self_qq = crate::config::get().self_qq;
         if self_qq > 0 {
-            let entries = working_memory::get_recent(group_id, 600, 15);
+            let entries = working_memory::get_recent(group_id, 86400, 30);
             let bot_lines: Vec<String> = entries.iter()
                 .filter(|e| e.user_id == self_qq)
                 .map(|e| format!("  \"{}\"", e.content))
@@ -155,11 +156,14 @@ pub fn ai_generate_message(
     let user_prompt = config::prompt();
     let full_context = ctx.join("\n\n");
 
-    match crate::ai::analyze_with_tools(
+    // 主动消息生成使用对话温度与更高的 top_p，避免低采样下反复输出相同内容
+    match crate::ai::analyze_with_tools_cfg(
         &format!("{}\n\n{}", user_prompt, crate::prompt::PromptManager::get().raw("proactive_message")),
         &full_context,
         &[crate::ai::proactive_message_tool()],
         Some(serde_json::json!("auto")),
+        crate::config::get().ai.temperature,
+        0.5,
     ) {
         Ok(parsed) => {
             // 如果 AI 选择跳过，不发送

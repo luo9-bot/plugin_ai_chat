@@ -3,6 +3,9 @@
 /// 消息分段分隔符
 pub const SEGMENT_SEP: &str = "|^|";
 
+/// 单次发送最多拆分的消息条数：真人连发一般不会超过 3~4 条
+const MAX_SEGMENT_COUNT: usize = 4;
+
 /// 规范化消息分段分隔符：将 AI 生成的不完整 "|^" 或 "^|" 补全为 "|^|"
 pub fn normalize_segment_sep(reply: &str) -> String {
     let mut normalized = reply.replace("\r\n", "\n");
@@ -100,7 +103,7 @@ fn is_cjk(ch: char) -> bool {
 
 /// 将已规范化的消息按 `|^|` 和换行分割为最终发送片段
 pub fn split_segments(normalized_reply: &str) -> Vec<String> {
-    if normalized_reply.contains(SEGMENT_SEP) {
+    let mut segments: Vec<String> = if normalized_reply.contains(SEGMENT_SEP) {
         normalized_reply
             .split(SEGMENT_SEP)
             .flat_map(|s| s.split('\n'))
@@ -113,5 +116,15 @@ pub fn split_segments(normalized_reply: &str) -> Vec<String> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
+    };
+
+    // 限制分段数量：超出部分合并到最后一段，避免一次性连发轰炸
+    if segments.len() > MAX_SEGMENT_COUNT {
+        let overflow: String = segments.split_off(MAX_SEGMENT_COUNT).join("");
+        if let Some(last) = segments.last_mut() {
+            last.push_str(&overflow);
+        }
     }
+
+    segments
 }

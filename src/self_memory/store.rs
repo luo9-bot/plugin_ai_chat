@@ -183,10 +183,10 @@ pub fn get_context(max_count: usize) -> String {
         return String::new();
     }
 
-    let lines: Vec<String> = store.thoughts
+    // 按主题抽样，避免最近想法堆叠在同一主题（如反复出现"吃饭"）
+    let picked = pick_diverse_thoughts(&store.thoughts, max_count);
+    let lines: Vec<String> = picked
         .iter()
-        .rev()
-        .take(max_count)
         .map(|t| {
             let cat = match t.category {
                 ThoughtCategory::Reflection => "反思",
@@ -199,4 +199,67 @@ pub fn get_context(max_count: usize) -> String {
         .collect();
 
     format!("# 你最近的想法\n{}", lines.join("\n"))
+}
+
+/// 轻量主题分类：用于避免最近记忆堆叠在同一个主题上
+fn thought_topic(content: &str) -> &'static str {
+    const FOOD_WORDS: [&str; 12] = ["吃", "饭", "饿", "西瓜", "火锅", "水果", "猪脚", "麻辣",
+        "番茄", "夜宵", "宵夜", "早餐"];
+    if FOOD_WORDS.iter().any(|w| content.contains(w)) {
+        return "food";
+    }
+    const HEALTH_WORDS: [&str; 12] = ["嗓子", "睡", "累", "病", "疼", "感冒", "水", "药",
+        "困", "不舒服", "头疼", "嗓子疼"];
+    if HEALTH_WORDS.iter().any(|w| content.contains(w)) {
+        return "health";
+    }
+    const PEOPLE_WORDS: [&str; 12] = ["他", "她", "豆", "群", "消息", "回", "人", "洛屿",
+        "土豆", "大家", "朋友", "队友"];
+    if PEOPLE_WORDS.iter().any(|w| content.contains(w)) {
+        return "people";
+    }
+    const PLAN_WORDS: [&str; 10] = ["计划", "明天", "打算", "安排", "准备", "记得",
+        "要去", "得去", "该去", "安排"];
+    if PLAN_WORDS.iter().any(|w| content.contains(w)) {
+        return "plan";
+    }
+    "other"
+}
+
+/// 从记忆里按主题抽样：同一主题最多取 2 条，再按最新补齐，保证上下文主题多样
+pub(super) fn pick_diverse_thoughts(thoughts: &[SelfThought], max_count: usize) -> Vec<&SelfThought> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut picked: Vec<&SelfThought> = Vec::new();
+    let mut picked_idx: HashSet<usize> = HashSet::new();
+    let mut topic_count: HashMap<&'static str, usize> = HashMap::new();
+    let indices: Vec<usize> = (0..thoughts.len()).rev().collect();
+
+    // 第一轮：按主题多样选取，每个主题最多 2 条
+    for &idx in &indices {
+        if picked.len() >= max_count {
+            break;
+        }
+        let topic = thought_topic(&thoughts[idx].content);
+        let used = topic_count.entry(topic).or_insert(0);
+        if *used >= 2 {
+            continue;
+        }
+        *used += 1;
+        picked.push(&thoughts[idx]);
+        picked_idx.insert(idx);
+    }
+
+    // 第二轮：仍不足时按最新补齐（保证多样性优先，也不浪费可用记忆）
+    for &idx in &indices {
+        if picked.len() >= max_count {
+            break;
+        }
+        if picked_idx.contains(&idx) {
+            continue;
+        }
+        picked.push(&thoughts[idx]);
+    }
+
+    picked
 }

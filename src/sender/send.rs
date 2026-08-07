@@ -108,6 +108,19 @@ pub fn send_msg(group_id: u64, user_id: u64, text: &str) {
     }
 }
 
+/// 发送消息，分段之间带随机节奏（用于主动消息，避免机械同秒连发）
+fn send_msg_rhythmic(group_id: u64, user_id: u64, text: &str) {
+    let normalized = normalize_segment_sep(text);
+    let segments = split_segments(&normalized);
+    for (i, segment) in segments.iter().enumerate() {
+        raw_send_msg(group_id, user_id, segment);
+        if i < segments.len() - 1 {
+            let delay_ms = 600 + fastrand::u64(0..1200);
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
+    }
+}
+
 /// 发送带 @ 的群消息
 pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
     let full = format!("[CQ:at,qq={}]\n{}", user_id, text);
@@ -150,10 +163,10 @@ pub fn safe_send_quiet(group_id: u64, user_id: u64, reply: &str) -> bool {
             "sender: AI 消息被安全系统拦截"
         );
         if let Some(sanitized) = check.sanitized {
-            send_msg(group_id, user_id, &sanitized);
+            send_msg_rhythmic(group_id, user_id, &sanitized);
         }
         return false;
     }
-    send_msg(group_id, user_id, &cleaned);
+    send_msg_rhythmic(group_id, user_id, &cleaned);
     true
 }

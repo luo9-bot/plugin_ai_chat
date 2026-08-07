@@ -28,11 +28,40 @@ pub enum ReplyStatus {
 /// group_id -> Vec<(content_fingerprint, timestamp)>
 static RECENT_GROUP_MESSAGES: Mutex<Option<HashMap<u64, Vec<(String, u64)>>>> = Mutex::new(None);
 
-/// 同群去重冷却时间（秒）
-const GROUP_MSG_COOLDOWN_SECS: u64 = 3600;
+/// 同群去重冷却时间（秒）：覆盖 24 小时，避免跨时段重复同一句话
+const GROUP_MSG_COOLDOWN_SECS: u64 = 86400;
 
 /// 保留的最近消息数量
-const RECENT_MSG_KEEP: usize = 15;
+const RECENT_MSG_KEEP: usize = 40;
+
+/// 主动消息"生成了但被拦截"后的冷却时间（秒）
+const GENERATION_BLOCK_COOLDOWN_SECS: u64 = 600;
+
+/// 上次生成被拦截的时间：key = (user_id, group_id) -> timestamp
+static LAST_BLOCKED_GENERATION: Mutex<Option<HashMap<(u64, u64), u64>>> = Mutex::new(None);
+
+/// 记录一次"生成了但没有发送"的尝试，避免短时间反复调用模型
+fn mark_blocked_generation(user_id: u64, group_id: u64) {
+    let now = crate::util::now_secs();
+    let mut guard = LAST_BLOCKED_GENERATION.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert((user_id, group_id), now);
+    if map.len() > 256 {
+        map.retain(|_, t| now.saturating_sub(*t) < GENERATION_BLOCK_COOLDOWN_SECS);
+    }
+}
+
+/// 距上次被拦截生成是否还在冷却期内（是则跳过生成，避免浪费）
+fn generation_blocked_recently(user_id: u64, group_id: u64) -> bool {
+    let now = crate::util::now_secs();
+    let guard = LAST_BLOCKED_GENERATION.lock().unwrap();
+    if let Some(map) = guard.as_ref()
+        && let Some(&last) = map.get(&(user_id, group_id))
+    {
+        return now.saturating_sub(last) < GENERATION_BLOCK_COOLDOWN_SECS;
+    }
+    false
+}
 
 /// 提取消息的"指纹"：取前 12 个非空白字符用于去重
 fn content_fingerprint(msg: &str) -> String {
@@ -74,7 +103,26 @@ fn classify_message_topic(msg: &str) -> String {
     }
 
     // 快速规则首 pass：明显的话题直接返回，避免 AI 调用
-    if clean.contains("早") || clean.contains("晚安") || clean.contains("你好") {
+    // 注意顺序：食物类优先，避免"早餐"被"早"误判为问候
+    const FOOD_WORDS: [&str; 14] = ["吃", "饭", "饿", "西瓜", "水果", "火锅", "猪脚", "麻辣", "番茄",
+        "夜宵", "宵夜", "早餐", "午餐", "晚餐"];
+    if FOOD_WORDS.iter().any(|w| clean.contains(w)) {
+        return "food".to_string();
+    }
+    const WEATHER_WORDS: [&str; 8] = ["天气", "下雨", "太阳", "晴", "冷", "热", "刮风", "降温"];
+    if WEATHER_WORDS.iter().any(|w| clean.contains(w)) {
+        return "weather".to_string();
+    }
+    const SLEEP_WORDS: [&str; 5] = ["睡", "困", "醒", "熬夜", "失眠"];
+    if SLEEP_WORDS.iter().any(|w| clean.contains(w)) {
+        return "sleep".to_string();
+    }
+    const PEOPLE_WORDS: [&str; 8] = ["土豆", "豆", "失踪", "在哪", "人呢", "跑了", "没来", "群"];
+    if PEOPLE_WORDS.iter().any(|w| clean.contains(w)) {
+        return "people".to_string();
+    }
+    const GREETING_WORDS: [&str; 7] = ["早上好", "早安", "早呀", "早啊", "晚安", "你好", "大家好"];
+    if GREETING_WORDS.iter().any(|w| clean.contains(w)) {
         return "greeting".to_string();
     }
 
@@ -192,11 +240,11 @@ fn is_duplicate_message(group_id: u64, user_id: u64, msg: &str) -> bool {
     }
     drop(guard);
 
-    // 检查 2: 工作记忆中 bot 自己最近 600 秒的消息
+    // 检查 2: 工作记忆中 bot 自己最近 24 小时的消息
     // 覆盖任何发送路径（对话回复、氛围消息等），跨用户彻底去重
     let self_qq = crate::config::get().self_qq;
     if self_qq > 0 {
-        let recent = crate::working_memory::get_recent(group_id, 600, 20);
+        let recent = crate::working_memory::get_recent(group_id, 86400, 40);
         for entry in &recent {
             if entry.user_id == self_qq {
                 let entry_fp = content_fingerprint(&entry.content);
@@ -212,7 +260,7 @@ fn is_duplicate_message(group_id: u64, user_id: u64, msg: &str) -> bool {
     if self_qq > 0 {
         // 群聊历史
         let history = crate::read_shared_state(|s| s.get_history_clone(group_id, 0));
-        for (role, content) in history.iter().rev().take(10) {
+        for (role, content) in history.iter().rev().take(30) {
             if role != "assistant" { continue; }
             let entry_fp = content_fingerprint(content);
             if fingerprints_similar(&entry_fp, &fp) {
@@ -222,7 +270,7 @@ fn is_duplicate_message(group_id: u64, user_id: u64, msg: &str) -> bool {
         // 私聊时还需检查特定用户的历史（proactive 消息存储在 (0, user_id)）
         if group_id == 0 && user_id > 0 {
             let user_history = crate::read_shared_state(|s| s.get_history_clone(0, user_id));
-            for (role, content) in user_history.iter().rev().take(10) {
+            for (role, content) in user_history.iter().rev().take(30) {
                 if role != "assistant" { continue; }
                 let entry_fp = content_fingerprint(content);
                 if fingerprints_similar(&entry_fp, &fp) {
@@ -368,6 +416,15 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     let emo = emotion::get_state(user_id);
 
+    // 统一计算随机化间隔（路径 1/2/3 共用同一时间基准）
+    let jitter = 0.5 + pseudo_random(user_id.wrapping_add(now / 60)) * 1.0;
+    let effective_interval = (interval as f64 * jitter) as u64;
+    let mood_adjusted = if emo.current == emotion::EmotionType::Sad || emo.current == emotion::EmotionType::Tired {
+        (effective_interval as f64 * low_mood_mult) as u64
+    } else {
+        effective_interval
+    };
+
     // ── 触发路径 1: 情绪冲动 ────────────────────────────────────
     // 情绪强烈时，不等固定间隔，随机概率触发
     // 回复状态影响：没人回复+同话题 → skip；别人在聊 → 允许（情绪强烈可插话）
@@ -376,16 +433,24 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         let impulse_prob = mood_impulse_probability(&emo);
         let roll = pseudo_random(user_id.wrapping_add(now));
         if impulse_prob > 0.0 && roll < impulse_prob {
+            // 刚被拦截过则跳过，避免短时间反复生成
+            if generation_blocked_recently(user_id, group_id) {
+                debug!(user_id, group_id, "proactive: mood blocked recently, skipping generation");
+                return;
+            }
             let msg = generate_mood_message(user_id, &emo, group_id);
             if msg.is_empty() {
+                mark_blocked_generation(user_id, group_id);
                 return;
             }
             if is_duplicate_message(group_id, user_id, &msg) {
                 debug!(user_id, group_id, msg = %msg, "proactive: duplicate mood message, skipping");
+                mark_blocked_generation(user_id, group_id);
                 return;
             }
             if should_skip_by_topic(&reply_status, &last_topic, &msg) {
                 debug!(user_id, group_id, msg = %msg, "proactive: no reply + same topic mood, skipping");
+                mark_blocked_generation(user_id, group_id);
                 return;
             }
             debug!(user_id, group_id, msg = %msg, emotion = ?emo.current, intensity = emo.intensity, roll, "proactive: mood impulse");
@@ -400,40 +465,53 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     // ── 触发路径 2: 动机驱动的主动消息 ────────────────────────
     // 基于内在动机（分享欲、关心欲、好奇心等）决定是否说话
-    let min_motivation_wait = (interval / 3).max(300); // 最短 5 分钟或 interval/3
-    if time_since_last > min_motivation_wait && time_since_reply > 60 {
+    // 与定时路径使用同一时间门槛：间隔未到不调用模型，避免无效生成
+    if time_since_last >= mood_adjusted && time_since_reply >= mood_adjusted {
         let dominant = motivation::get_dominant_motivation();
         if let Some((motivation_type, strength)) = dominant {
             // 动机强度超过阈值才触发
             let threshold = 0.4;
             if strength >= threshold {
-                let _motivation_ctx = motivation::get_motivation_context();
-                let msg = generate_greeting(user_id, group_id);
-                if !msg.is_empty() && !is_duplicate_message(group_id, user_id, &msg) && !should_skip_by_topic(&reply_status, &last_topic, &msg) {
-                    debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");
-                    if sender::safe_send_quiet(group_id, user_id, &msg) {
-                        record_sent(user_id, group_id);
-                        record_group_message(group_id, &msg);
-                        push_proactive_to_history(group_id, user_id, &msg);
-                        motivation::consume_expression();
-                    }
+                // 刚被拦截过则跳过，避免短时间反复生成
+                if generation_blocked_recently(user_id, group_id) {
+                    debug!(user_id, group_id, "proactive: motivation blocked recently, skipping generation");
                     return;
                 }
+                let _motivation_ctx = motivation::get_motivation_context();
+                let msg = generate_greeting(user_id, group_id);
+                if msg.is_empty() {
+                    mark_blocked_generation(user_id, group_id);
+                    return;
+                }
+                if is_duplicate_message(group_id, user_id, &msg) {
+                    debug!(user_id, group_id, msg = %msg, "proactive: duplicate motivation message, skipping");
+                    mark_blocked_generation(user_id, group_id);
+                    return;
+                }
+                if should_skip_by_topic(&reply_status, &last_topic, &msg) {
+                    debug!(user_id, group_id, msg = %msg, "proactive: no reply + same topic motivation, skipping");
+                    mark_blocked_generation(user_id, group_id);
+                    return;
+                }
+                debug!(user_id, group_id, msg = %msg, motivation = %motivation_type, strength, "proactive: motivation-driven");
+                if sender::safe_send_quiet(group_id, user_id, &msg) {
+                    record_sent(user_id, group_id);
+                    record_group_message(group_id, &msg);
+                    push_proactive_to_history(group_id, user_id, &msg);
+                    motivation::consume_expression();
+                }
+                return;
             }
         }
     }
 
     // ── 触发路径 3: 随机化间隔的主动消息 ────────────────────────
-    let jitter = 0.5 + pseudo_random(user_id.wrapping_add(now / 60)) * 1.0;
-    let effective_interval = (interval as f64 * jitter) as u64;
-
-    let mood_adjusted = if emo.current == emotion::EmotionType::Sad || emo.current == emotion::EmotionType::Tired {
-        (effective_interval as f64 * low_mood_mult) as u64
-    } else {
-        effective_interval
-    };
-
     if time_since_last >= mood_adjusted && time_since_reply >= mood_adjusted {
+        // 刚被拦截过则跳过，避免短时间反复生成
+        if generation_blocked_recently(user_id, group_id) {
+            debug!(user_id, group_id, "proactive: periodic blocked recently, skipping generation");
+            return;
+        }
         // 路径 3：如果没人回复 bot 的消息，直接跳过（不说同类话题）
         if reply_status == ReplyStatus::NoReply {
             debug!(user_id, group_id, "proactive: no reply to last message, skipping periodic greeting");
@@ -447,10 +525,12 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
         let msg = generate_greeting(user_id, group_id);
         if msg.is_empty() {
+            mark_blocked_generation(user_id, group_id);
             return;
         }
         if is_duplicate_message(group_id, user_id, &msg) {
             debug!(user_id, group_id, msg = %msg, time_since_last, "proactive: duplicate, skipping");
+            mark_blocked_generation(user_id, group_id);
             return;
         }
         debug!(user_id, group_id, msg = %msg, time_since_last, time_since_reply, jitter = format!("{:.2}", jitter), "proactive: sending");
