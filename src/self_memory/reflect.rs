@@ -3,12 +3,12 @@ use tracing::{debug, info};
 use crate::config;
 use crate::emotion;
 
-use super::store::{ThoughtCategory, add, get_context};
+use super::store::{add, get_context, ThoughtCategory};
 
 /// 群组画像：AI 用来判断往哪个群分享
 pub struct GroupProfile {
     pub group_id: u64,
-    pub recent_messages: String,  // 格式化的最近消息摘要
+    pub recent_messages: String, // 格式化的最近消息摘要
 }
 
 /// AI 驱动的自我反思
@@ -56,9 +56,10 @@ pub fn reflect(
 
     // 各群的画像 (让 AI 了解每个群是干什么的)
     if !group_profiles.is_empty() {
-        let profiles_text: Vec<String> = group_profiles.iter().map(|p| {
-            format!("## 群{}\n{}", p.group_id, p.recent_messages)
-        }).collect();
+        let profiles_text: Vec<String> = group_profiles
+            .iter()
+            .map(|p| format!("## 群{}\n{}", p.group_id, p.recent_messages))
+            .collect();
         context_parts.push(format!("# 你所在的群\n{}", profiles_text.join("\n\n")));
     }
 
@@ -68,24 +69,41 @@ pub fn reflect(
         crate::prompt::PromptManager::get().raw("self_reflect"),
         &full_context,
         &[crate::ai::self_reflect_tool()],
-        Some(serde_json::json!("auto"))
+        Some(serde_json::json!("auto")),
     ) {
         Ok(parsed) => {
             // 解析 thoughts
             let mut count = 0;
             if let Some(thoughts) = parsed.get("thoughts").and_then(|v| v.as_array()) {
                 for thought in thoughts {
-                    let content = thought.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = thought
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if content.is_empty() {
                         continue;
                     }
-                    let category = match thought.get("category").and_then(|v| v.as_str()).unwrap_or("") {
+                    let category = match thought
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                    {
                         "experience" => ThoughtCategory::Experience,
                         "plan" => ThoughtCategory::Plan,
                         "feeling" => ThoughtCategory::Feeling,
                         _ => ThoughtCategory::Reflection,
                     };
+                    let is_plan = category == ThoughtCategory::Plan;
                     add(content, category);
+                    if is_plan {
+                        crate::personal_tasks::add_or_reinforce(
+                            content,
+                            "self_reflection",
+                            "找个合适的时候开始做",
+                            0,
+                            0,
+                        );
+                    }
                     count += 1;
                 }
             }
@@ -94,7 +112,10 @@ pub fn reflect(
             if let Some(concerns) = parsed.get("concerns").and_then(|v| v.as_array()) {
                 for item in concerns {
                     let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let category = item.get("category").and_then(|v| v.as_str()).unwrap_or("social");
+                    let category = item
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("social");
                     if !content.is_empty() {
                         crate::mental_state::add_concern(content, category, 0, 0);
                     }
@@ -112,9 +133,15 @@ pub fn reflect(
 
             // 处理主动分享
             let share = parsed.get("share").and_then(|s| {
-                let should_share = s.get("should_share").and_then(crate::ai::parse_bool).unwrap_or(false);
+                let should_share = s
+                    .get("should_share")
+                    .and_then(crate::ai::parse_bool)
+                    .unwrap_or(false);
                 let content = s.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let target = s.get("target_group_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let target = s
+                    .get("target_group_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 if should_share && !content.is_empty() && target > 0 {
                     Some((content.to_string(), target))
                 } else {

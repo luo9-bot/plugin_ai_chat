@@ -78,6 +78,7 @@ pub fn complete_task(task: &str) {
     if !plan.completed.contains(&task.to_string()) {
         plan.completed.push(task.to_string());
         save_plan(&plan);
+        crate::personal_tasks::complete_by_title(task, "日计划已完成");
         debug!(task, "schedule: task completed");
     }
 }
@@ -88,6 +89,13 @@ pub fn add_task(task: &str) {
     if !plan.goals.contains(&task.to_string()) {
         plan.goals.push(task.to_string());
         save_plan(&plan);
+        crate::personal_tasks::add_or_reinforce(
+            task,
+            "daily_plan",
+            "安排一个合适的时间开始",
+            0,
+            0,
+        );
         debug!(task, "schedule: task added");
     }
 }

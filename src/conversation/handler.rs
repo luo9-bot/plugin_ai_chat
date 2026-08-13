@@ -1,12 +1,11 @@
 //! 消息处理：process_message 核心逻辑、回复清理、群聊回复发送
 
-use crate::{
-    activity, anti_injection, config, conversation_end, emotion,
-    mental_state, person_info, planner, replyer, sender, social_battery, vision, working_memory,
-    util, with_shared_state, read_shared_state,
-    processing_users, ProcessingGuard,
-};
 use super::attention;
+use crate::{
+    activity, anti_injection, config, conversation_end, emotion, mental_state, person_info,
+    personal_tasks, planner, processing_users, read_shared_state, replyer, sender, social_battery,
+    util, vision, with_shared_state, working_memory, ProcessingGuard,
+};
 use tracing::{debug, info, warn};
 
 /// 清理 AI 回复：移除自记忆标签，将中文字符间的空格转为分段符
@@ -22,8 +21,11 @@ fn clean_reply(reply: &str) -> String {
     let chars: Vec<char> = result.chars().collect();
     let mut out = String::with_capacity(result.len());
     for i in 0..chars.len() {
-        if chars[i] == ' ' && i > 0 && i + 1 < chars.len()
-            && is_cjk(chars[i - 1]) && is_cjk(chars[i + 1])
+        if chars[i] == ' '
+            && i > 0
+            && i + 1 < chars.len()
+            && is_cjk(chars[i - 1])
+            && is_cjk(chars[i + 1])
         {
             out.push_str("|^|");
         } else {
@@ -55,7 +57,10 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     {
         let mut processing = processing_users().lock().unwrap();
         if processing.contains(&(group_id, user_id)) {
-            info!(user_id, group_id, "process_message: 用户消息正在处理中，跳过");
+            info!(
+                user_id,
+                group_id, "process_message: 用户消息正在处理中，跳过"
+            );
             return;
         }
         processing.insert((group_id, user_id));
@@ -75,18 +80,20 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
     let image_descriptions: Vec<String> = if cfg.vision.enabled() && !vision_disabled {
         let urls = vision::extract_image_urls(message);
-        urls.iter().filter_map(|url| {
-            // 表情包走持久化缓存路径（下载→哈希→查 stickers.json→VLM）
-            if is_sticker_msg {
-                let desc = crate::sticker::describe_sticker_cq(message);
-                if let Some(ref d) = desc {
-                    debug!("vision: got sticker description via hash cache");
-                    return Some(d.clone());
+        urls.iter()
+            .filter_map(|url| {
+                // 表情包走持久化缓存路径（下载→哈希→查 stickers.json→VLM）
+                if is_sticker_msg {
+                    let desc = crate::sticker::describe_sticker_cq(message);
+                    if let Some(ref d) = desc {
+                        debug!("vision: got sticker description via hash cache");
+                        return Some(d.clone());
+                    }
                 }
-            }
-            // 普通图片或 VLM 缓存未命中，直接调用 VLM
-            vision::recognize_for_user(url, user_id)
-        }).collect()
+                // 普通图片或 VLM 缓存未命中，直接调用 VLM
+                vision::recognize_for_user(url, user_id)
+            })
+            .collect()
     } else {
         Vec::new()
     };
@@ -96,9 +103,14 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
 
     // 组装发给 AI 的消息：图片描述 + 纯文本
     let ai_message = if image_descriptions.is_empty() {
-        if text_message.is_empty() { "[图片]".to_string() } else { text_message.clone() }
+        if text_message.is_empty() {
+            "[图片]".to_string()
+        } else {
+            text_message.clone()
+        }
     } else {
-        let img_ctx: Vec<String> = image_descriptions.iter()
+        let img_ctx: Vec<String> = image_descriptions
+            .iter()
             .enumerate()
             .map(|(i, d)| format!("[图片{}: {}]", i + 1, d))
             .collect();
@@ -111,7 +123,12 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
 
     // 图片识别完成后，用精确时间戳回写工作记忆中的 [图片] 为实际描述
     if !image_descriptions.is_empty() && group_id > 0 {
-        working_memory::update_image_content(group_id, user_id, &image_descriptions, record_timestamps);
+        working_memory::update_image_content(
+            group_id,
+            user_id,
+            &image_descriptions,
+            record_timestamps,
+        );
     }
 
     // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
@@ -182,7 +199,11 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
         )
     };
     let extra_context = if let Some(defect) = defect_instruction {
-        format!("{}\n\n# 当前状态\n{}", extra_context, mental_state::defect_to_instruction(defect))
+        format!(
+            "{}\n\n# 当前状态\n{}",
+            extra_context,
+            mental_state::defect_to_instruction(defect)
+        )
     } else {
         extra_context
     };
@@ -229,7 +250,10 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
         let extra_context = if let Some((bot_last, _)) = history.last() {
             let hour = util::current_hour_cst();
             if conversation_end::keyword_screen(bot_last, &ai_message, hour) {
-                debug!(user_id, "conversation_end: keyword triggered, injecting context");
+                debug!(
+                    user_id,
+                    "conversation_end: keyword triggered, injecting context"
+                );
                 let end_ctx = conversation_end::get_context(bot_last, &ai_message);
                 format!("{}\n\n{}", extra_context, end_ctx)
             } else {
@@ -280,122 +304,140 @@ pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timest
     {
         match result {
             Ok((reply, _)) => {
-                    // 从回复中解析情绪标签 (AI 自报告)
-                    let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
-                    let cleaned_reply = clean_reply(&cleaned_reply);
-                    info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "replyer: got reply");
+                // 从回复中解析情绪标签 (AI 自报告)
+                let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
+                let cleaned_reply = clean_reply(&cleaned_reply);
+                info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "replyer: got reply");
 
-                    // ── 人性滤镜：回复后处理 ──
-                    let cleaned_reply = if config::get().humanity.humanity_filter_enabled {
-                        let battery_level = if config::get().humanity.social_battery_enabled {
-                            social_battery::load().level / config::get().humanity.battery_capacity
-                        } else {
-                            0.7
-                        };
-                        let attention_level = if config::get().humanity.attention_enabled {
-                            attention::load_attention().attention_level
-                        } else {
-                            0.7
-                        };
-                        crate::sender::timing::apply_humanity_filter(
-                            &cleaned_reply,
-                            attention_level,
-                            battery_level,
-                        )
+                // ── 人性滤镜：回复后处理 ──
+                let cleaned_reply = if config::get().humanity.humanity_filter_enabled {
+                    let battery_level = if config::get().humanity.social_battery_enabled {
+                        social_battery::load().level / config::get().humanity.battery_capacity
                     } else {
-                        cleaned_reply
+                        0.7
                     };
-
-                    // ── 输出层防护：检查 AI 回复安全性 (始终开启) ──
-                    let output_check = anti_injection::check_output(user_id, &cleaned_reply, &config::get().anti_injection);
-
-                    let final_reply = if !output_check.passed {
-                        warn!(
-                            user_id, group_id,
-                            issues = ?output_check.issues,
-                            action = ?output_check.action,
-                            penalty = anti_injection::get_penalty_multiplier(user_id),
-                            "anti_injection: AI 回复被替换 (违规已记录)"
-                        );
-                        output_check.sanitized.unwrap_or_else(|| "抱歉，我无法回应这个话题。".to_string())
+                    let attention_level = if config::get().humanity.attention_enabled {
+                        attention::load_attention().attention_level
                     } else {
-                        cleaned_reply
+                        0.7
                     };
+                    crate::sender::timing::apply_humanity_filter(
+                        &cleaned_reply,
+                        attention_level,
+                        battery_level,
+                    )
+                } else {
+                    cleaned_reply
+                };
 
-                    // 追加 AI 回复到历史
-                    with_shared_state(|s| s.push_history(group_id, user_id, "assistant", &final_reply, max_history));
+                // ── 输出层防护：检查 AI 回复安全性 (始终开启) ──
+                let output_check = anti_injection::check_output(
+                    user_id,
+                    &cleaned_reply,
+                    &config::get().anti_injection,
+                );
 
-                    // 处理定时任务嵌入
-                    let final_reply = crate::cron::handle_cron_in_reply(&final_reply, group_id);
+                let final_reply = if !output_check.passed {
+                    warn!(
+                        user_id, group_id,
+                        issues = ?output_check.issues,
+                        action = ?output_check.action,
+                        penalty = anti_injection::get_penalty_multiplier(user_id),
+                        "anti_injection: AI 回复被替换 (违规已记录)"
+                    );
+                    output_check
+                        .sanitized
+                        .unwrap_or_else(|| "抱歉，我无法回应这个话题。".to_string())
+                } else {
+                    cleaned_reply
+                };
 
-                    // 发送回复（群聊需要去重检查）
+                // 追加 AI 回复到历史
+                with_shared_state(|s| {
+                    s.push_history(group_id, user_id, "assistant", &final_reply, max_history)
+                });
+
+                // 处理定时任务嵌入
+                let final_reply = crate::cron::handle_cron_in_reply(&final_reply, group_id);
+
+                // 发送回复（群聊需要去重检查）
+                if group_id > 0 {
+                    // 去重检查：防止短时间内发送相同的回复
+                    if crate::runtime::reply_dedup::is_duplicate(group_id, &final_reply) {
+                        info!(user_id, group_id, "dedup: 检测到重复回复，跳过发送");
+                        return;
+                    }
+                    send_group_reply(group_id, user_id, &final_reply);
+                } else {
+                    sender::send_with_typing(0, user_id, &final_reply);
+                }
+
+                // 记录社交电量消耗
+                if config::get().humanity.social_battery_enabled {
+                    let mut battery = social_battery::load();
+                    let emo = emotion::get_state(user_id);
+                    social_battery::set_emotion_modifier(&mut battery, &emo.current);
+                    social_battery::record_active_reply(&mut battery);
+                    social_battery::save(&battery);
+                }
+
+                // 记录关系交互
+                person_info::relationship::record_interaction(user_id, true);
+
+                // 记录回复时间
+                with_shared_state(|s| {
+                    s.record_reply(group_id, user_id);
                     if group_id > 0 {
-                        // 去重检查：防止短时间内发送相同的回复
-                        if crate::runtime::reply_dedup::is_duplicate(group_id, &final_reply) {
-                            info!(user_id, group_id, "dedup: 检测到重复回复，跳过发送");
-                            return;
-                        }
-                        send_group_reply(group_id, user_id, &final_reply);
-                    } else {
-                        sender::send_with_typing(0, user_id, &final_reply);
+                        s.record_bot_message(group_id, &final_reply);
                     }
+                });
 
-                    // 记录社交电量消耗
-                    if config::get().humanity.social_battery_enabled {
-                        let mut battery = social_battery::load();
-                        let emo = emotion::get_state(user_id);
-                        social_battery::set_emotion_modifier(&mut battery, &emo.current);
-                        social_battery::record_active_reply(&mut battery);
-                        social_battery::save(&battery);
-                    }
+                // 标记工作记忆中该用户的消息为已回复
+                working_memory::mark_replied(group_id, user_id);
 
-                    // 记录关系交互
-                    person_info::relationship::record_interaction(user_id, true);
+                // 回复效果追踪：记录发送的回复
+                crate::reply_effect::record_reply(group_id, user_id, &final_reply);
 
-                    // 记录回复时间
-                    with_shared_state(|s| {
-                        s.record_reply(group_id, user_id);
-                        if group_id > 0 {
-                            s.record_bot_message(group_id, &final_reply);
-                        }
-                    });
+                // 去重追踪：记录最近回复内容用于防重复
+                if group_id > 0 {
+                    crate::runtime::reply_dedup::record(group_id, user_id, &final_reply);
+                }
 
-                    // 标记工作记忆中该用户的消息为已回复
-                    working_memory::mark_replied(group_id, user_id);
+                // 活动状态检测：bot 的回复是否声明了某个活动
+                activity::check_bot_message(user_id, &final_reply);
 
-                    // 回复效果追踪：记录发送的回复
-                    crate::reply_effect::record_reply(group_id, user_id, &final_reply);
-
-                    // 去重追踪：记录最近回复内容用于防重复
-                    if group_id > 0 {
-                        crate::runtime::reply_dedup::record(group_id, user_id, &final_reply);
-                    }
-
-                    // 活动状态检测：bot 的回复是否声明了某个活动
-                    activity::check_bot_message(user_id, &final_reply);
-
-                    // 以下后处理任务不阻塞队列，放入后台线程
-                    let bg_ai_msg = ai_message.clone();
-                    let bg_final = final_reply.clone();
-                    let bg_history = history.clone();
-                    let bg_uid = user_id;
-                    let bg_gid = group_id;
+                // 以下后处理任务不阻塞队列，放入后台线程
+                let bg_ai_msg = ai_message.clone();
+                let bg_final = final_reply.clone();
+                let bg_history = history.clone();
+                let bg_uid = user_id;
+                let bg_gid = group_id;
                     std::thread::spawn(move || {
-                        // 人物事实自动回写：从对话中提取用户事实
-                        crate::person_info::extract_facts_from_conversation(bg_uid, &bg_ai_msg, &bg_final);
+                        personal_tasks::note_user_message(bg_uid, bg_gid, &bg_ai_msg);
+                        personal_tasks::extract_from_conversation(
+                            bg_uid,
+                            bg_gid,
+                            &bg_ai_msg,
+                            &bg_final,
+                        );
 
-                        // 记忆提取：分析对话内容，提取值得记忆的信息
-                        crate::memory::ai_extract(bg_uid, bg_gid, &bg_ai_msg, &bg_final, &bg_history);
+                    // 人物事实自动回写：从对话中提取用户事实
+                    crate::person_info::extract_facts_from_conversation(
+                        bg_uid, &bg_ai_msg, &bg_final,
+                    );
 
-                        // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
-                        crate::memory::auto_summarize(bg_uid, bg_gid, &bg_history);
-                    });
-                }
-                Err(e) => {
-                    info!(user_id, group_id, error = %e, "replyer: 生成回复失败");
-                    sender::send_msg(group_id, user_id, "睡着了...");
-                }
+                    // 记忆提取：分析对话内容，提取值得记忆的信息
+                    crate::memory::ai_extract(bg_uid, bg_gid, &bg_ai_msg, &bg_final, &bg_history);
+
+                    // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
+                    crate::memory::auto_summarize(bg_uid, bg_gid, &bg_history);
+                });
             }
+            Err(e) => {
+                info!(user_id, group_id, error = %e, "replyer: 生成回复失败");
+                sender::send_msg(group_id, user_id, "睡着了...");
+            }
+        }
     }
 }
 

@@ -351,6 +351,36 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         return;
     }
 
+    // 任务跟进只针对有明确对象、且已到复查时间的事项。
+    // 它仍然遵从群冷却、消息去重和安全发送，不能借任务名义反复催促。
+    if let Some(task) = crate::personal_tasks::due_social_follow_up(user_id, group_id) {
+        let emotion = emotion::get_state(user_id);
+        let task_context = format!(
+            "这是一个真实待推进事项：{}。当前下一步是：{}。只在自然合适时发一条简短跟进；若不合适就 skip。",
+            task.title, task.next_action
+        );
+        if let Some(message) = super::generate::ai_generate_message(
+            "task_follow_up",
+            user_id,
+            group_id,
+            &emotion,
+            &task_context,
+        ) {
+            if !is_duplicate_message(group_id, user_id, &message)
+                && !should_skip_by_topic(&check_reply_status(group_id).0, &None, &message)
+                && sender::safe_send_quiet(group_id, user_id, &message)
+            {
+                record_sent(user_id, group_id);
+                record_group_message(group_id, &message);
+                push_proactive_to_history(group_id, user_id, &message);
+                crate::personal_tasks::mark_follow_up_sent(task.id);
+                debug!(task_id = task.id, user_id, group_id, "personal_tasks: follow-up sent");
+                return;
+            }
+            mark_blocked_generation(user_id, group_id);
+        }
+    }
+
     let time_since_last = now.saturating_sub(state.last_sent);
     let time_since_reply = now.saturating_sub(state.last_user_reply);
 

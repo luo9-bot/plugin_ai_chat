@@ -21,6 +21,7 @@ pub mod memory;
 pub mod mental_state;
 pub mod person_info;
 pub mod personality;
+pub mod personal_tasks;
 pub mod planner;
 pub mod prompt;
 pub mod proactive;
@@ -389,6 +390,9 @@ fn check_periodic() {
 
     // 主动消息动机更新
     proactive::motivation::update_motivations();
+
+    // 推进到期事项：等待超时不会被虚构为完成，只转为需要决定下一步。
+    personal_tasks::review_due_tasks();
 
     // 情绪衰减 + 主动消息检查 (分步获取锁，释放后再调用 proactive/emotion)
     let mut all_users: Vec<(u64, u64)> = Vec::new();

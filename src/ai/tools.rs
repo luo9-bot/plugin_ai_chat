@@ -377,6 +377,36 @@ pub fn mental_state_generate_tool() -> Tool {
     }
 }
 
+/// 从对话中提取 bot 自己需要推进的真实事项。
+pub fn task_progress_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "task_progress".to_string(),
+            description: "提取 bot 需要推进的明确约定、承诺或等待事项".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": { "type": "string", "description": "简短的 bot 自身事项" },
+                                "next_action": { "type": "string", "description": "下一步的具体自然行动" },
+                                "waiting_for_person": { "type": "boolean", "description": "下一步是否必须等当前对话对象回应" }
+                            },
+                            "required": ["title", "next_action", "waiting_for_person"]
+                        },
+                        "description": "没有明确事项时为空数组"
+                    }
+                },
+                "required": ["tasks"]
+            }),
+        },
+    }
+}
+
 /// 周计划生成工具
 pub fn weekly_plan_tool() -> Tool {
     Tool {

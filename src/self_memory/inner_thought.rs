@@ -89,8 +89,8 @@ pub fn try_generate() -> Option<InnerThought> {
         }
     }
 
-    // 构建生成提示
-    let context = build_generation_context();
+    // 构建生成提示。已保存的内心独白必须参与上下文，避免模型反复沿用同一个念头。
+    let context = build_generation_context(&store);
     let thought = generate_inner_thought(&context);
 
     if let Some(ref t) = thought {
@@ -110,7 +110,7 @@ pub fn try_generate() -> Option<InnerThought> {
         });
         if is_dup {
             debug!(content = %t.content, "inner_thought: skipped duplicate thought");
-            store.last_generation = now;
+            // 不推进生成时间。下一次周期会带着重复反馈重新生成，而不是静默空转。
             store.save();
             return None;
         }
@@ -132,7 +132,12 @@ pub fn try_generate() -> Option<InnerThought> {
             };
             let mut emo_state = crate::emotion::get_state(0);
             emo_state.update_emotional_dynamics(
-                Some((&emo_type, t.emotional_impact.abs() * 0.3, "内心独白", crate::emotion::TriggerType::InnerThought)),
+                Some((
+                    &emo_type,
+                    t.emotional_impact.abs() * 0.3,
+                    "内心独白",
+                    crate::emotion::TriggerType::InnerThought,
+                )),
                 0.0,
             );
             crate::emotion::update_state(0, emo_state);
@@ -143,7 +148,7 @@ pub fn try_generate() -> Option<InnerThought> {
 }
 
 /// 构建生成内心独白的上下文
-fn build_generation_context() -> String {
+fn build_generation_context(inner_thought_store: &InnerThoughtStore) -> String {
     let mut parts = Vec::new();
 
     // 当前情绪
@@ -161,23 +166,47 @@ fn build_generation_context() -> String {
         parts.push(format!("最近的想法：{}", recent.join("；")));
     }
 
+    if let Some(context) = recent_inner_thought_context(&inner_thought_store.thoughts, 8) {
+        parts.push(context);
+    }
+
+    let task_context = crate::personal_tasks::get_context(5);
+    if !task_context.is_empty() {
+        parts.push(task_context);
+    }
+
     // 活跃对话
-    let active_users: Vec<u64> = crate::read_shared_state(|s| {
-        s.active_users.iter().copied().collect()
-    });
+    let active_users: Vec<u64> =
+        crate::read_shared_state(|s| s.active_users.iter().copied().collect());
     if !active_users.is_empty() {
         parts.push(format!("正在和{}个用户对话", active_users.len()));
     }
 
     // 人员印象
-    let person_ctx = crate::person_info::get_person_context(
-        active_users.first().copied().unwrap_or(0)
-    );
+    let person_ctx =
+        crate::person_info::get_person_context(active_users.first().copied().unwrap_or(0));
     if !person_ctx.is_empty() {
         parts.push(person_ctx);
     }
 
     parts.join("\n")
+}
+
+/// 构造近期独白的排除上下文，强制下一轮思考切换方向。
+fn recent_inner_thought_context(thoughts: &[InnerThought], max_count: usize) -> Option<String> {
+    let recent: Vec<&str> = thoughts
+        .iter()
+        .rev()
+        .take(max_count)
+        .map(|thought| thought.content.as_str())
+        .collect();
+
+    (!recent.is_empty()).then(|| {
+        format!(
+            "已产生过的内心独白（禁止换词重复，必须转向不同的人、事或感受）：{}",
+            recent.join("；")
+        )
+    })
 }
 
 /// 调用 LLM 生成内心独白
@@ -189,6 +218,9 @@ fn generate_inner_thought(context: &str) -> Option<InnerThought> {
          - 突然想到的念头\n\
          - 对某个人的看法\n\
          - 一个随机的想法\n\n\
+         不要复述上下文中已产生过的内心独白，也不要仅替换同义词。\n\
+         如果当前线索不足以继续同一件事，主动切换到另一件真实发生的事、另一种感受或当下状态。\n\n\
+         如果上下文有正在推进的事，可以继续想到它，但要体现进展、等待、决定或搁置，不能重复旧句子。\n\n\
          {}\n\n\
          只返回内心独白的内容（一句话），并在最后用方括号标注对情绪的影响\
          [-1.0到1.0，负数=负面，正数=正面]和行动潜力[0.0-1.0]。\
@@ -207,7 +239,10 @@ fn generate_inner_thought(context: &str) -> Option<InnerThought> {
             }
 
             let now = crate::util::now_secs();
-            debug!(content, emotional_impact, action_potential, "inner_thought: generated");
+            debug!(
+                content,
+                emotional_impact, action_potential, "inner_thought: generated"
+            );
 
             Some(InnerThought {
                 content,
@@ -227,33 +262,49 @@ fn generate_inner_thought(context: &str) -> Option<InnerThought> {
 
 /// 解析内心独白中的标签
 fn parse_thought_tags(text: &str) -> (String, f32, f32) {
-    let mut content = text.to_string();
     let mut emotional_impact = 0.0f32;
     let mut action_potential = 0.0f32;
 
-    // 尝试提取最后的 [数字] 模式
-    if let Some(last_bracket) = text.rfind(']') {
-        if let Some(open_bracket) = text[..last_bracket].rfind('[') {
-            let tag = &text[open_bracket + 1..last_bracket];
-            let parts: Vec<&str> = tag.split_whitespace().collect();
-            if parts.len() == 2 {
-                if let Ok(v) = parts[0].parse::<f32>() {
-                    action_potential = v.clamp(0.0, 1.0);
-                }
-                if let Ok(v) = parts[1].parse::<f32>() {
-                    emotional_impact = v.clamp(-1.0, 1.0);
-                }
-                // 也有可能是 [情绪影响] [行动潜力] 或反过来
-            } else if parts.len() == 1 {
-                if let Ok(v) = parts[0].parse::<f32>() {
-                    emotional_impact = v.clamp(-1.0, 1.0);
-                }
-            }
-            content = text[..open_bracket].trim().to_string();
+    let (without_action, trailing_action) = strip_trailing_numeric_tag(text);
+    let (without_emotion, trailing_emotion) = strip_trailing_numeric_tag(without_action);
+
+    match (trailing_emotion, trailing_action) {
+        (Some(emotion), Some(action)) => {
+            emotional_impact = emotion.clamp(-1.0, 1.0);
+            action_potential = action.clamp(0.0, 1.0);
         }
+        (None, Some(emotion)) => {
+            // 兼容历史模型只输出一个标签的情况：单标签表示情绪影响。
+            emotional_impact = emotion.clamp(-1.0, 1.0);
+        }
+        _ => {}
     }
 
-    (content, emotional_impact, action_potential)
+    (
+        without_emotion.trim().to_string(),
+        emotional_impact,
+        action_potential,
+    )
+}
+
+/// 去掉文本尾部形如 `[0.3]` 的数值标签，并返回标签值。
+fn strip_trailing_numeric_tag(text: &str) -> (&str, Option<f32>) {
+    let trimmed = text.trim_end();
+    if !trimmed.ends_with(']') {
+        return (trimmed, None);
+    }
+
+    let Some(open_bracket) = trimmed.rfind('[') else {
+        return (trimmed, None);
+    };
+    let value = trimmed[open_bracket + 1..trimmed.len() - 1]
+        .trim()
+        .parse::<f32>();
+
+    match value {
+        Ok(value) => (&trimmed[..open_bracket], Some(value)),
+        Err(_) => (trimmed, None),
+    }
 }
 
 /// 获取活跃的内心独白（未淡忘的）
@@ -261,7 +312,9 @@ pub fn get_active_thoughts(max_count: usize) -> Vec<InnerThought> {
     let store = InnerThoughtStore::load();
     let now = crate::util::now_secs();
 
-    let mut active: Vec<InnerThought> = store.thoughts.iter()
+    let mut active: Vec<InnerThought> = store
+        .thoughts
+        .iter()
         .filter(|t| {
             if t.faded {
                 // 淡忘的想法有小概率被想起
@@ -295,7 +348,9 @@ pub fn decay_thoughts() {
 
     // 清理超过7天的
     let before = store.thoughts.len();
-    store.thoughts.retain(|t| now.saturating_sub(t.timestamp) < 604800);
+    store
+        .thoughts
+        .retain(|t| now.saturating_sub(t.timestamp) < 604800);
     if store.thoughts.len() != before {
         changed = true;
     }
@@ -312,14 +367,17 @@ pub fn get_inner_thought_context(max_count: usize) -> String {
         return String::new();
     }
 
-    let lines: Vec<String> = thoughts.iter().map(|t| {
-        let recalled = if t.recall_count > 0 {
-            " [回想起]"
-        } else {
-            ""
-        };
-        format!("- {}{}", t.content, recalled)
-    }).collect();
+    let lines: Vec<String> = thoughts
+        .iter()
+        .map(|t| {
+            let recalled = if t.recall_count > 0 {
+                " [回想起]"
+            } else {
+                ""
+            };
+            format!("- {}{}", t.content, recalled)
+        })
+        .collect();
 
     format!("# 你此刻的内心想法\n{}", lines.join("\n"))
 }
@@ -328,7 +386,9 @@ pub fn get_inner_thought_context(max_count: usize) -> String {
 pub fn recall_thought(content_hint: &str) -> Option<InnerThought> {
     let mut store = InnerThoughtStore::load();
     let mut result = None;
-    if let Some(thought) = store.thoughts.iter_mut()
+    if let Some(thought) = store
+        .thoughts
+        .iter_mut()
         .find(|t| t.faded && t.content.contains(content_hint))
     {
         thought.faded = false;
@@ -377,8 +437,16 @@ fn is_similar(a: &str, b: &str) -> bool {
     let shorter_len = a_chars.len().min(b_chars.len());
 
     // 子串包含
-    let (shorter, longer) = if a_chars.len() <= b_chars.len() { (&a_chars, &b_chars) } else { (&b_chars, &a_chars) };
-    if longer.len() >= 6 && longer.windows(shorter.len()).any(|w| w == shorter.as_slice()) {
+    let (shorter, longer) = if a_chars.len() <= b_chars.len() {
+        (&a_chars, &b_chars)
+    } else {
+        (&b_chars, &a_chars)
+    };
+    if longer.len() >= 6
+        && longer
+            .windows(shorter.len())
+            .any(|w| w == shorter.as_slice())
+    {
         return true;
     }
 
@@ -397,7 +465,9 @@ fn is_similar(a: &str, b: &str) -> bool {
 fn lcs_len(a: &[char], b: &[char]) -> usize {
     let a_len = a.len();
     let b_len = b.len();
-    if a_len == 0 || b_len == 0 { return 0; }
+    if a_len == 0 || b_len == 0 {
+        return 0;
+    }
     let mut prev = vec![0usize; b_len + 1];
     for i in 1..=a_len {
         let mut curr = vec![0usize; b_len + 1];
@@ -411,4 +481,46 @@ fn lcs_len(a: &[char], b: &[char]) -> usize {
         prev = curr;
     }
     prev[b_len]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_thought_tags_removes_both_tags_in_documented_order() {
+        let (content, emotional_impact, action_potential) =
+            parse_thought_tags("今天想早点休息 [-0.4] [0.7]");
+
+        assert_eq!(content, "今天想早点休息");
+        assert!((emotional_impact + 0.4).abs() < f32::EPSILON);
+        assert!((action_potential - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn parse_thought_tags_keeps_single_tag_as_emotional_impact() {
+        let (content, emotional_impact, action_potential) =
+            parse_thought_tags("明天的事明天再说 [0.3]");
+
+        assert_eq!(content, "明天的事明天再说");
+        assert!((emotional_impact - 0.3).abs() < f32::EPSILON);
+        assert_eq!(action_potential, 0.0);
+    }
+
+    #[test]
+    fn recent_inner_thought_context_excludes_existing_topics() {
+        let thoughts = vec![InnerThought {
+            content: "晚上打影之刃零，比等回话有意思。".to_string(),
+            timestamp: 1,
+            emotional_impact: 0.3,
+            action_potential: 0.0,
+            faded: false,
+            recall_count: 0,
+        }];
+
+        let context = recent_inner_thought_context(&thoughts, 8).unwrap();
+
+        assert!(context.contains("禁止换词重复"));
+        assert!(context.contains("晚上打影之刃零，比等回话有意思。"));
+    }
 }

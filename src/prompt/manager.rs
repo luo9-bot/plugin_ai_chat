@@ -127,6 +127,7 @@ impl PromptManager {
             ("memory_extract", include_str!("../../defaults/memory_extract.prompt")),
             ("memory_summarize", include_str!("../../defaults/memory_summarize.prompt")),
             ("self_reflect", include_str!("../../defaults/self_reflect.prompt")),
+            ("task_progress", include_str!("../../defaults/task_progress.prompt")),
             ("proactive_message", include_str!("../../defaults/proactive_message.prompt")),
             ("mental_state_generate", include_str!("../../defaults/mental_state_generate.prompt")),
             ("vision_describe", include_str!("../../defaults/vision_describe.prompt")),

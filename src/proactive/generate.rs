@@ -3,9 +3,9 @@ use tracing::debug;
 use crate::config;
 use crate::emotion;
 use crate::memory;
+use crate::read_shared_state;
 use crate::self_memory;
 use crate::working_memory;
-use crate::read_shared_state;
 
 /// 用 AI 生成主动消息，失败返回 None
 pub fn ai_generate_message(
@@ -28,18 +28,42 @@ pub fn ai_generate_message(
 
     // 时间
     let hour = crate::util::current_hour_cst();
-    let time_desc = if hour < 6 { "深夜" } else if hour < 9 { "早上" } else if hour < 12 { "上午" }
-        else if hour < 14 { "中午" } else if hour < 18 { "下午" }
-        else if hour < 21 { "晚上" } else { "深夜" };
+    let time_desc = if hour < 6 {
+        "深夜"
+    } else if hour < 9 {
+        "早上"
+    } else if hour < 12 {
+        "上午"
+    } else if hour < 14 {
+        "中午"
+    } else if hour < 18 {
+        "下午"
+    } else if hour < 21 {
+        "晚上"
+    } else {
+        "深夜"
+    };
     ctx.push(format!("# 当前时间\n{}:00 ({})", hour, time_desc));
 
     // 情绪
-    ctx.push(format!("# 情绪状态\n{}, intensity: {}", emo.current.as_str(), emo.intensity));
+    ctx.push(format!(
+        "# 情绪状态\n{}, intensity: {}",
+        emo.current.as_str(),
+        emo.intensity
+    ));
 
     // 内心独白（仅供内部参考，不要说出去）
     let self_thoughts = self_memory::get_context(10);
     if !self_thoughts.is_empty() {
-        ctx.push(format!("# 你的内心想法（仅作为内部参考，不要直接说出来）\n{}", self_thoughts));
+        ctx.push(format!(
+            "# 你的内心想法（仅作为内部参考，不要直接说出来）\n{}",
+            self_thoughts
+        ));
+    }
+
+    let task_context = crate::personal_tasks::get_context(5);
+    if !task_context.is_empty() {
+        ctx.push(task_context);
     }
 
     // 注入内心独白上下文
@@ -54,7 +78,8 @@ pub fn ai_generate_message(
     let (reply_status, last_topic) = crate::proactive::trigger::check_reply_status(group_id);
     let reply_ctx = match reply_status {
         crate::proactive::trigger::ReplyStatus::RepliedToBot => {
-            "# 你刚才说的话有没有人回复\n情况：有人回复了你。对话正在进行中，可以自然接话。".to_string()
+            "# 你刚才说的话有没有人回复\n情况：有人回复了你。对话正在进行中，可以自然接话。"
+                .to_string()
         }
         crate::proactive::trigger::ReplyStatus::OthersTalking => {
             format!(
@@ -91,21 +116,28 @@ pub fn ai_generate_message(
         let self_qq = crate::config::get().self_qq;
         if self_qq > 0 {
             let entries = working_memory::get_recent(group_id, 86400, 30);
-            let bot_lines: Vec<String> = entries.iter()
+            let bot_lines: Vec<String> = entries
+                .iter()
                 .filter(|e| e.user_id == self_qq)
                 .map(|e| format!("  \"{}\"", e.content))
                 .collect();
             if !bot_lines.is_empty() {
-                ctx.push(format!("# 你刚才在群里说过的话（不要重复这些）\n{}", bot_lines.join("\n")));
+                ctx.push(format!(
+                    "# 你刚才在群里说过的话（不要重复这些）\n{}",
+                    bot_lines.join("\n")
+                ));
             }
         }
     } else if group_id == 0 {
         // 私聊：从对话历史中获取最近几轮对话，让 AI 知道聊到哪了
         let history = read_shared_state(|s| s.get_history_clone(0, user_id));
         if !history.is_empty() {
-            let recent: Vec<String> = history.iter().rev().take(8).map(|(role, content)| {
-                format!("[{}] {}", role, content)
-            }).collect();
+            let recent: Vec<String> = history
+                .iter()
+                .rev()
+                .take(8)
+                .map(|(role, content)| format!("[{}] {}", role, content))
+                .collect();
             ctx.push(format!("# 最近的私聊对话\n{}", recent.join("\n")));
         }
     }
@@ -158,7 +190,11 @@ pub fn ai_generate_message(
 
     // 主动消息生成使用对话温度与更高的 top_p，避免低采样下反复输出相同内容
     match crate::ai::analyze_with_tools_cfg(
-        &format!("{}\n\n{}", user_prompt, crate::prompt::PromptManager::get().raw("proactive_message")),
+        &format!(
+            "{}\n\n{}",
+            user_prompt,
+            crate::prompt::PromptManager::get().raw("proactive_message")
+        ),
         &full_context,
         &[crate::ai::proactive_message_tool()],
         Some(serde_json::json!("auto")),
@@ -167,7 +203,10 @@ pub fn ai_generate_message(
     ) {
         Ok(parsed) => {
             // 如果 AI 选择跳过，不发送
-            let should_skip = parsed.get("skip").and_then(|v| v.as_bool()).unwrap_or(false);
+            let should_skip = parsed
+                .get("skip")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if should_skip {
                 debug!("proactive: AI chose to skip");
                 return None;
