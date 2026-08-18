@@ -286,7 +286,7 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
     }
 
     if with_state(|s| s.active.contains(&user_id)) {
-        crate::proactive::record_user_reply(user_id);
+        crate::proactive::record_private_user_reply(user_id);
         crate::emotion::analyze_user_message(user_id, trimmed);
 
         // 表情包自动注册（同群聊逻辑）

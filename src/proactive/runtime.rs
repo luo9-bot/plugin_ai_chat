@@ -14,6 +14,18 @@ pub struct ProactiveState {
     pub last_user_reply: u64,
     pub last_working_memory_ts: u64,
     pub pending_reminders: Vec<DateReminder>,
+    /// 私聊连续未得到回应的主动消息次数，用于逐步降低联系频率。
+    #[serde(default)]
+    pub private_silence_streak: u32,
+    /// 连续主动回复次数；达到阈值后才恢复热络状态。
+    #[serde(default)]
+    pub private_reengagement_streak: u32,
+    /// 上次克制地表达被冷落的时间，防止变成催促。
+    #[serde(default)]
+    pub last_hurt_check_in: u64,
+    /// 私聊下一次允许主动决策的时间，避免每分钟重新随机评估同一段关系。
+    #[serde(default)]
+    pub next_private_contact_at: u64,
 }
 
 impl Default for ProactiveState {
@@ -25,6 +37,10 @@ impl Default for ProactiveState {
             last_user_reply: now,
             last_working_memory_ts: 0,
             pending_reminders: Vec::new(),
+            private_silence_streak: 0,
+            private_reengagement_streak: 0,
+            last_hurt_check_in: 0,
+            next_private_contact_at: 0,
         }
     }
 }
@@ -168,10 +184,37 @@ pub fn record_user_reply(user_id: u64) {
     save_state(user_id, &state);
 }
 
+/// 只在私聊收到回应时调用，逐步恢复此前冷却的联系频率。
+pub fn record_private_user_reply(user_id: u64) {
+    let mut state = load_state(user_id);
+    state.last_user_reply = crate::util::now_secs();
+    state.ignore_count = 0;
+    state.next_private_contact_at = 0;
+    if state.private_silence_streak > 0 {
+        state.private_reengagement_streak += 1;
+        // 真正恢复热聊需要连续回应，不因一句礼貌回复就马上恢复高频。
+        if state.private_reengagement_streak >= 2 {
+            state.private_silence_streak = 0;
+            state.private_reengagement_streak = 0;
+        } else {
+            state.private_silence_streak -= 1;
+        }
+    }
+    save_state(user_id, &state);
+}
+
 pub fn record_sent(user_id: u64, group_id: u64) {
     let mut state = load_state(user_id);
     state.last_sent = crate::util::now_secs();
     state.ignore_count += 1;
+    if group_id == 0 {
+        state.private_silence_streak = state.private_silence_streak.saturating_add(1);
+        state.private_reengagement_streak = 0;
+        let base_interval = config::get().proactive.interval;
+        state.next_private_contact_at = crate::util::now_secs().saturating_add(
+            private_contact_interval(base_interval, state.private_silence_streak),
+        );
+    }
     if group_id > 0 {
         state.last_working_memory_ts = crate::working_memory::get_latest_user_message_ts(group_id);
     }
@@ -180,6 +223,64 @@ pub fn record_sent(user_id: u64, group_id: u64) {
     // 群级同步：更新群组最近发送时间
     if group_id > 0 {
         update_group_last_sent(group_id);
+    }
+}
+
+/// 私聊的退避间隔。连续未回复时由正常频率逐步拉长到零散联系。
+pub fn private_contact_interval(base_interval: u64, silence_streak: u32) -> u64 {
+    let multiplier = match silence_streak {
+        0 => 1,
+        1 => 4,
+        2 => 12,
+        3 => 48,
+        _ => 168,
+    };
+    base_interval.saturating_mul(multiplier)
+}
+
+/// 只有被长期冷落且此前未表达过时，才允许一次克制的确认。
+pub fn can_send_hurt_check_in(state: &ProactiveState, now: u64, is_darling: bool) -> bool {
+    const MIN_SILENCE_SECS: u64 = 24 * 3600;
+    const CHECK_IN_COOLDOWN_SECS: u64 = 7 * 24 * 3600;
+
+    is_darling
+        && state.private_silence_streak >= 2
+        && now.saturating_sub(state.last_user_reply) >= MIN_SILENCE_SECS
+        && now.saturating_sub(state.last_hurt_check_in) >= CHECK_IN_COOLDOWN_SECS
+}
+
+/// 记录一次已成功发送的克制确认；此后进入更长的自然沉默。
+pub fn record_hurt_check_in(user_id: u64) {
+    let mut state = load_state(user_id);
+    state.last_hurt_check_in = crate::util::now_secs();
+    state.private_silence_streak = state.private_silence_streak.max(3);
+    state.private_reengagement_streak = 0;
+    save_state(user_id, &state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_contact_interval_uses_progressive_backoff() {
+        assert_eq!(private_contact_interval(3600, 0), 3600);
+        assert_eq!(private_contact_interval(3600, 1), 14400);
+        assert_eq!(private_contact_interval(3600, 2), 43200);
+        assert_eq!(private_contact_interval(3600, 4), 604800);
+    }
+
+    #[test]
+    fn hurt_check_in_needs_long_silence_and_weekly_cooldown() {
+        let now = 2_000_000;
+        let state = ProactiveState {
+            private_silence_streak: 2,
+            last_user_reply: now - 24 * 3600,
+            last_hurt_check_in: now - 7 * 24 * 3600,
+            ..ProactiveState::default()
+        };
+        assert!(can_send_hurt_check_in(&state, now, true));
+        assert!(!can_send_hurt_check_in(&state, now, false));
     }
 }
 

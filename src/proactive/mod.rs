@@ -7,10 +7,11 @@ pub mod motivation;
 
 // runtime.rs
 pub use runtime::{
-    ProactiveState, DateReminder, RuntimeConfig,
-    user_count, record_user_reply, record_sent, add_date_reminder,
+    ProactiveState, DateReminder, RuntimeConfig, load_state,
+    user_count, record_user_reply, record_private_user_reply, record_sent, add_date_reminder,
     set_enabled, set_quiet_hours, set_interval,
-    get_group_last_sent,
+    get_group_last_sent, private_contact_interval, can_send_hurt_check_in,
+    record_hurt_check_in,
 };
 
 // trigger.rs

@@ -37,6 +37,9 @@ const RECENT_MSG_KEEP: usize = 40;
 /// 主动消息"生成了但被拦截"后的冷却时间（秒）
 const GENERATION_BLOCK_COOLDOWN_SECS: u64 = 600;
 
+/// 群聊主动插话只发生在真实对话仍在延续时，不主动唤醒沉默的群。
+const GROUP_CONVERSATION_ACTIVE_SECS: u64 = 15 * 60;
+
 /// 上次生成被拦截的时间：key = (user_id, group_id) -> timestamp
 static LAST_BLOCKED_GENERATION: Mutex<Option<HashMap<(u64, u64), u64>>> = Mutex::new(None);
 
@@ -336,6 +339,62 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
         return;
     }
 
+    if group_id > 0 {
+        let latest_user_message = crate::working_memory::get_latest_user_message_ts(group_id);
+        let group_idle_secs = now.saturating_sub(latest_user_message);
+        if latest_user_message == 0 || group_idle_secs > GROUP_CONVERSATION_ACTIVE_SECS {
+            debug!(
+                group_id,
+                group_idle_secs,
+                "proactive: group conversation is idle, not starting a topic"
+            );
+            return;
+        }
+    }
+
+    let time_since_last = now.saturating_sub(state.last_sent);
+    let time_since_reply = now.saturating_sub(state.last_user_reply);
+
+    // 私聊比群聊更像一段关系：没有回应就逐步退开，所有后续主动路径都必须通过这里。
+    if group_id == 0 {
+        if state.next_private_contact_at > now && state.last_sent > state.last_user_reply {
+            debug!(
+                user_id,
+                next_private_contact_at = state.next_private_contact_at,
+                "proactive: private next-contact window not open"
+            );
+            return;
+        }
+
+        let is_darling = crate::config::get().darling_qq > 0
+            && crate::config::get().darling_qq == user_id;
+        if crate::proactive::can_send_hurt_check_in(&state, now, is_darling) {
+            let message = "你怎么不理我呀，是不是我哪里惹你烦了？没事的话回我一下就好。";
+            if sender::safe_send_quiet(group_id, user_id, message) {
+                record_sent(user_id, group_id);
+                crate::proactive::record_hurt_check_in(user_id);
+                push_proactive_to_history(group_id, user_id, message);
+                debug!(user_id, "proactive: sent restrained hurt check-in");
+            }
+            return;
+        }
+
+        let private_interval = crate::proactive::private_contact_interval(
+            interval,
+            state.private_silence_streak,
+        );
+        if time_since_last < private_interval {
+            debug!(
+                user_id,
+                silence_streak = state.private_silence_streak,
+                time_since_last,
+                private_interval,
+                "proactive: private relationship cooling down"
+            );
+            return;
+        }
+    }
+
     // 日期提醒 -- 最高优先级
     if let Some(reminder_msg) = check_date_reminders(user_id, &state) {
         if is_duplicate_message(group_id, user_id, &reminder_msg) {
@@ -353,7 +412,9 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
 
     // 任务跟进只针对有明确对象、且已到复查时间的事项。
     // 它仍然遵从群冷却、消息去重和安全发送，不能借任务名义反复催促。
-    if let Some(task) = crate::personal_tasks::due_social_follow_up(user_id, group_id) {
+    if group_id == 0
+        && let Some(task) = crate::personal_tasks::due_social_follow_up(user_id, group_id)
+    {
         let emotion = emotion::get_state(user_id);
         let task_context = format!(
             "这是一个真实待推进事项：{}。当前下一步是：{}。只在自然合适时发一条简短跟进；若不合适就 skip。",
@@ -380,9 +441,6 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             mark_blocked_generation(user_id, group_id);
         }
     }
-
-    let time_since_last = now.saturating_sub(state.last_sent);
-    let time_since_reply = now.saturating_sub(state.last_user_reply);
 
     // ── 回复状态检测：bot 最近的消息有没有人回复？ ──
     let (reply_status, last_topic) = check_reply_status(group_id);
@@ -442,6 +500,13 @@ pub fn check_proactive_messages(user_id: u64, group_id: u64) {
             tracing::debug!(user_id, group_id, last_ts = state.last_working_memory_ts, latest_ts, "proactive: no new messages since last send, skipping");
             return;
         }
+    }
+
+    // 群聊的自然参与由批处理回复和真实生活事件承载。全局动机只会随时间增长，
+    // 与具体群的对话无关，拿它来开场会稳定地产生机械的报时、点名和冒泡消息。
+    if group_id > 0 {
+        debug!(group_id, "proactive: group generic initiative disabled");
+        return;
     }
 
     let emo = emotion::get_state(user_id);

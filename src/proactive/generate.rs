@@ -20,6 +20,13 @@ pub fn ai_generate_message(
     // 场景标识
     if group_id == 0 {
         ctx.push("# 场景\n私聊（一对一聊天）".to_string());
+        let private_state = crate::proactive::load_state(user_id);
+        if private_state.private_silence_streak >= 2 {
+            ctx.push(
+                "# 私聊关系状态\n对方此前没有回应你的消息。现在保持克制，不催促、不抱怨；除非系统明确要求，否则优先选择 skip。"
+                    .to_string(),
+            );
+        }
     } else {
         ctx.push(format!("# 场景\n群聊（group_id: {}）", group_id));
     }

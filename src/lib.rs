@@ -404,24 +404,31 @@ fn check_periodic() {
         }
     });
 
-    // 群聊用户: 从 SharedState 获取 contexts，从 State 获取 active_groups
+    // 群聊按群而不是按成员决策。把每个成员都当成主动触发对象，会让同一群轮流
+    // 使用不同成员的冷却状态，表现成定时轮番喊话。
     let active_groups: std::collections::HashSet<u64> = with_state(|s| s.active_groups.clone());
+    let mut proactive_groups: std::collections::HashSet<u64> = std::collections::HashSet::new();
     read_shared_state(|s| {
-        for (&(gid, uid), ctx) in &s.contexts {
+        for (&(gid, _uid), ctx) in &s.contexts {
             if gid > 0 && active_groups.contains(&gid) && !ctx.history.is_empty() {
-                all_users.push((uid, gid));
+                proactive_groups.insert(gid);
             }
         }
     });
 
-    // 也包含当前有活跃批次的用户 (thread_local State)
+    // 也包含当前有活跃批次的群。
     with_state(|s| {
-        for &(gid, uid) in s.batches.keys() {
+        for &(gid, _uid) in s.batches.keys() {
             if gid > 0 {
-                all_users.push((uid, gid));
+                proactive_groups.insert(gid);
             }
         }
     });
+
+    let self_qq = config::get().self_qq;
+    for group_id in proactive_groups {
+        all_users.push((self_qq, group_id));
+    }
 
     all_users.sort_unstable();
     all_users.dedup();

@@ -110,7 +110,8 @@ pub fn try_generate() -> Option<InnerThought> {
         });
         if is_dup {
             debug!(content = %t.content, "inner_thought: skipped duplicate thought");
-            // 不推进生成时间。下一次周期会带着重复反馈重新生成，而不是静默空转。
+            // 重复结果也要推进冷却，否则每分钟都会重复调用模型并记录同一日志。
+            store.last_generation = now;
             store.save();
             return None;
         }
