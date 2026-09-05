@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// 记忆重要性
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,13 +73,13 @@ fn group_user_path(group_id: u64, user_id: u64) -> PathBuf {
 
 // ── 文件 I/O ────────────────────────────────────────────────────
 
-fn ensure_dir(path: &PathBuf) {
+fn ensure_dir(path: &Path) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).ok();
     }
 }
 
-fn load_json<T: serde::de::DeserializeOwned + Default>(path: &PathBuf) -> T {
+fn load_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
     match fs::read_to_string(path) {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
         Err(_) => T::default(),
@@ -139,12 +139,16 @@ pub fn init() {
 
     // 迁移旧数据（如果存在）
     let old_path = crate::config::data_dir().join("memory.json");
-    if old_path.exists() && fs::read_dir(&new_dir.join("users")).map(|mut d| d.next().is_none()).unwrap_or(true) {
+    if old_path.exists()
+        && fs::read_dir(new_dir.join("users"))
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true)
+    {
         tracing::info!("memory: migrating from old memory.json to new directory structure");
-        if let Ok(content) = fs::read_to_string(&old_path) {
-            if let Ok(old_store) = serde_json::from_str::<OldMemoryStore>(&content) {
-                migrate_old_store(&old_store);
-            }
+        if let Ok(content) = fs::read_to_string(&old_path)
+            && let Ok(old_store) = serde_json::from_str::<OldMemoryStore>(&content)
+        {
+            migrate_old_store(&old_store);
         }
         // 备份旧文件
         let backup = crate::config::data_dir().join("memory.json.bak");
@@ -155,7 +159,10 @@ pub fn init() {
 
 fn migrate_old_store(old: &OldMemoryStore) {
     for (uid_str, user_mem) in &old.users {
-        let uid: u64 = match uid_str.parse() { Ok(id) => id, Err(_) => continue };
+        let uid: u64 = match uid_str.parse() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
         let mut global = MemoryFile::default();
         let mut groups: HashMap<u64, MemoryFile> = HashMap::new();
 
@@ -184,7 +191,10 @@ fn migrate_old_store(old: &OldMemoryStore) {
     // 迁移群级别记忆
     if let Some(ref group_mems) = old.group_memories {
         for (gid_str, entries) in group_mems {
-            let gid: u64 = match gid_str.parse() { Ok(id) => id, Err(_) => continue };
+            let gid: u64 = match gid_str.parse() {
+                Ok(id) => id,
+                Err(_) => continue,
+            };
             let mut mem = MemoryFile::default();
             for old_entry in entries {
                 mem.entries.push(MemoryEntry {
@@ -215,10 +225,9 @@ pub fn all_user_ids() -> Vec<u64> {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str()
                 && name.ends_with(".json")
+                && let Ok(uid) = name.trim_end_matches(".json").parse::<u64>()
             {
-                if let Ok(uid) = name.trim_end_matches(".json").parse::<u64>() {
-                    ids.push(uid);
-                }
+                ids.push(uid);
             }
         }
     }

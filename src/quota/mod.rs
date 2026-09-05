@@ -1,7 +1,7 @@
-mod store;
-mod segment;
 mod interest;
+mod segment;
+mod store;
 
-pub use store::{init, SegmentMessage, UserInterest, SegmentLogEntry};
-pub use segment::*;
 pub use interest::*;
+pub use segment::*;
+pub use store::{SegmentLogEntry, SegmentMessage, UserInterest, init};

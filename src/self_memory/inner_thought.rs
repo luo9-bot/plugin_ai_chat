@@ -126,11 +126,7 @@ pub fn try_generate() -> Option<InnerThought> {
 
         // 可能触发情绪变化
         if t.emotional_impact.abs() > 0.3 {
-            let emo_type = if t.emotional_impact > 0.0 {
-                crate::emotion::EmotionType::Thinking
-            } else {
-                crate::emotion::EmotionType::Thinking
-            };
+            let emo_type = crate::emotion::EmotionType::Thinking;
             let mut emo_state = crate::emotion::get_state(0);
             emo_state.update_emotional_dynamics(
                 Some((
@@ -396,9 +392,9 @@ pub fn recall_thought(content_hint: &str) -> Option<InnerThought> {
         thought.recall_count += 1;
         result = Some(thought.clone());
     }
-    if result.is_some() {
+    if let Some(recalled) = &result {
         store.save();
-        debug!(content = %result.as_ref().unwrap().content, "inner_thought: recalled");
+        debug!(content = %recalled.content, "inner_thought: recalled");
     }
     result
 }
@@ -414,7 +410,7 @@ fn normalize_thought(s: &str) -> String {
             '[' => in_bracket = true,
             ']' => in_bracket = false,
             _ if !in_bracket => {
-                if c.is_alphanumeric() || (c >= '\u{4e00}' && c <= '\u{9fff}') {
+                if c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&c) {
                     result.push(c);
                 }
             }

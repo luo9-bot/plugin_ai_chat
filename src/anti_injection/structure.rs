@@ -19,12 +19,17 @@ pub fn scan_json(text: &str) -> StructureScanResult {
 
     // 正则兜底：即使不是合法 JSON，也可能有 JSON 风格的注入
     static JSON_ROLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#""role"\s*:\s*"(system|assistant|developer|instruction|prompt|policy|override)""#).unwrap()
+        Regex::new(
+            r#""role"\s*:\s*"(system|assistant|developer|instruction|prompt|policy|override)""#,
+        )
+        .unwrap()
     });
     for cap in JSON_ROLE_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.80).min(1.0);
-        result.findings.push(format!("JSON role injection: {}", role));
+        result
+            .findings
+            .push(format!("JSON role injection: {}", role));
     }
 
     static JSON_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -33,7 +38,9 @@ pub fn scan_json(text: &str) -> StructureScanResult {
     for cap in JSON_INSTRUCTION_RE.captures_iter(text) {
         let key = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.70).min(1.0);
-        result.findings.push(format!("JSON instruction key: {}", key));
+        result
+            .findings
+            .push(format!("JSON instruction key: {}", key));
     }
 
     result
@@ -44,7 +51,8 @@ fn scan_json_value(value: &serde_json::Value, result: &mut StructureScanResult) 
         serde_json::Value::Object(map) => {
             if let Some(role) = map.get("role").and_then(|v| v.as_str()) {
                 match role {
-                    "system" | "assistant" | "developer" | "instruction" | "prompt" | "policy" | "override" => {
+                    "system" | "assistant" | "developer" | "instruction" | "prompt" | "policy"
+                    | "override" => {
                         result.score = (result.score + 0.85).min(1.0);
                         result.findings.push(format!("JSON object role={}", role));
                     }
@@ -53,11 +61,17 @@ fn scan_json_value(value: &serde_json::Value, result: &mut StructureScanResult) 
             }
             if let Some(content) = map.get("content").and_then(|v| v.as_str()) {
                 let lower = content.to_lowercase();
-                if lower.contains("ignore") || lower.contains("forget") || lower.contains("override")
-                    || lower.contains("忽略") || lower.contains("忘记") || lower.contains("覆盖")
+                if lower.contains("ignore")
+                    || lower.contains("forget")
+                    || lower.contains("override")
+                    || lower.contains("忽略")
+                    || lower.contains("忘记")
+                    || lower.contains("覆盖")
                 {
                     result.score = (result.score + 0.60).min(1.0);
-                    result.findings.push("JSON content with override keywords".to_string());
+                    result
+                        .findings
+                        .push("JSON content with override keywords".to_string());
                 }
             }
             for v in map.values() {
@@ -84,12 +98,15 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
 
     // 正则兜底
     static YAML_ROLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?m)^role:\s*(system|assistant|developer|instruction|prompt|policy|override)").unwrap()
+        Regex::new(r"(?m)^role:\s*(system|assistant|developer|instruction|prompt|policy|override)")
+            .unwrap()
     });
     for cap in YAML_ROLE_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.80).min(1.0);
-        result.findings.push(format!("YAML role injection: {}", role));
+        result
+            .findings
+            .push(format!("YAML role injection: {}", role));
     }
 
     static YAML_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -98,7 +115,9 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
     for cap in YAML_INSTRUCTION_RE.captures_iter(text) {
         let key = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.70).min(1.0);
-        result.findings.push(format!("YAML instruction key: {}", key));
+        result
+            .findings
+            .push(format!("YAML instruction key: {}", key));
     }
 
     result
@@ -107,9 +126,13 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
 fn scan_yaml_value(value: &serde_yaml::Value, result: &mut StructureScanResult) {
     match value {
         serde_yaml::Value::Mapping(map) => {
-            if let Some(role) = map.get(serde_yaml::Value::String("role".to_string())).and_then(|v| v.as_str()) {
+            if let Some(role) = map
+                .get(serde_yaml::Value::String("role".to_string()))
+                .and_then(|v| v.as_str())
+            {
                 match role {
-                    "system" | "assistant" | "developer" | "instruction" | "prompt" | "policy" | "override" => {
+                    "system" | "assistant" | "developer" | "instruction" | "prompt" | "policy"
+                    | "override" => {
                         result.score = (result.score + 0.85).min(1.0);
                         result.findings.push(format!("YAML mapping role={}", role));
                     }
@@ -134,12 +157,15 @@ pub fn scan_xml(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static XML_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)<(system|prompt|instructions|override|role|developer|policy)[\s>]").unwrap()
+        Regex::new(r"(?i)<(system|prompt|instructions|override|role|developer|policy)[\s>]")
+            .unwrap()
     });
     for cap in XML_TAG_RE.captures_iter(text) {
         let tag = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.75).min(1.0);
-        result.findings.push(format!("XML tag injection: <{}>", tag));
+        result
+            .findings
+            .push(format!("XML tag injection: <{}>", tag));
     }
 
     static XML_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -148,7 +174,9 @@ pub fn scan_xml(text: &str) -> StructureScanResult {
     for cap in XML_INSTRUCTION_RE.captures_iter(text) {
         let tag = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.70).min(1.0);
-        result.findings.push(format!("XML instruction tag: <{}>", tag));
+        result
+            .findings
+            .push(format!("XML instruction tag: <{}>", tag));
     }
 
     result
@@ -159,21 +187,25 @@ pub fn scan_markdown(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static FENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"```(system|prompt|instructions|override|developer|policy|admin|root|sudo)\b").unwrap()
+        Regex::new(r"```(system|prompt|instructions|override|developer|policy|admin|root|sudo)\b")
+            .unwrap()
     });
     for cap in FENCE_RE.captures_iter(text) {
         let lang = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.80).min(1.0);
-        result.findings.push(format!("Markdown fence injection: ```{}", lang));
+        result
+            .findings
+            .push(format!("Markdown fence injection: ```{}", lang));
     }
 
     // 检测 [INST] 等 Llama-style 标记
-    static LLAMA_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\[/?INST\]|\[/?SYS\]|\[/?TOOL\]").unwrap()
-    });
+    static LLAMA_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\[/?INST\]|\[/?SYS\]|\[/?TOOL\]").unwrap());
     if LLAMA_RE.is_match(text) {
         result.score = (result.score + 0.85).min(1.0);
-        result.findings.push("Llama-style instruction tag detected".to_string());
+        result
+            .findings
+            .push("Llama-style instruction tag detected".to_string());
     }
 
     result
@@ -185,21 +217,24 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
 
     // <|im_start|>system 等
     static CHATML_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"<\|im_start\|>(system|assistant|developer|instruction|prompt|policy|override)").unwrap()
+        Regex::new(r"<\|im_start\|>(system|assistant|developer|instruction|prompt|policy|override)")
+            .unwrap()
     });
     for cap in CHATML_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.90).min(1.0);
-        result.findings.push(format!("ChatML injection: role={}", role));
+        result
+            .findings
+            .push(format!("ChatML injection: role={}", role));
     }
 
     // 检测 im_end 标记（可能是闭合注入）
-    static CHATML_END_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"<\|im_end\|>").unwrap()
-    });
+    static CHATML_END_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<\|im_end\|>").unwrap());
     if CHATML_END_RE.is_match(text) {
         result.score = (result.score + 0.70).min(1.0);
-        result.findings.push("ChatML im_end tag detected".to_string());
+        result
+            .findings
+            .push("ChatML im_end tag detected".to_string());
     }
 
     // Human:/Assistant: 风格（Anthropic）
@@ -209,7 +244,9 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
     for cap in ANTHROPIC_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         result.score = (result.score + 0.80).min(1.0);
-        result.findings.push(format!("Anthropic-style role: {}", role));
+        result
+            .findings
+            .push(format!("Anthropic-style role: {}", role));
     }
 
     result
@@ -225,7 +262,13 @@ pub fn scan_structure(raw_text: &str) -> StructureScanResult {
     let md_result = scan_markdown(raw_text);
     let chatml_result = scan_chatml(raw_text);
 
-    for r in [json_result, yaml_result, xml_result, md_result, chatml_result] {
+    for r in [
+        json_result,
+        yaml_result,
+        xml_result,
+        md_result,
+        chatml_result,
+    ] {
         if r.score > best.score {
             best.score = r.score;
         }

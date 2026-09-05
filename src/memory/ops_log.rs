@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 const MAX_ENTRIES: usize = 1000;

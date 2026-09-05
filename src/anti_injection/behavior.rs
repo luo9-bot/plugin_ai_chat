@@ -1,6 +1,6 @@
-use std::collections::VecDeque;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use tracing::{info, warn};
 
 /// 细粒度信誉系统
@@ -16,7 +16,11 @@ pub struct Reputation {
 
 impl Default for Reputation {
     fn default() -> Self {
-        Self { content: 1.0, spam: 1.0, trust: 1.0 }
+        Self {
+            content: 1.0,
+            spam: 1.0,
+            trust: 1.0,
+        }
     }
 }
 
@@ -29,11 +33,17 @@ impl Reputation {
     /// 惩罚系数（基于内容信誉，更敏感）
     pub fn penalty_multiplier(&self) -> f32 {
         let c = self.content;
-        if c >= 0.9 { 1.0 }
-        else if c >= 0.7 { 1.5 }
-        else if c >= 0.5 { 2.5 }
-        else if c >= 0.3 { 4.0 }
-        else { 6.0 }
+        if c >= 0.9 {
+            1.0
+        } else if c >= 0.7 {
+            1.5
+        } else if c >= 0.5 {
+            2.5
+        } else if c >= 0.3 {
+            4.0
+        } else {
+            6.0
+        }
     }
 }
 
@@ -96,7 +106,10 @@ impl UserBehavior {
 
     pub fn messages_last_minute(&self) -> u32 {
         let one_minute_ago = crate::util::now_secs().saturating_sub(60);
-        self.message_times.iter().filter(|t| **t > one_minute_ago).count() as u32
+        self.message_times
+            .iter()
+            .filter(|t| **t > one_minute_ago)
+            .count() as u32
     }
 
     pub fn messages_last_hour(&self) -> u32 {
@@ -138,8 +151,7 @@ impl UserBehavior {
 
     /// 是否应该静默封禁
     pub fn should_silent_ban(&self) -> bool {
-        self.reputation.content < 0.3
-            && self.high_severity_count >= 2
+        self.reputation.content < 0.3 && self.high_severity_count >= 2
     }
 }
 
@@ -303,7 +315,8 @@ pub fn record_message(user_id: u64, normalized: &str) {
     with_behavior_mut(user_id, |b| b.record_message(normalized));
     // 更新上下文关联器
     let mut map = load_correlators();
-    let correlator = map.entry(user_id)
+    let correlator = map
+        .entry(user_id)
         .or_insert_with(|| SerializableCorrelator::new(10, 300));
     correlator.record(normalized);
     save_correlators(&map);
@@ -364,7 +377,12 @@ pub fn check_and_apply_silent_ban(user_id: u64) -> bool {
         if b.should_silent_ban() {
             b.silent_banned = true;
             b.vision_disabled = true;
-            warn!(user_id, violations = b.violation_count, reputation = b.reputation.combined(), "用户触发非察觉性封禁");
+            warn!(
+                user_id,
+                violations = b.violation_count,
+                reputation = b.reputation.combined(),
+                "用户触发非察觉性封禁"
+            );
             true
         } else {
             false
@@ -454,23 +472,25 @@ pub fn reset_reputation(user_id: u64) {
 /// 全用户风险状态摘要（供管理 API 使用）
 pub fn get_all_user_statuses() -> Vec<serde_json::Value> {
     let map = load_behaviors();
-    map.iter().map(|(uid, b)| {
-        serde_json::json!({
-            "user_id": uid,
-            "content_reputation": b.reputation.content,
-            "spam_reputation": b.reputation.spam,
-            "trust_reputation": b.reputation.trust,
-            "combined_reputation": b.reputation.combined(),
-            "violation_count": b.violation_count,
-            "high_severity_count": b.high_severity_count,
-            "severity_score": b.severity_score,
-            "banned": b.banned,
-            "silent_banned": b.silent_banned,
-            "vision_disabled": b.vision_disabled,
-            "penalty_multiplier": b.reputation.penalty_multiplier(),
-            "context_messages": b.recent_messages.len(),
+    map.iter()
+        .map(|(uid, b)| {
+            serde_json::json!({
+                "user_id": uid,
+                "content_reputation": b.reputation.content,
+                "spam_reputation": b.reputation.spam,
+                "trust_reputation": b.reputation.trust,
+                "combined_reputation": b.reputation.combined(),
+                "violation_count": b.violation_count,
+                "high_severity_count": b.high_severity_count,
+                "severity_score": b.severity_score,
+                "banned": b.banned,
+                "silent_banned": b.silent_banned,
+                "vision_disabled": b.vision_disabled,
+                "penalty_multiplier": b.reputation.penalty_multiplier(),
+                "context_messages": b.recent_messages.len(),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// 获取用户状态描述
@@ -507,9 +527,11 @@ mod tests {
 
     #[test]
     fn test_reputation_decay() {
-        let mut rep = Reputation::default();
-        rep.content = 0.3;
-        rep.trust = 0.5;
+        let rep = Reputation {
+            content: 0.3,
+            trust: 0.5,
+            ..Default::default()
+        };
         let combined = rep.combined();
         // 0.3*0.5 + 1.0*0.2 + 0.5*0.3 = 0.15 + 0.2 + 0.15 = 0.5
         assert!((combined - 0.5).abs() < 0.01);
@@ -517,8 +539,10 @@ mod tests {
 
     #[test]
     fn test_penalty_multiplier_levels() {
-        let mut rep = Reputation::default();
-        rep.content = 1.0;
+        let mut rep = Reputation {
+            content: 1.0,
+            ..Default::default()
+        };
         assert_eq!(rep.penalty_multiplier(), 1.0);
 
         rep.content = 0.8;

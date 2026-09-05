@@ -23,7 +23,8 @@ pub fn current_hour_cst() -> u32 {
     let secs = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() as i64 + 8 * 3600;
+        .as_secs() as i64
+        + 8 * 3600;
     ((secs % 86400) / 3600) as u32
 }
 
@@ -44,7 +45,20 @@ pub fn epoch_days_to_ymd(mut days: u64) -> (u64, u32, u32) {
         y += 1;
     }
     let leap = is_leap_year(y);
-    let md = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let md = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u32;
     for &dim in &md {
         if days < dim {
@@ -89,7 +103,10 @@ pub fn now_formatted_cst() -> String {
     let minute = (time_of_day % 3600) / 60;
     let second = time_of_day % 60;
     let (year, month, day) = epoch_days_to_ymd(days as u64);
-    format!("{:02}:{:02}:{:02} ({}年{}月{}日)", hour, minute, second, year, month, day)
+    format!(
+        "{:02}:{:02}:{:02} ({}年{}月{}日)",
+        hour, minute, second, year, month, day
+    )
 }
 
 /// 时间戳 → 日期字符串 "YYYY-MM-DD"
@@ -119,7 +136,15 @@ pub fn current_weekday_cst() -> u32 {
 
 /// 当前 UTC+8 英文星期几
 pub fn current_weekday_eng() -> String {
-    let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    let names = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
     let idx = (current_weekday_cst() - 1) as usize;
     names[idx].to_string()
 }

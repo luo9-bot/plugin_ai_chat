@@ -4,27 +4,44 @@
 //! 1. 关键词预筛选（快速，无 AI 调用）
 //! 2. Tool 判断（AI 调用，综合上下文）
 
-
 /// 告别词
 const FAREWELL_PATTERNS: &[&str] = &[
-    "晚安", "好了", "先这样", "拜拜", "下次聊", "去忙吧", "去睡了",
-    "困了", "要睡了", "先睡了", "休息了", "挂了", "走了",
+    "晚安",
+    "好了",
+    "先这样",
+    "拜拜",
+    "下次聊",
+    "去忙吧",
+    "去睡了",
+    "困了",
+    "要睡了",
+    "先睡了",
+    "休息了",
+    "挂了",
+    "走了",
 ];
 
 /// 简短确认词
 const SHORT_CONFIRM: &[&str] = &[
-    "好", "嗯", "行", "好的", "嗯嗯", "知道了", "ok", "嗯好",
-    "好嘞", "好哒", "行吧", "好吧", "知道了知道了",
+    "好",
+    "嗯",
+    "行",
+    "好的",
+    "嗯嗯",
+    "知道了",
+    "ok",
+    "嗯好",
+    "好嘞",
+    "好哒",
+    "行吧",
+    "好吧",
+    "知道了知道了",
 ];
 
 /// 关键词预筛选：快速判断对话可能已结束
 ///
 /// 返回 true 表示需要进一步 AI 判断
-pub fn keyword_screen(
-    bot_last_message: &str,
-    user_message: &str,
-    current_hour: u32,
-) -> bool {
+pub fn keyword_screen(bot_last_message: &str, user_message: &str, current_hour: u32) -> bool {
     let trimmed = user_message.trim();
 
     // 检查是否是简短确认
@@ -34,7 +51,9 @@ pub fn keyword_screen(
     }
 
     // 检查 bot 是否说了告别词
-    let bot_said_farewell = FAREWELL_PATTERNS.iter().any(|p| bot_last_message.contains(p));
+    let bot_said_farewell = FAREWELL_PATTERNS
+        .iter()
+        .any(|p| bot_last_message.contains(p));
 
     // 深夜时间
     let is_late_night = !(6..23).contains(&current_hour);

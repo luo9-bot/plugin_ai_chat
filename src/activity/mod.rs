@@ -163,7 +163,8 @@ pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
         let now = crate::util::now_secs();
         let effective_expires = if is_darling(user_id) {
             state.started_at
-                + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO) as u64
+                + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO)
+                    as u64
         } else {
             state.expires_at
         };
@@ -232,11 +233,11 @@ pub fn get_pending_life_event(_user_id: u64) -> Option<LifeEvent> {
     // 优先级 3: 刚完成的活动（2 小时内完成的）
     {
         let completed = COMPLETED_ACTIVITIES.lock().unwrap();
-        if let Some(last) = completed.last() {
-            if now.saturating_sub(last.finished_at) < 600 {
-                // 10 分钟内刚完成的
-                return Some(LifeEvent::ActivityCompleted(last.activity.clone()));
-            }
+        if let Some(last) = completed.last()
+            && now.saturating_sub(last.finished_at) < 600
+        {
+            // 10 分钟内刚完成的
+            return Some(LifeEvent::ActivityCompleted(last.activity.clone()));
         }
     }
 
@@ -325,29 +326,48 @@ fn detect_activity(message: &str) -> Option<ActivityType> {
             return Some(ActivityType::Custom(format!("执行计划：{}", goal)));
         }
     }
-    if message.contains("训练") || message.contains("健身") || message.contains("跑步")
-        || message.contains("运动") || message.contains("打球") || message.contains("游泳")
+    if message.contains("训练")
+        || message.contains("健身")
+        || message.contains("跑步")
+        || message.contains("运动")
+        || message.contains("打球")
+        || message.contains("游泳")
     {
         return Some(ActivityType::Training);
     }
-    if message.contains("吃饭") || message.contains("去吃") || message.contains("干饭")
-        || message.contains("外卖到了") || message.contains("做饭")
+    if message.contains("吃饭")
+        || message.contains("去吃")
+        || message.contains("干饭")
+        || message.contains("外卖到了")
+        || message.contains("做饭")
     {
         return Some(ActivityType::Eating);
     }
-    if message.contains("睡觉") || message.contains("睡了") || message.contains("晚安")
-        || message.contains("休息") || message.contains("困了") || message.contains("去睡")
+    if message.contains("睡觉")
+        || message.contains("睡了")
+        || message.contains("晚安")
+        || message.contains("休息")
+        || message.contains("困了")
+        || message.contains("去睡")
     {
         return Some(ActivityType::Sleeping);
     }
-    if message.contains("上班") || message.contains("开会") || message.contains("加班")
-        || message.contains("学习") || message.contains("写代码") || message.contains("上课")
-        || message.contains("去忙") || message.contains("忙了")
+    if message.contains("上班")
+        || message.contains("开会")
+        || message.contains("加班")
+        || message.contains("学习")
+        || message.contains("写代码")
+        || message.contains("上课")
+        || message.contains("去忙")
+        || message.contains("忙了")
     {
         return Some(ActivityType::Working);
     }
-    if message.contains("出去") || message.contains("出门") || message.contains("走了")
-        || message.contains("出去玩") || message.contains("逛街")
+    if message.contains("出去")
+        || message.contains("出门")
+        || message.contains("走了")
+        || message.contains("出去玩")
+        || message.contains("逛街")
     {
         return Some(ActivityType::Outing);
     }

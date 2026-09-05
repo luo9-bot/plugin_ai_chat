@@ -1,4 +1,4 @@
-use super::types::{Tool, FunctionDef};
+use super::types::{FunctionDef, Tool};
 
 // ── Function Call 工具定义 ────────────────────────────────────
 

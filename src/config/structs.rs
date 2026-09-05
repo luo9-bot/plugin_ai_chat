@@ -116,20 +116,18 @@ pub struct ConversationConfig {
     pub max_typing_delay_ms: u64,
     #[serde(default = "default_reply_follow_up_secs")]
     pub reply_follow_up_secs: u64,
-    #[serde(default = "default_intrusiveness_weight")]
-    pub intrusiveness_weight: f32,
     /// 是否允许括号内的动作/表情描述，如"（笑了笑）"，默认 true
     #[serde(default = "default_action_descriptions")]
     pub action_descriptions: bool,
     /// 对同一用户的回复冷却时间 (秒)，防止连续回复刷屏，默认 15
     #[serde(default = "default_reply_cooldown_secs")]
     pub reply_cooldown_secs: u64,
-    /// 群聊额外提示，会注入到 timing_gate prompt 中
-    #[serde(default = "default_group_chat_prompt")]
-    pub group_chat_prompt: String,
-    /// 私聊额外提示，会注入到 timing_gate prompt 中
-    #[serde(default = "default_private_chat_prompt")]
-    pub private_chat_prompt: String,
+    /// 群聊语音循环的最大轮数（工具调用轮次），默认 3
+    #[serde(default = "default_voice_max_rounds")]
+    pub voice_max_rounds: u32,
+    /// 群聊沉默冷却 (秒)：她刚决定不说话后的重新评估间隔，默认 90
+    #[serde(default = "default_silence_cooldown_secs")]
+    pub silence_cooldown_secs: u64,
 }
 
 impl Default for ConversationConfig {
@@ -140,11 +138,10 @@ impl Default for ConversationConfig {
             typing_speed: default_typing_speed(),
             max_typing_delay_ms: default_max_typing_delay(),
             reply_follow_up_secs: default_reply_follow_up_secs(),
-            intrusiveness_weight: default_intrusiveness_weight(),
             action_descriptions: default_action_descriptions(),
             reply_cooldown_secs: default_reply_cooldown_secs(),
-            group_chat_prompt: default_group_chat_prompt(),
-            private_chat_prompt: default_private_chat_prompt(),
+            voice_max_rounds: default_voice_max_rounds(),
+            silence_cooldown_secs: default_silence_cooldown_secs(),
         }
     }
 }
@@ -396,7 +393,10 @@ pub struct StartStopMsg {
 
 impl Default for StartStopMsg {
     fn default() -> Self {
-        Self { success: default_msg_ok(), redo: default_msg_already() }
+        Self {
+            success: default_msg_ok(),
+            redo: default_msg_already(),
+        }
     }
 }
 
@@ -410,7 +410,10 @@ pub struct ForgetMsg {
 
 impl Default for ForgetMsg {
     fn default() -> Self {
-        Self { success: default_forget_success(), fail: default_forget_fail() }
+        Self {
+            success: default_forget_success(),
+            fail: default_forget_fail(),
+        }
     }
 }
 
@@ -451,7 +454,9 @@ pub struct SyncConfig {
     pub expose: bool,
 }
 
-fn default_db_name() -> String { "memory_default".into() }
+fn default_db_name() -> String {
+    "memory_default".into()
+}
 
 impl Default for SyncConfig {
     fn default() -> Self {
@@ -475,7 +480,9 @@ pub struct AdminConfig {
     pub port: u16,
 }
 
-fn default_admin_port() -> u16 { 17000 }
+fn default_admin_port() -> u16 {
+    17000
+}
 
 impl Default for AdminConfig {
     fn default() -> Self {
@@ -489,8 +496,7 @@ impl Default for AdminConfig {
 // ── 防注入配置 ────────────────────────────────────────────────────
 // 注意：防注入系统始终开启，不可关闭
 
-#[derive(Debug, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct AntiInjectionConfig {
     /// 输入层配置
     #[serde(default)]
@@ -505,7 +511,6 @@ pub struct AntiInjectionConfig {
     #[serde(default)]
     pub detection_whitelist: Vec<u64>,
 }
-
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InputFilterConfig {
@@ -643,25 +648,9 @@ pub struct HumanityConfig {
     #[serde(default = "default_true")]
     pub attention_enabled: bool,
 
-    // 满足性决策
-    #[serde(default = "default_true")]
-    pub satisficing_enabled: bool,
-    #[serde(default = "default_satisficing_threshold")]
-    pub satisficing_threshold: f32,
-    #[serde(default = "default_satisficing_max_iterations")]
-    pub satisficing_max_iterations: u32,
-    #[serde(default = "default_satisficing_good_enough_probability")]
-    pub satisficing_good_enough_probability: f32,
-
     // 变速回复
     #[serde(default = "default_true")]
     pub response_timing_enabled: bool,
-    #[serde(default = "default_split_reply_probability")]
-    pub split_reply_probability: f32,
-    #[serde(default = "default_follow_up_probability")]
-    pub follow_up_probability: f32,
-    #[serde(default = "default_self_correction_probability")]
-    pub self_correction_probability: f32,
     #[serde(default = "default_thinking_pause_probability")]
     pub thinking_pause_probability: f32,
     #[serde(default = "default_base_typing_speed")]
@@ -679,11 +668,8 @@ pub struct HumanityConfig {
     #[serde(default = "default_association_jump_probability")]
     pub association_jump_probability: f32,
 
-    // 回复人性扰动
-    #[serde(default = "default_true")]
-    pub humanity_filter_enabled: bool,
-    #[serde(default = "default_catchphrase_probability")]
-    pub catchphrase_probability: f32,
+    // 回复人性扰动（已移除：随机口头禅、感叹号手术、句子截断、错别字注入）
+    // 表达的自然感由语音管线本身负责
 
     // 内心独白
     #[serde(default = "default_true")]
@@ -692,12 +678,6 @@ pub struct HumanityConfig {
     pub inner_thought_interval_min: u64,
     #[serde(default = "default_inner_thought_interval_max")]
     pub inner_thought_interval_max: u64,
-
-    // 错别字
-    #[serde(default = "default_true")]
-    pub typo_enabled: bool,
-    #[serde(default = "default_typo_error_rate")]
-    pub typo_error_rate: f64,
 }
 
 impl Default for HumanityConfig {
@@ -715,14 +695,7 @@ impl Default for HumanityConfig {
             cognitive_biases_enabled: true,
             cognitive_biases: CognitiveBiasesConfig::default(),
             attention_enabled: true,
-            satisficing_enabled: true,
-            satisficing_threshold: default_satisficing_threshold(),
-            satisficing_max_iterations: default_satisficing_max_iterations(),
-            satisficing_good_enough_probability: default_satisficing_good_enough_probability(),
             response_timing_enabled: true,
-            split_reply_probability: default_split_reply_probability(),
-            follow_up_probability: default_follow_up_probability(),
-            self_correction_probability: default_self_correction_probability(),
             thinking_pause_probability: default_thinking_pause_probability(),
             base_typing_speed: default_base_typing_speed(),
             unpredictability_enabled: true,
@@ -730,13 +703,9 @@ impl Default for HumanityConfig {
             opinion_drift_rate: default_opinion_drift_rate(),
             forgetting_rate: default_forgetting_rate(),
             association_jump_probability: default_association_jump_probability(),
-            humanity_filter_enabled: true,
-            catchphrase_probability: default_catchphrase_probability(),
             inner_thought_enabled: true,
             inner_thought_interval_min: default_inner_thought_interval_min(),
             inner_thought_interval_max: default_inner_thought_interval_max(),
-            typo_enabled: true,
-            typo_error_rate: default_typo_error_rate(),
         }
     }
 }
@@ -769,119 +738,303 @@ impl Default for CognitiveBiasesConfig {
 
 // ── 默认值 ──────────────────────────────────────────────────────
 
-pub(super) fn default_prompts() -> String { "default.txt".into() }
-pub(super) fn default_bot_name() -> String { "洛玖".into() }
-fn default_frequency_penalty() -> f64 { 2.0 }
-fn default_presence_penalty() -> f64 { 1.0 }
-fn default_temperature() -> f64 { 1.3 }
-fn default_top_p() -> f64 { 0.1 }
-fn default_max_tokens() -> u32 { 4096 }
-fn default_request_timeout() -> u64 { 60 }
-fn default_analysis_max_tokens() -> u32 { 10000 }
-fn default_analysis_temperature() -> f64 { 0.3 }
-fn default_max_history() -> usize { 10 }
-fn default_batch_timeout() -> u64 { 2000 }
-fn default_typing_speed() -> f64 { 5.0 }
-fn default_max_typing_delay() -> u64 { 4000 }
-fn default_reply_follow_up_secs() -> u64 { 300 }
-fn default_intrusiveness_weight() -> f32 { 0.3 }
-fn default_action_descriptions() -> bool { false }
-fn default_reply_cooldown_secs() -> u64 { 15 }
-fn default_group_chat_prompt() -> String {
-    "你正在qq群里聊天，下面是群里正在聊的内容。\n\
-     回复尽量简短一些。最好一次对一个话题进行回复。\n\
-     控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。".to_string()
+pub(super) fn default_prompts() -> String {
+    "default.txt".into()
 }
-fn default_private_chat_prompt() -> String {
-    "你正在聊天，下面是正在聊的内容。\n\
-     回复尽量简短一些。请注意把握聊天内容。".to_string()
+pub(super) fn default_bot_name() -> String {
+    "洛玖".into()
 }
-fn default_segment_minutes() -> u32 { 5 }
+fn default_frequency_penalty() -> f64 {
+    2.0
+}
+fn default_presence_penalty() -> f64 {
+    1.0
+}
+fn default_temperature() -> f64 {
+    1.3
+}
+fn default_top_p() -> f64 {
+    0.1
+}
+fn default_max_tokens() -> u32 {
+    4096
+}
+fn default_request_timeout() -> u64 {
+    60
+}
+fn default_analysis_max_tokens() -> u32 {
+    10000
+}
+fn default_analysis_temperature() -> f64 {
+    0.3
+}
+fn default_max_history() -> usize {
+    10
+}
+fn default_batch_timeout() -> u64 {
+    2000
+}
+fn default_typing_speed() -> f64 {
+    5.0
+}
+fn default_max_typing_delay() -> u64 {
+    4000
+}
+fn default_reply_follow_up_secs() -> u64 {
+    300
+}
+fn default_action_descriptions() -> bool {
+    false
+}
+fn default_reply_cooldown_secs() -> u64 {
+    15
+}
+fn default_voice_max_rounds() -> u32 {
+    3
+}
+fn default_silence_cooldown_secs() -> u64 {
+    90
+}
+fn default_segment_minutes() -> u32 {
+    5
+}
 fn default_quota_segments() -> Vec<QuotaSegment> {
     vec![
-        QuotaSegment { start_hour: 0,  end_hour: 6,  max_replies: 5 },
-        QuotaSegment { start_hour: 6,  end_hour: 8,  max_replies: 20 },
-        QuotaSegment { start_hour: 8,  end_hour: 10, max_replies: 30 },
-        QuotaSegment { start_hour: 10, end_hour: 14, max_replies: 50 },
-        QuotaSegment { start_hour: 14, end_hour: 16, max_replies: 10 },
-        QuotaSegment { start_hour: 16, end_hour: 20, max_replies: 20 },
-        QuotaSegment { start_hour: 20, end_hour: 24, max_replies: 10 },
+        QuotaSegment {
+            start_hour: 0,
+            end_hour: 6,
+            max_replies: 5,
+        },
+        QuotaSegment {
+            start_hour: 6,
+            end_hour: 8,
+            max_replies: 20,
+        },
+        QuotaSegment {
+            start_hour: 8,
+            end_hour: 10,
+            max_replies: 30,
+        },
+        QuotaSegment {
+            start_hour: 10,
+            end_hour: 14,
+            max_replies: 50,
+        },
+        QuotaSegment {
+            start_hour: 14,
+            end_hour: 16,
+            max_replies: 10,
+        },
+        QuotaSegment {
+            start_hour: 16,
+            end_hour: 20,
+            max_replies: 20,
+        },
+        QuotaSegment {
+            start_hour: 20,
+            end_hour: 24,
+            max_replies: 10,
+        },
     ]
 }
-fn default_log_level() -> String { "info".into() }
-fn default_normal_expire_days() -> u64 { 30 }
-fn default_important_fade_days() -> u64 { 7 }
-fn default_auto_summarize_threshold() -> usize { 10 }
-fn default_working_memory_expire_hours() -> u64 { 6 }
-fn default_decay_rate() -> f32 { 0.15 }
-fn default_decay_delay() -> u64 { 60 }
-fn default_neutral_threshold() -> f32 { 0.15 }
-fn default_affinity_threshold() -> f32 { 3.0 }
-fn default_true() -> bool { true }
-fn default_quiet_start() -> u32 { 23 }
-fn default_quiet_end() -> u32 { 7 }
-fn default_proactive_interval() -> u64 { 7200 }
-fn default_max_ignore() -> u32 { 3 }
-fn default_low_mood_multiplier() -> f64 { 2.0 }
-fn default_check_interval() -> u64 { 60 }
-fn default_reflection_interval() -> u64 { 1800 }
-fn default_max_thoughts() -> usize { 8 }
-fn default_post_conversation_delay() -> u64 { 120 }
-fn default_concerns_max() -> usize { 5 }
-fn default_concern_decay_rate() -> f32 { 0.1 }
-fn default_deliberations_max() -> usize { 8 }
-fn default_deliberation_decay_rate() -> f32 { 0.05 }
-fn default_defect_base_probability() -> f32 { 0.1 }
-fn default_max_reply_chars() -> usize { 30 }
-fn default_punctuation_style() -> String { "casual".into() }
-fn default_style_random_probability() -> f64 { 0.3 }
-fn default_vision_base_url() -> String { "https://api.deepseek.com".into() }
-fn default_vision_model() -> String { "	deepseek-v4-flash".into() }
-fn default_vision_max_tokens() -> u32 { 256 }
-fn default_embedding_base_url() -> String { "https://ark.cn-beijing.volces.com/api/v3".into() }
-fn default_embedding_model() -> String { "doubao-embedding-vision-251215".into() }
-fn default_msg_ok() -> String { "好的".into() }
-fn default_msg_already() -> String { "已经开启啦".into() }
-fn default_forget_success() -> String { "已遗忘对话记录".into() }
-fn default_forget_fail() -> String { "没有找到对话记录".into() }
-fn default_max_message_length() -> usize { 2000 }
-fn default_sensitive_action() -> String { "block".into() }
-fn default_output_action() -> String { "block".into() }
-fn default_max_messages_per_minute() -> u32 { 20 }
-fn default_max_messages_per_hour() -> u32 { 200 }
-fn default_reputation_threshold() -> f32 { 0.3 }
-fn default_auto_ban_threshold() -> u32 { 10 }
-fn default_steal_emoji() -> bool { true }
-fn default_max_reg_num() -> usize { 64 }
-fn default_do_replace() -> bool { true }
-fn default_battery_capacity() -> f32 { 100.0 }
-fn default_battery_drain_rate() -> f32 { 2.0 }
-fn default_battery_recharge_rate() -> f32 { 0.5 }
-fn default_burnout_threshold() -> f32 { 5.0 }
-fn default_burnout_recovery_mult() -> f32 { 0.5 }
-fn default_circadian_amplitude() -> f32 { 0.3 }
-fn default_circadian_phase_offset() -> f32 { 0.0 }
-fn default_confirmation_bias() -> f32 { 0.3 }
-fn default_recency_bias() -> f32 { 0.4 }
-fn default_mood_congruence() -> f32 { 0.5 }
-fn default_anchoring_strength() -> f32 { 0.3 }
-fn default_availability_heuristic() -> f32 { 0.4 }
-fn default_satisficing_threshold() -> f32 { 0.55 }
-fn default_satisficing_max_iterations() -> u32 { 3 }
-fn default_satisficing_good_enough_probability() -> f32 { 0.15 }
-fn default_split_reply_probability() -> f32 { 0.1 }
-fn default_follow_up_probability() -> f32 { 0.08 }
-fn default_self_correction_probability() -> f32 { 0.03 }
-fn default_thinking_pause_probability() -> f32 { 0.15 }
-fn default_base_typing_speed() -> f32 { 5.0 }
-fn default_whim_probability() -> f32 { 0.03 }
-fn default_opinion_drift_rate() -> f32 { 0.01 }
-fn default_forgetting_rate() -> f32 { 0.005 }
-fn default_association_jump_probability() -> f32 { 0.05 }
-fn default_catchphrase_probability() -> f32 { 0.1 }
-fn default_inner_thought_interval_min() -> u64 { 300 }
-fn default_inner_thought_interval_max() -> u64 { 900 }
-fn default_typo_error_rate() -> f64 { 0.3 }
+fn default_log_level() -> String {
+    "info".into()
+}
+fn default_normal_expire_days() -> u64 {
+    30
+}
+fn default_important_fade_days() -> u64 {
+    7
+}
+fn default_auto_summarize_threshold() -> usize {
+    10
+}
+fn default_working_memory_expire_hours() -> u64 {
+    6
+}
+fn default_decay_rate() -> f32 {
+    0.15
+}
+fn default_decay_delay() -> u64 {
+    60
+}
+fn default_neutral_threshold() -> f32 {
+    0.15
+}
+fn default_affinity_threshold() -> f32 {
+    3.0
+}
+fn default_true() -> bool {
+    true
+}
+fn default_quiet_start() -> u32 {
+    23
+}
+fn default_quiet_end() -> u32 {
+    7
+}
+fn default_proactive_interval() -> u64 {
+    7200
+}
+fn default_max_ignore() -> u32 {
+    3
+}
+fn default_low_mood_multiplier() -> f64 {
+    2.0
+}
+fn default_check_interval() -> u64 {
+    60
+}
+fn default_reflection_interval() -> u64 {
+    1800
+}
+fn default_max_thoughts() -> usize {
+    8
+}
+fn default_post_conversation_delay() -> u64 {
+    120
+}
+fn default_concerns_max() -> usize {
+    5
+}
+fn default_concern_decay_rate() -> f32 {
+    0.1
+}
+fn default_deliberations_max() -> usize {
+    8
+}
+fn default_deliberation_decay_rate() -> f32 {
+    0.05
+}
+fn default_defect_base_probability() -> f32 {
+    0.1
+}
+fn default_max_reply_chars() -> usize {
+    30
+}
+fn default_punctuation_style() -> String {
+    "casual".into()
+}
+fn default_style_random_probability() -> f64 {
+    0.3
+}
+fn default_vision_base_url() -> String {
+    "https://api.deepseek.com".into()
+}
+fn default_vision_model() -> String {
+    "	deepseek-v4-flash".into()
+}
+fn default_vision_max_tokens() -> u32 {
+    256
+}
+fn default_embedding_base_url() -> String {
+    "https://ark.cn-beijing.volces.com/api/v3".into()
+}
+fn default_embedding_model() -> String {
+    "doubao-embedding-vision-251215".into()
+}
+fn default_msg_ok() -> String {
+    "好的".into()
+}
+fn default_msg_already() -> String {
+    "已经开启啦".into()
+}
+fn default_forget_success() -> String {
+    "已遗忘对话记录".into()
+}
+fn default_forget_fail() -> String {
+    "没有找到对话记录".into()
+}
+fn default_max_message_length() -> usize {
+    2000
+}
+fn default_sensitive_action() -> String {
+    "block".into()
+}
+fn default_output_action() -> String {
+    "block".into()
+}
+fn default_max_messages_per_minute() -> u32 {
+    20
+}
+fn default_max_messages_per_hour() -> u32 {
+    200
+}
+fn default_reputation_threshold() -> f32 {
+    0.3
+}
+fn default_auto_ban_threshold() -> u32 {
+    10
+}
+fn default_steal_emoji() -> bool {
+    true
+}
+fn default_max_reg_num() -> usize {
+    64
+}
+fn default_do_replace() -> bool {
+    true
+}
+fn default_battery_capacity() -> f32 {
+    100.0
+}
+fn default_battery_drain_rate() -> f32 {
+    2.0
+}
+fn default_battery_recharge_rate() -> f32 {
+    0.5
+}
+fn default_burnout_threshold() -> f32 {
+    5.0
+}
+fn default_burnout_recovery_mult() -> f32 {
+    0.5
+}
+fn default_circadian_amplitude() -> f32 {
+    0.3
+}
+fn default_circadian_phase_offset() -> f32 {
+    0.0
+}
+fn default_confirmation_bias() -> f32 {
+    0.3
+}
+fn default_recency_bias() -> f32 {
+    0.4
+}
+fn default_mood_congruence() -> f32 {
+    0.5
+}
+fn default_anchoring_strength() -> f32 {
+    0.3
+}
+fn default_availability_heuristic() -> f32 {
+    0.4
+}
+fn default_thinking_pause_probability() -> f32 {
+    0.15
+}
+fn default_base_typing_speed() -> f32 {
+    5.0
+}
+fn default_whim_probability() -> f32 {
+    0.03
+}
+fn default_opinion_drift_rate() -> f32 {
+    0.01
+}
+fn default_forgetting_rate() -> f32 {
+    0.005
+}
+fn default_association_jump_probability() -> f32 {
+    0.05
+}
+fn default_inner_thought_interval_min() -> u64 {
+    300
+}
+fn default_inner_thought_interval_max() -> u64 {
+    900
+}
 
 /// 表情包配置
 #[derive(Debug, Clone, Deserialize)]

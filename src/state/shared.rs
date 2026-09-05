@@ -77,7 +77,8 @@ impl SharedState {
         if group_id > 0 {
             self.last_reply_times.insert((group_id, 0), Instant::now());
         }
-        self.last_reply_times.insert((group_id, user_id), Instant::now());
+        self.last_reply_times
+            .insert((group_id, user_id), Instant::now());
     }
 
     /// 检查是否在对话跟进时间内
@@ -105,7 +106,12 @@ impl SharedState {
     }
 
     /// 获取机器人在某群最近的消息 (返回 owned String，因为无法跨锁返回引用)
-    pub fn get_recent_bot_messages(&self, group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<String> {
+    pub fn get_recent_bot_messages(
+        &self,
+        group_id: u64,
+        max_age_secs: u64,
+        max_count: usize,
+    ) -> Vec<String> {
         self.recent_bot_messages
             .get(&group_id)
             .map(|msgs| {
@@ -132,15 +138,23 @@ impl SharedState {
     /// 向用户历史追加一条消息。
     /// 超出窗口大小时，将需要压缩的数据提取出来，在锁外调用 AI，
     /// 然后重新获取锁写回摘要。避免持锁调用 AI 导致死锁。
-    pub fn push_history(&mut self, group_id: u64, user_id: u64, role: &str, content: &str, max_pairs: usize) {
+    pub fn push_history(
+        &mut self,
+        group_id: u64,
+        user_id: u64,
+        role: &str,
+        content: &str,
+        max_pairs: usize,
+    ) {
         let ctx = self.get_or_create_context(group_id, user_id);
         ctx.history.push((role.to_string(), content.to_string()));
         if ctx.history.len() > max_pairs * 2 {
-            let keep_recent = max_pairs as usize;
+            let keep_recent = max_pairs;
             let compress_end = ctx.history.len().saturating_sub(keep_recent);
             if compress_end > 2 {
                 // 提取需要压缩的数据和现有摘要
-                let to_compress: Vec<String> = ctx.history[..compress_end].iter()
+                let to_compress: Vec<String> = ctx.history[..compress_end]
+                    .iter()
                     .map(|(r, c)| format!("[{}] {}", r, c))
                     .collect();
                 let existing_summary = ctx.conversation_summary.clone();
@@ -150,7 +164,10 @@ impl SharedState {
                 let final_prompt = if existing_summary.is_empty() {
                     prompt_text
                 } else {
-                    format!("之前的摘要：{}\n\n新的对话：\n{}", existing_summary, prompt_text)
+                    format!(
+                        "之前的摘要：{}\n\n新的对话：\n{}",
+                        existing_summary, prompt_text
+                    )
                 };
                 // 在锁外调用 AI（避免持锁阻塞主循环）
                 // 注意：此时 self 的可变借用已通过 drain 释放了大部分数据
@@ -163,18 +180,16 @@ impl SharedState {
                         crate::prompt::PromptManager::get().raw("history_attention"),
                         &prompt_clone,
                     );
-                    if let Ok(summary) = compressed {
-                        if let Some(json_str) = crate::ai::extract_json(&summary) {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                                if let Some(s) = val.get("summary").and_then(|v| v.as_str()) {
-                                    // 重新获取锁写回摘要
-                                    crate::with_shared_state(|state| {
-                                        let ctx = state.get_or_create_context(group_id, user_id);
-                                        ctx.conversation_summary = s.to_string();
-                                    });
-                                }
-                            }
-                        }
+                    if let Ok(summary) = compressed
+                        && let Some(json_str) = crate::ai::extract_json(&summary)
+                        && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                        && let Some(s) = val.get("summary").and_then(|v| v.as_str())
+                    {
+                        // 重新获取锁写回摘要
+                        crate::with_shared_state(|state| {
+                            let ctx = state.get_or_create_context(group_id, user_id);
+                            ctx.conversation_summary = s.to_string();
+                        });
                     }
                 });
             } else {
@@ -186,14 +201,23 @@ impl SharedState {
     /// 克隆用户对话历史 (用于跨锁返回)
     pub fn get_history_clone(&self, group_id: u64, user_id: u64) -> Vec<(String, String)> {
         let key: CtxKey = (group_id, user_id);
-        self.contexts.get(&key)
+        self.contexts
+            .get(&key)
             .map(|ctx| ctx.history.clone())
             .unwrap_or_default()
     }
 
     /// 向群级历史追加一条消息（群聊中跨用户可见）
-    pub fn push_group_history(&mut self, group_id: u64, role: &str, content: &str, max_pairs: usize) {
-        if group_id == 0 { return; }
+    pub fn push_group_history(
+        &mut self,
+        group_id: u64,
+        role: &str,
+        content: &str,
+        max_pairs: usize,
+    ) {
+        if group_id == 0 {
+            return;
+        }
         let history = self.group_history.entry(group_id).or_default();
         history.push((role.to_string(), content.to_string()));
         while history.len() > max_pairs * 2 {
@@ -203,8 +227,11 @@ impl SharedState {
 
     /// 克隆群级历史
     pub fn get_group_history_clone(&self, group_id: u64) -> Vec<(String, String)> {
-        if group_id == 0 { return vec![]; }
-        self.group_history.get(&group_id)
+        if group_id == 0 {
+            return vec![];
+        }
+        self.group_history
+            .get(&group_id)
             .cloned()
             .unwrap_or_default()
     }
@@ -217,7 +244,8 @@ impl SharedState {
 
     /// 返回空闲超过指定秒数且未反思过的群组列表
     pub fn get_idle_groups(&self, now: u64, idle_secs: u64) -> Vec<u64> {
-        self.last_conversation_times.iter()
+        self.last_conversation_times
+            .iter()
             .filter(|(gid, last_time)| {
                 **gid > 0
                     && now.saturating_sub(**last_time) >= idle_secs
@@ -254,17 +282,17 @@ impl SharedState {
         let one_hour = 3600u64;
 
         // 清理空 history 且 summary 也为空的 context
-        self.contexts.retain(|_, ctx| {
-            !ctx.history.is_empty() || !ctx.conversation_summary.is_empty()
-        });
+        self.contexts
+            .retain(|_, ctx| !ctx.history.is_empty() || !ctx.conversation_summary.is_empty());
 
         // 清理超过 1 小时的回复时间记录
-        self.last_reply_times.retain(|_, instant| {
-            instant.elapsed().as_secs() < one_hour
-        });
+        self.last_reply_times
+            .retain(|_, instant| instant.elapsed().as_secs() < one_hour);
 
         // 清理不活跃群的相关数据
-        let inactive_groups: Vec<u64> = self.group_history.keys()
+        let inactive_groups: Vec<u64> = self
+            .group_history
+            .keys()
             .filter(|gid| **gid > 0 && !active_groups.contains(gid))
             .copied()
             .collect();
@@ -284,11 +312,13 @@ pub fn get_groups_needing_review(
     review_interval: u64,
     max_idle: u64,
 ) -> Vec<u64> {
-    conversation_times.iter()
+    conversation_times
+        .iter()
         .filter(|(gid, last_time)| {
             **gid > 0
                 && now.saturating_sub(**last_time) < max_idle
-                && review_times.get(*gid)
+                && review_times
+                    .get(*gid)
                     .is_none_or(|&last_review| now.saturating_sub(last_review) >= review_interval)
         })
         .map(|(gid, _)| *gid)

@@ -159,7 +159,9 @@ pub fn pseudo_random(seed_extra: u64) -> f64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     let ticks = now.as_nanos() as u64;
-    let mut x = ticks.wrapping_add(seed_extra).wrapping_add(0x9E3779B97F4A7C15);
+    let mut x = ticks
+        .wrapping_add(seed_extra)
+        .wrapping_add(0x9E3779B97F4A7C15);
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
@@ -258,32 +260,6 @@ pub fn record_hurt_check_in(user_id: u64) {
     save_state(user_id, &state);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn private_contact_interval_uses_progressive_backoff() {
-        assert_eq!(private_contact_interval(3600, 0), 3600);
-        assert_eq!(private_contact_interval(3600, 1), 14400);
-        assert_eq!(private_contact_interval(3600, 2), 43200);
-        assert_eq!(private_contact_interval(3600, 4), 604800);
-    }
-
-    #[test]
-    fn hurt_check_in_needs_long_silence_and_weekly_cooldown() {
-        let now = 2_000_000;
-        let state = ProactiveState {
-            private_silence_streak: 2,
-            last_user_reply: now - 24 * 3600,
-            last_hurt_check_in: now - 7 * 24 * 3600,
-            ..ProactiveState::default()
-        };
-        assert!(can_send_hurt_check_in(&state, now, true));
-        assert!(!can_send_hurt_check_in(&state, now, false));
-    }
-}
-
 pub fn add_date_reminder(user_id: u64, date: &str, description: &str) {
     let mut state = load_state(user_id);
     state.pending_reminders.push(DateReminder {
@@ -340,4 +316,30 @@ pub fn set_interval(interval: u64) {
     let mut rt = load_runtime();
     rt.interval = Some(interval);
     save_runtime(&rt);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_contact_interval_uses_progressive_backoff() {
+        assert_eq!(private_contact_interval(3600, 0), 3600);
+        assert_eq!(private_contact_interval(3600, 1), 14400);
+        assert_eq!(private_contact_interval(3600, 2), 43200);
+        assert_eq!(private_contact_interval(3600, 4), 604800);
+    }
+
+    #[test]
+    fn hurt_check_in_needs_long_silence_and_weekly_cooldown() {
+        let now = 2_000_000;
+        let state = ProactiveState {
+            private_silence_streak: 2,
+            last_user_reply: now - 24 * 3600,
+            last_hurt_check_in: now - 7 * 24 * 3600,
+            ..ProactiveState::default()
+        };
+        assert!(can_send_hurt_check_in(&state, now, true));
+        assert!(!can_send_hurt_check_in(&state, now, false));
+    }
 }

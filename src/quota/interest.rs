@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use tracing::debug;
 
+use super::segment::{check_and_consume, has_quota};
+use super::store::{STORE, SegmentLogEntry, UserInterest, save_store};
 use crate::config;
-use super::store::{STORE, save_store, UserInterest, SegmentLogEntry};
-use super::segment::{has_quota, check_and_consume};
 
 // ── 兴趣系统 ─────────────────────────────────────────────────
 
@@ -24,9 +24,8 @@ pub fn calculate_priority(
     let is_at_bot = !at_pattern.is_empty() && message.contains(at_pattern);
 
     // bot 最近在群里发过消息（2 分钟内）= 对话窗口
-    let bot_recently_active = crate::read_shared_state(|s| {
-        !s.get_recent_bot_messages(group_id, 120, 1).is_empty()
-    });
+    let bot_recently_active =
+        crate::read_shared_state(|s| !s.get_recent_bot_messages(group_id, 120, 1).is_empty());
 
     let mut score = 0.0f32;
 
@@ -34,7 +33,9 @@ pub fn calculate_priority(
         if is_darling {
             // darling 在活跃对话中：无需 @ 也能延续
             score += 0.45;
-            if is_at_bot { score += 0.10; }
+            if is_at_bot {
+                score += 0.10;
+            }
         } else if is_at_bot {
             // 普通用户 @bot：有基础分但不足以突破
             score += 0.20;
@@ -43,7 +44,9 @@ pub fn calculate_priority(
         // 对话窗口已关闭：只有 @bot 才有分
         if is_at_bot {
             score += 0.40;
-            if is_darling { score += 0.05; }
+            if is_darling {
+                score += 0.05;
+            }
         }
     }
 
@@ -59,7 +62,13 @@ pub fn calculate_priority(
 /// - 配额充足 → 消费配额，返回 true
 /// - 配额耗尽 + 优先级 >= 0.45 → 突破配额（不消费），返回 true
 /// - 配额耗尽 + 优先级 < 0.45 → 返回 false
-pub fn try_reply(group_id: u64, user_id: u64, message: &str, at_pattern: &str, darling_qq: u64) -> bool {
+pub fn try_reply(
+    group_id: u64,
+    user_id: u64,
+    message: &str,
+    at_pattern: &str,
+    darling_qq: u64,
+) -> bool {
     let cfg = &config::get().quota;
     if !cfg.enabled {
         return true;
@@ -97,7 +106,8 @@ pub fn decay_all_interest() {
 
 pub fn get_interest_score(user_id: u64) -> f32 {
     let store_guard = STORE.lock().unwrap();
-    store_guard.as_ref()
+    store_guard
+        .as_ref()
         .and_then(|s| s.user_interest.get(&user_id))
         .map(|i| i.score)
         .unwrap_or(0.0)
@@ -107,14 +117,16 @@ pub fn get_interest_score(user_id: u64) -> f32 {
 
 pub fn get_all_interest() -> HashMap<u64, UserInterest> {
     let store_guard = STORE.lock().unwrap();
-    store_guard.as_ref()
+    store_guard
+        .as_ref()
         .map(|s| s.user_interest.clone())
         .unwrap_or_default()
 }
 
 pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
     let store_guard = STORE.lock().unwrap();
-    store_guard.as_ref()
+    store_guard
+        .as_ref()
         .and_then(|s| s.segment_log.get(&group_id))
         .map(|logs| {
             let mut sorted = logs.clone();
@@ -126,7 +138,8 @@ pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
 
 pub fn get_groups_with_logs() -> Vec<u64> {
     let store_guard = STORE.lock().unwrap();
-    store_guard.as_ref()
+    store_guard
+        .as_ref()
         .map(|s| s.segment_log.keys().copied().collect())
         .unwrap_or_default()
 }

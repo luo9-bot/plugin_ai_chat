@@ -195,8 +195,11 @@ impl KnowledgeGraph {
             .collect();
 
         let mut pr: Vec<f64> = vec![1.0 / n as f64; n];
-        let node_idx: HashMap<&str, usize> =
-            nodes.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+        let node_idx: HashMap<&str, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
 
         for _iter in 0..max_iter {
             let mut new_pr = vec![0.0; n];
@@ -256,8 +259,11 @@ impl KnowledgeGraph {
             .collect();
 
         let mut pr: Vec<f64> = vec![1.0 / n as f64; n];
-        let node_idx: HashMap<&str, usize> =
-            nodes.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+        let node_idx: HashMap<&str, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
 
         for _iter in 0..max_iter {
             let mut new_pr = vec![0.0; n];
@@ -350,9 +356,10 @@ impl EntityMatcher {
         let mut found: Vec<String> = Vec::new();
         for m in self.ac.find_iter(text) {
             if let Some(name) = self.entities.get(m.pattern().as_usize())
-                && !found.contains(name) {
-                    found.push(name.clone());
-                }
+                && !found.contains(name)
+            {
+                found.push(name.clone());
+            }
         }
         found
     }

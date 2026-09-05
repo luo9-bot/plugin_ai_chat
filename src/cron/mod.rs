@@ -1,5 +1,5 @@
-use luo9_sdk::bus::Bus;
 use luo9_sdk::Bot;
+use luo9_sdk::bus::Bus;
 use serde_json::json;
 use std::ffi::CString;
 use tracing::debug;
@@ -47,13 +47,22 @@ pub fn handle_cron_in_reply(reply: &str, group_id: u64) -> String {
 }
 
 fn parse_cron_request(json_str: &str) -> Result<(String, String, String), String> {
-    let v: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| format!("invalid json: {}", e))?;
+    let v: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| format!("invalid json: {}", e))?;
 
     let cron = v.get("cron").ok_or("missing 'cron' field")?;
-    let title = cron.get("title").and_then(|v| v.as_str()).ok_or("missing 'title'")?;
-    let exp = cron.get("exp").and_then(|v| v.as_str()).ok_or("missing 'exp'")?;
-    let content = cron.get("content").and_then(|v| v.as_str()).ok_or("missing 'content'")?;
+    let title = cron
+        .get("title")
+        .and_then(|v| v.as_str())
+        .ok_or("missing 'title'")?;
+    let exp = cron
+        .get("exp")
+        .and_then(|v| v.as_str())
+        .ok_or("missing 'exp'")?;
+    let content = cron
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or("missing 'content'")?;
 
     Ok((title.to_string(), exp.to_string(), content.to_string()))
 }

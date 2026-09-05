@@ -48,7 +48,10 @@ impl PromptManager {
             templates,
             data_dir: data_dir.to_path_buf(),
         });
-        debug!(count = PROMPTS.get().unwrap().templates.len(), "prompt: manager initialized");
+        debug!(
+            count = PROMPTS.get().unwrap().templates.len(),
+            "prompt: manager initialized"
+        );
     }
 
     /// 获取全局实例（未初始化时 panic）
@@ -111,33 +114,95 @@ impl PromptManager {
     /// 内置默认 prompt：如果文件不存在则写入
     fn ensure_defaults(dir: &std::path::Path, templates: &mut HashMap<String, String>) {
         let defaults: &[(&str, &str)] = &[
-            ("core_rules", include_str!("../../defaults/core_rules.prompt")),
-            ("luo9_chat", include_str!("../../defaults/luo9_chat.prompt")),
-            ("luo9_timing_gate", include_str!("../../defaults/luo9_timing_gate.prompt")),
-            ("timing_gate", include_str!("../../defaults/timing_gate.prompt")),
-            ("planner", include_str!("../../defaults/planner.prompt")),
-            ("replyer", include_str!("../../defaults/replyer.prompt")),
-            ("post_analyze", include_str!("../../defaults/post_analyze.prompt")),
-            ("review_conversation", include_str!("../../defaults/review_conversation.prompt")),
-            ("emotion_analyze", include_str!("../../defaults/emotion_analyze.prompt")),
-            ("crisis_mild", include_str!("../../defaults/crisis_mild.prompt")),
-            ("crisis_severe", include_str!("../../defaults/crisis_severe.prompt")),
-            ("crisis_ai_detect", include_str!("../../defaults/crisis_ai_detect.prompt")),
-            ("memory_review", include_str!("../../defaults/memory_review.prompt")),
-            ("memory_extract", include_str!("../../defaults/memory_extract.prompt")),
-            ("memory_summarize", include_str!("../../defaults/memory_summarize.prompt")),
-            ("self_reflect", include_str!("../../defaults/self_reflect.prompt")),
-            ("task_progress", include_str!("../../defaults/task_progress.prompt")),
-            ("proactive_message", include_str!("../../defaults/proactive_message.prompt")),
-            ("mental_state_generate", include_str!("../../defaults/mental_state_generate.prompt")),
-            ("vision_describe", include_str!("../../defaults/vision_describe.prompt")),
-            ("daily_plan", include_str!("../../defaults/daily_plan.prompt")),
-            ("weekly_plan", include_str!("../../defaults/weekly_plan.prompt")),
-            ("monthly_plan", include_str!("../../defaults/monthly_plan.prompt")),
-            ("learn_style", include_str!("../../defaults/learn_style.prompt")),
-            ("sticker_content_filtration", include_str!("../../defaults/sticker_content_filtration.prompt")),
-            ("sticker_select", include_str!("../../defaults/sticker_select.prompt")),
-            ("history_attention", include_str!("../../defaults/history_attention.prompt")),
+            (
+                "core_rules",
+                include_str!("../../defaults/core_rules.prompt"),
+            ),
+            ("voice", include_str!("../../defaults/voice.prompt")),
+            (
+                "post_analyze",
+                include_str!("../../defaults/post_analyze.prompt"),
+            ),
+            (
+                "review_conversation",
+                include_str!("../../defaults/review_conversation.prompt"),
+            ),
+            (
+                "emotion_analyze",
+                include_str!("../../defaults/emotion_analyze.prompt"),
+            ),
+            (
+                "crisis_mild",
+                include_str!("../../defaults/crisis_mild.prompt"),
+            ),
+            (
+                "crisis_severe",
+                include_str!("../../defaults/crisis_severe.prompt"),
+            ),
+            (
+                "crisis_ai_detect",
+                include_str!("../../defaults/crisis_ai_detect.prompt"),
+            ),
+            (
+                "memory_review",
+                include_str!("../../defaults/memory_review.prompt"),
+            ),
+            (
+                "memory_extract",
+                include_str!("../../defaults/memory_extract.prompt"),
+            ),
+            (
+                "memory_summarize",
+                include_str!("../../defaults/memory_summarize.prompt"),
+            ),
+            (
+                "self_reflect",
+                include_str!("../../defaults/self_reflect.prompt"),
+            ),
+            (
+                "task_progress",
+                include_str!("../../defaults/task_progress.prompt"),
+            ),
+            (
+                "proactive_message",
+                include_str!("../../defaults/proactive_message.prompt"),
+            ),
+            (
+                "mental_state_generate",
+                include_str!("../../defaults/mental_state_generate.prompt"),
+            ),
+            (
+                "vision_describe",
+                include_str!("../../defaults/vision_describe.prompt"),
+            ),
+            (
+                "daily_plan",
+                include_str!("../../defaults/daily_plan.prompt"),
+            ),
+            (
+                "weekly_plan",
+                include_str!("../../defaults/weekly_plan.prompt"),
+            ),
+            (
+                "monthly_plan",
+                include_str!("../../defaults/monthly_plan.prompt"),
+            ),
+            (
+                "learn_style",
+                include_str!("../../defaults/learn_style.prompt"),
+            ),
+            (
+                "sticker_content_filtration",
+                include_str!("../../defaults/sticker_content_filtration.prompt"),
+            ),
+            (
+                "sticker_select",
+                include_str!("../../defaults/sticker_select.prompt"),
+            ),
+            (
+                "history_attention",
+                include_str!("../../defaults/history_attention.prompt"),
+            ),
         ];
 
         for (name, content) in defaults {

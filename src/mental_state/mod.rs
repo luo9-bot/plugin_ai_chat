@@ -1,6 +1,6 @@
 mod concerns;
-mod deliberations;
 mod defects;
+mod deliberations;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -11,7 +11,7 @@ use crate::config;
 // ── re-exports ────────────────────────────────────────────────
 
 // concerns.rs
-pub use concerns::{ConcernCategory, Concern, add_concern, decay_concerns};
+pub use concerns::{Concern, ConcernCategory, add_concern, decay_concerns};
 
 // deliberations.rs
 pub use deliberations::{Deliberation, add_deliberation, decay_deliberations};
@@ -21,8 +21,7 @@ pub use defects::{DefectType, check_defect, defect_to_instruction};
 
 // ── 持久化存储 (共享) ──────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct MentalStateStore {
     pub concerns: Vec<concerns::Concern>,
     pub deliberations: Vec<deliberations::Deliberation>,
@@ -30,7 +29,6 @@ pub struct MentalStateStore {
     #[serde(default)]
     pub last_defect_ts: u64,
 }
-
 
 fn store_path() -> std::path::PathBuf {
     config::data_dir().join("mental_state.json")
@@ -83,8 +81,16 @@ pub(crate) fn is_similar(a: &str, b: &str) -> bool {
     let shorter_len = a_chars.len().min(b_chars.len());
 
     // 子串包含
-    let (shorter, longer) = if a_chars.len() <= b_chars.len() { (&a_chars, &b_chars) } else { (&b_chars, &a_chars) };
-    if longer.len() >= 6 && longer.windows(shorter.len()).any(|w| w == shorter.as_slice()) {
+    let (shorter, longer) = if a_chars.len() <= b_chars.len() {
+        (&a_chars, &b_chars)
+    } else {
+        (&b_chars, &a_chars)
+    };
+    if longer.len() >= 6
+        && longer
+            .windows(shorter.len())
+            .any(|w| w == shorter.as_slice())
+    {
         return true;
     }
 
@@ -103,7 +109,9 @@ pub(crate) fn is_similar(a: &str, b: &str) -> bool {
 fn lcs_len(a: &[char], b: &[char]) -> usize {
     let a_len = a.len();
     let b_len = b.len();
-    if a_len == 0 || b_len == 0 { return 0; }
+    if a_len == 0 || b_len == 0 {
+        return 0;
+    }
     let mut prev = vec![0usize; b_len + 1];
     for i in 1..=a_len {
         let mut curr = vec![0usize; b_len + 1];
@@ -129,20 +137,32 @@ pub fn get_prompt_context(max_concerns: usize, max_deliberations: usize) -> Stri
     // 担忧
     if !store.concerns.is_empty() {
         let mut concerns: Vec<&concerns::Concern> = store.concerns.iter().collect();
-        concerns.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
-        let lines: Vec<String> = concerns.iter().take(max_concerns).map(|c| {
-            format!("- {}（{}）", c.content, c.category.label())
-        }).collect();
+        concerns.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let lines: Vec<String> = concerns
+            .iter()
+            .take(max_concerns)
+            .map(|c| format!("- {}（{}）", c.content, c.category.label()))
+            .collect();
         parts.push(format!("# 你的担忧\n{}", lines.join("\n")));
     }
 
     // 考量
     if !store.deliberations.is_empty() {
         let mut delibs: Vec<&deliberations::Deliberation> = store.deliberations.iter().collect();
-        delibs.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
-        let lines: Vec<String> = delibs.iter().take(max_deliberations).map(|d| {
-            format!("- {}", d.content)
-        }).collect();
+        delibs.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let lines: Vec<String> = delibs
+            .iter()
+            .take(max_deliberations)
+            .map(|d| format!("- {}", d.content))
+            .collect();
         parts.push(format!("# 你的考量\n{}", lines.join("\n")));
     }
 
@@ -190,7 +210,10 @@ pub fn generate_from_conversation(group_id: u64, messages_text: &str) {
             if let Some(concerns) = parsed.get("concerns").and_then(|v| v.as_array()) {
                 for item in concerns {
                     let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let category = item.get("category").and_then(|v| v.as_str()).unwrap_or("social");
+                    let category = item
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("social");
                     if !content.is_empty() {
                         add_concern(content, category, 0, group_id);
                         count += 1;

@@ -1,51 +1,50 @@
 pub mod activity;
 pub mod admin;
-pub mod tracking;
 pub mod ai;
 pub mod anti_injection;
 pub mod archive;
 pub mod blocklist;
+pub mod circadian;
 pub mod config;
 pub mod conversation;
 pub mod conversation_end;
 pub mod crisis;
-pub mod crypto;
-pub mod util;
 #[cfg(feature = "plugin")]
 pub mod cron;
+pub mod crypto;
 pub mod emoji;
 pub mod emotion;
-pub mod sticker;
 pub mod learner;
 pub mod memory;
 pub mod mental_state;
+pub mod narrative_self;
 pub mod person_info;
-pub mod personality;
 pub mod personal_tasks;
-pub mod planner;
-pub mod prompt;
+pub mod personality;
 pub mod proactive;
+pub mod prompt;
 pub mod quota;
 pub mod reply_effect;
-pub mod replyer;
 pub mod runtime;
 pub mod schedule;
 pub mod self_memory;
-pub mod narrative_self;
-pub mod circadian;
-pub mod social_battery;
 #[cfg(feature = "plugin")]
 pub mod sender;
+pub mod social_battery;
 pub mod state;
-pub mod timing_gate;
-pub mod typo;
+pub mod sticker;
+pub mod tracking;
+pub mod util;
 pub mod vision;
+pub mod voice;
 pub mod working_memory;
 
 // ── 测试模式下的 stub ────────────────────────────────────────
 #[cfg(not(feature = "plugin"))]
 mod cron {
-    pub fn handle_cron_in_reply(reply: &str, _group_id: u64) -> String { reply.to_string() }
+    pub fn handle_cron_in_reply(reply: &str, _group_id: u64) -> String {
+        reply.to_string()
+    }
     pub fn handle_task_event(_json: &str) {}
 }
 #[cfg(not(feature = "plugin"))]
@@ -53,6 +52,12 @@ mod sender {
     pub fn send_msg(_group_id: u64, _user_id: u64, _text: &str) {}
     pub fn send_with_typing(_group_id: u64, _user_id: u64, _text: &str) {}
     pub fn send_at_msg(_group_id: u64, _user_id: u64, _text: &str) {}
+    pub fn safe_send(_group_id: u64, _user_id: u64, _reply: &str) -> bool {
+        true
+    }
+    pub fn safe_send_quiet(_group_id: u64, _user_id: u64, _reply: &str) -> bool {
+        true
+    }
 }
 
 #[cfg(feature = "plugin")]
@@ -93,7 +98,7 @@ fn init_message_queue() {
 
     thread::spawn(move || {
         while let Ok(task) = rx.recv() {
-            conversation::batch::process_group_batch(task.group_id, &task.user_msgs);
+            conversation::handler::process_group_batch(task.group_id, &task.user_msgs);
         }
     });
 }
@@ -106,7 +111,10 @@ pub(crate) struct ProcessingGuard {
 
 impl Drop for ProcessingGuard {
     fn drop(&mut self) {
-        processing_users().lock().unwrap().remove(&(self.group_id, self.user_id));
+        processing_users()
+            .lock()
+            .unwrap()
+            .remove(&(self.group_id, self.user_id));
     }
 }
 
@@ -162,7 +170,9 @@ fn read_log_config(log_dir: &std::path::Path) -> Option<config::LogConfig> {
     let config_path = log_dir.parent()?.join("config.yaml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     #[derive(serde::Deserialize)]
-    struct Partial { log: Option<config::LogConfig> }
+    struct Partial {
+        log: Option<config::LogConfig>,
+    }
     serde_yaml::from_str::<Partial>(&content).ok()?.log
 }
 
@@ -170,13 +180,15 @@ fn read_log_config(log_dir: &std::path::Path) -> Option<config::LogConfig> {
 #[unsafe(no_mangle)]
 pub extern "C" fn plugin_main() {
     // 初始化 tracing subscriber：同时输出到控制台和日志文件
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-    use tracing_appender::rolling;
     use time::macros::format_description;
+    use tracing_appender::rolling;
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
     let log_dir = std::env::current_dir()
         .unwrap_or_default()
-        .join("data").join("plugin_ai_chat").join("logs");
+        .join("data")
+        .join("plugin_ai_chat")
+        .join("logs");
     std::fs::create_dir_all(&log_dir).ok();
     let file_appender = rolling::daily(&log_dir, "ai_chat.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
@@ -185,7 +197,10 @@ pub extern "C" fn plugin_main() {
 
     // 从配置读取日志级别 (config.yaml 可能在 init 之前)
     let log_config = read_log_config(&log_dir);
-    let log_level = log_config.as_ref().map(|c| c.level.as_str()).unwrap_or("info");
+    let log_level = log_config
+        .as_ref()
+        .map(|c| c.level.as_str())
+        .unwrap_or("info");
     let log_enabled = log_config.as_ref().map(|c| c.enabled).unwrap_or(true);
 
     // 禁用日志时用 error 级别，实际上不输出任何内容
@@ -194,9 +209,9 @@ pub extern "C" fn plugin_main() {
         .unwrap_or_else(|_| EnvFilter::new(format!("plugin_ai_chat={},warn", effective_level)));
 
     // 使用东八区（北京时间）格式: 2026-05-03 14:30:45
-    let timer = fmt::time::LocalTime::new(
-        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]")
-    );
+    let timer = fmt::time::LocalTime::new(format_description!(
+        "[year]-[month]-[day] [hour]:[minute]:[second]"
+    ));
 
     let file_layer = fmt::layer()
         .with_writer(file_writer)
@@ -220,9 +235,6 @@ pub extern "C" fn plugin_main() {
 
     // 初始化 PromptManager（加载所有 .prompt 模板文件）
     prompt::PromptManager::init(config::data_dir());
-
-    // 初始化错别字生成器（加载字频和拼音字典）
-    typo::init(config::data_dir());
 
     // 初始化记忆系统（JSON 存储）
     memory::init();
@@ -271,7 +283,9 @@ pub extern "C" fn plugin_main() {
             }
 
             // 自动开启对话
-            with_state(|s| { s.active.insert(user_id); });
+            with_state(|s| {
+                s.active.insert(user_id);
+            });
             info!(user_id, "auto_start: 活跃用户私聊");
         }
     }
@@ -281,7 +295,9 @@ pub extern "C" fn plugin_main() {
     {
         let cfg = config::get();
         for &group_id in &cfg.auto_start_groups {
-            with_state(|s| { s.active_groups.insert(group_id); });
+            with_state(|s| {
+                s.active_groups.insert(group_id);
+            });
             info!(group_id, "auto_start: 活跃群聊");
         }
     }
@@ -328,17 +344,22 @@ pub extern "C" fn plugin_main() {
 
     loop {
         if let Some(json) = msg_topic.pop(msg_sub)
-            && let Some(BusPayload::Message(msg)) = BusPayload::parse(&json) {
-                match msg.message_type {
-                    MsgType::Group => {
-                        conversation::handle_group_msg(msg.group_id.unwrap_or(0), msg.user_id, &msg.message);
-                    }
-                    MsgType::Private => {
-                        conversation::handle_private_msg(msg.user_id, &msg.message);
-                    }
-                    _ => {}
+            && let Some(BusPayload::Message(msg)) = BusPayload::parse(&json)
+        {
+            match msg.message_type {
+                MsgType::Group => {
+                    conversation::handle_group_msg(
+                        msg.group_id.unwrap_or(0),
+                        msg.user_id,
+                        &msg.message,
+                    );
                 }
+                MsgType::Private => {
+                    conversation::handle_private_msg(msg.user_id, &msg.message);
+                }
+                _ => {}
             }
+        }
 
         if let Some(json) = task_topic.pop(task_sub) {
             cron::handle_task_event(&json);
@@ -361,9 +382,10 @@ pub extern "C" fn plugin_main() {
 
         // ── 版本查询 ──
         if let Some(json) = ver_topic.pop(ver_sub)
-            && luo9_sdk::version::is_version_query(&json) {
-                luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-            }
+            && luo9_sdk::version::is_version_query(&json)
+        {
+            luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        }
 
         thread::sleep(Duration::from_millis(1));
     }
@@ -472,7 +494,8 @@ fn check_periodic() {
 
     // SharedState 清理不活跃条目（释放内存）
     {
-        let inactive_groups: std::collections::HashSet<u64> = with_state(|s| s.active_groups.clone());
+        let inactive_groups: std::collections::HashSet<u64> =
+            with_state(|s| s.active_groups.clone());
         with_shared_state(|s| s.cleanup_inactive(&inactive_groups));
     }
 
@@ -514,8 +537,12 @@ fn check_periodic() {
     let post_delay = config::get().self_reflection.post_conversation_delay_secs;
     let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
     for group_id in idle_groups {
-        with_shared_state(|s| { s.reflected_groups.insert(group_id); });
-        with_state(|s| { s.last_review_times.insert(group_id, now); });
+        with_shared_state(|s| {
+            s.reflected_groups.insert(group_id);
+        });
+        with_state(|s| {
+            s.last_review_times.insert(group_id, now);
+        });
         std::thread::spawn(move || {
             do_post_conversation_reflection(group_id);
         });
@@ -525,10 +552,18 @@ fn check_periodic() {
     let review_interval = config::get().self_reflection.interval;
     let conv_times = read_shared_state(|s| s.last_conversation_times.clone());
     let active_review_groups = with_state(|s| {
-        state::get_groups_needing_review(&conv_times, &s.last_review_times, now, review_interval, post_delay)
+        state::get_groups_needing_review(
+            &conv_times,
+            &s.last_review_times,
+            now,
+            review_interval,
+            post_delay,
+        )
     });
     for group_id in active_review_groups {
-        with_state(|s| { s.last_review_times.insert(group_id, now); });
+        with_state(|s| {
+            s.last_review_times.insert(group_id, now);
+        });
         std::thread::spawn(move || {
             do_post_conversation_reflection(group_id);
         });
@@ -541,10 +576,7 @@ fn check_periodic() {
                 debug!(content = %thought.content, "inner_thought: new thought generated");
                 // 有行动潜力的想法加入自我记忆，可能触发主动消息
                 if thought.action_potential > 0.5 {
-                    self_memory::add(
-                        &thought.content,
-                        self_memory::ThoughtCategory::Feeling,
-                    );
+                    self_memory::add(&thought.content, self_memory::ThoughtCategory::Feeling);
                 }
             }
         });
@@ -566,14 +598,20 @@ fn check_periodic() {
 fn do_self_reflection() {
     // 收集群组列表 (thread_local) 和私聊上下文 (shared)
     let group_ids: Vec<u64> = with_state(|s| {
-        s.active_groups.iter().filter(|&&gid| gid > 0).copied().collect()
+        s.active_groups
+            .iter()
+            .filter(|&&gid| gid > 0)
+            .copied()
+            .collect()
     });
 
     let recent_context = read_shared_state(|s| {
         let mut context_parts = Vec::new();
         for (&(gid, uid), ctx) in &s.contexts {
             if gid == 0 && !ctx.history.is_empty() {
-                let recent: Vec<String> = ctx.history.iter()
+                let recent: Vec<String> = ctx
+                    .history
+                    .iter()
                     .rev()
                     .take(4)
                     .map(|(role, content)| format!("[{}] {}", role, content))
@@ -587,20 +625,29 @@ fn do_self_reflection() {
     });
 
     // 构建群组画像：每个群的最近消息，让 AI 理解每个群是干什么的
-    let group_profiles: Vec<self_memory::GroupProfile> = group_ids.iter().map(|&gid| {
-        let entries = working_memory::get_recent(gid, 7200, 20);
-        let recent_messages = if entries.is_empty() {
-            "(最近没有消息)".to_string()
-        } else {
-            let lines: Vec<String> = entries.iter().map(|e| {
-                let name = person_info::get_display_name(e.user_id, gid)
-                    .unwrap_or_else(|| "群友".to_string());
-                format!("[{}] {}", name, e.content)
-            }).collect();
-            lines.join("\n")
-        };
-        self_memory::GroupProfile { group_id: gid, recent_messages }
-    }).collect();
+    let group_profiles: Vec<self_memory::GroupProfile> = group_ids
+        .iter()
+        .map(|&gid| {
+            let entries = working_memory::get_recent(gid, 7200, 20);
+            let recent_messages = if entries.is_empty() {
+                "(最近没有消息)".to_string()
+            } else {
+                let lines: Vec<String> = entries
+                    .iter()
+                    .map(|e| {
+                        let name = person_info::get_display_name(e.user_id, gid)
+                            .unwrap_or_else(|| "群友".to_string());
+                        format!("[{}] {}", name, e.content)
+                    })
+                    .collect();
+                lines.join("\n")
+            };
+            self_memory::GroupProfile {
+                group_id: gid,
+                recent_messages,
+            }
+        })
+        .collect();
 
     let (count, share) = self_memory::reflect(&recent_context, &group_profiles);
 
@@ -616,7 +663,10 @@ fn do_self_reflection() {
         // 检查该群最近是否有活跃对话（5分钟内有消息）
         let recent_entries = working_memory::get_recent(group_id, 300, 5);
         if recent_entries.is_empty() {
-            debug!(group_id, "self_reflect: skipping share, no recent conversation");
+            debug!(
+                group_id,
+                "self_reflect: skipping share, no recent conversation"
+            );
             return;
         }
 
@@ -673,7 +723,9 @@ fn do_daily_plan_generation() {
 /// 生成周计划
 fn do_weekly_plan_generation() {
     let user_prompt = config::prompt();
-    if user_prompt.is_empty() { return; }
+    if user_prompt.is_empty() {
+        return;
+    }
 
     let context = format!(
         "{}\n\n{}\n\n# 最近的想法\n{}",
@@ -715,7 +767,9 @@ fn do_weekly_plan_generation() {
 /// 生成月计划
 fn do_monthly_plan_generation() {
     let user_prompt = config::prompt();
-    if user_prompt.is_empty() { return; }
+    if user_prompt.is_empty() {
+        return;
+    }
 
     let context = format!(
         "{}\n\n{}\n\n# 最近的想法\n{}",
@@ -753,9 +807,8 @@ fn do_monthly_plan_generation() {
 /// 对话后反思：回顾刚结束的群对话 + 审查新消息（已读+未读）
 fn do_post_conversation_reflection(group_id: u64) {
     // 获取上次审查到的时间戳，只处理之后的新消息
-    let last_reviewed = with_shared_state(|s| {
-        *s.last_reviewed_timestamps.get(&group_id).unwrap_or(&0)
-    });
+    let last_reviewed =
+        with_shared_state(|s| *s.last_reviewed_timestamps.get(&group_id).unwrap_or(&0));
 
     // 取该群的新工作记忆 (上次审查之后的消息)
     let entries = working_memory::get_since(group_id, last_reviewed, 50);
@@ -766,20 +819,31 @@ fn do_post_conversation_reflection(group_id: u64) {
     let self_qq = config::get().self_qq;
 
     // 全部消息都展示，但用 [bot] 和 [user_id:XXX] 清晰区分谁说了什么
-    let recent_context: Vec<String> = entries.iter().map(|e| {
-        let is_self = self_qq > 0 && e.user_id == self_qq;
-        let who = if is_self { "bot".to_string() } else {
-            person_info::get_display_name(e.user_id, group_id)
-                .unwrap_or_else(|| "群友".to_string())
-        };
-        let tag = if e.bot_replied { "[已回复]" } else { "[未回复]" };
-        format!("[{}]{} {}", who, tag, e.content)
-    }).collect();
+    let recent_context: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            let is_self = self_qq > 0 && e.user_id == self_qq;
+            let who = if is_self {
+                "bot".to_string()
+            } else {
+                person_info::get_display_name(e.user_id, group_id)
+                    .unwrap_or_else(|| "群友".to_string())
+            };
+            let tag = if e.bot_replied {
+                "[已回复]"
+            } else {
+                "[未回复]"
+            };
+            format!("[{}]{} {}", who, tag, e.content)
+        })
+        .collect();
     let context_text = recent_context.join("\n");
 
     // 记录最新消息的时间戳，下次只处理更新的
     let max_timestamp = entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
-    with_shared_state(|s| { s.last_reviewed_timestamps.insert(group_id, max_timestamp); });
+    with_shared_state(|s| {
+        s.last_reviewed_timestamps.insert(group_id, max_timestamp);
+    });
 
     // 检查内容是否与上次反思时足够相似，避免对同一话题反复思考
     let normalized = util::normalize_for_compare(&context_text);
@@ -800,9 +864,14 @@ fn do_post_conversation_reflection(group_id: u64) {
         let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
         debug!(group_id, count, "post_conversation_reflect completed");
 
-        with_shared_state(|s| { s.last_reflected_content.insert(group_id, normalized); });
+        with_shared_state(|s| {
+            s.last_reflected_content.insert(group_id, normalized);
+        });
     } else {
-        debug!(group_id, "post_conversation_reflect skipped (similar content)");
+        debug!(
+            group_id,
+            "post_conversation_reflect skipped (similar content)"
+        );
     }
 
     // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
@@ -812,8 +881,6 @@ fn do_post_conversation_reflection(group_id: u64) {
     mental_state::generate_from_conversation(group_id, &context_text);
 }
 
-
-
 /// 审查对话消息，只提取有关的记忆
 fn review_conversation_messages(group_id: u64, messages_text: &str) {
     let mut context_parts = Vec::new();
@@ -822,25 +889,38 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
         context_parts.push(format!("# 你的身份\n{}", user_prompt));
     }
     let personality = personality::get_prompt_context();
-    if !personality.is_empty() { context_parts.push(personality); }
+    if !personality.is_empty() {
+        context_parts.push(personality);
+    }
     let mem = memory::get_context(0, group_id);
-    if !mem.is_empty() { context_parts.push(mem); }
+    if !mem.is_empty() {
+        context_parts.push(mem);
+    }
 
-    let full_context = format!("{}\n\n# 对话记录\n{}", context_parts.join("\n\n"), messages_text);
+    let full_context = format!(
+        "{}\n\n# 对话记录\n{}",
+        context_parts.join("\n\n"),
+        messages_text
+    );
 
     match ai::analyze_with_tools(
-    crate::prompt::PromptManager::get().raw("review_conversation"),
-    &full_context,
-    &[ai::review_conversation_tool()],
-    Some(serde_json::json!("auto"))
+        crate::prompt::PromptManager::get().raw("review_conversation"),
+        &full_context,
+        &[ai::review_conversation_tool()],
+        Some(serde_json::json!("auto")),
     ) {
         Ok(parsed) => {
             if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
                 for item in relevant {
                     let user_id = item.get("user_id").and_then(|u| u.as_u64()).unwrap_or(0);
                     let memory_content = item.get("memory").and_then(|m| m.as_str()).unwrap_or("");
-                    let importance_str = item.get("importance").and_then(|i| i.as_str()).unwrap_or("normal");
-                    if memory_content.is_empty() || user_id == 0 { continue; }
+                    let importance_str = item
+                        .get("importance")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("normal");
+                    if memory_content.is_empty() || user_id == 0 {
+                        continue;
+                    }
                     let importance = match importance_str {
                         "permanent" => memory::Importance::Permanent,
                         "important" => memory::Importance::Important,
@@ -848,12 +928,22 @@ fn review_conversation_messages(group_id: u64, messages_text: &str) {
                     };
                     memory::add(user_id, group_id, memory_content, importance);
                 }
-                debug!(group_id, count = relevant.len(), "review_conversation: memories extracted");
+                debug!(
+                    group_id,
+                    count = relevant.len(),
+                    "review_conversation: memories extracted"
+                );
             }
 
             if let Some(emotion_obj) = parsed.get("emotion") {
-                let state = emotion_obj.get("state").and_then(|s| s.as_str()).unwrap_or("neutral");
-                let intensity = emotion_obj.get("intensity").and_then(|i| i.as_f64()).unwrap_or(0.3) as f32;
+                let state = emotion_obj
+                    .get("state")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("neutral");
+                let intensity = emotion_obj
+                    .get("intensity")
+                    .and_then(|i| i.as_f64())
+                    .unwrap_or(0.3) as f32;
                 emotion::update_from_analysis(0, state, intensity);
             }
         }
@@ -879,13 +969,21 @@ pub fn get_active_users() -> Vec<u64> {
 pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
     let changed = if enable {
         let already = with_state(|s| s.active_groups.contains(&group_id));
-        if already { return false; }
-        with_state(|s| { s.active_groups.insert(group_id); });
+        if already {
+            return false;
+        }
+        with_state(|s| {
+            s.active_groups.insert(group_id);
+        });
         true
     } else {
         let active = with_state(|s| s.active_groups.contains(&group_id));
-        if !active { return false; }
-        with_state(|s| { s.active_groups.remove(&group_id); });
+        if !active {
+            return false;
+        }
+        with_state(|s| {
+            s.active_groups.remove(&group_id);
+        });
         true
     };
     sync_active_to_shared();
@@ -896,12 +994,18 @@ pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
 pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
     let changed = if enable {
         let already = with_state(|s| s.active.contains(&user_id));
-        if already { return false; }
-        with_state(|s| { s.active.insert(user_id); });
+        if already {
+            return false;
+        }
+        with_state(|s| {
+            s.active.insert(user_id);
+        });
         true
     } else {
         let active = with_state(|s| s.active.contains(&user_id));
-        if !active { return false; }
+        if !active {
+            return false;
+        }
         with_state(|s| {
             s.active.remove(&user_id);
             s.batches.remove(&(0, user_id));
@@ -914,9 +1018,7 @@ pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
 
 /// 同步活跃对话状态到 SharedState（供管理线程读取）
 fn sync_active_to_shared() {
-    let (groups, users) = with_state(|s| {
-        (s.active_groups.clone(), s.active.clone())
-    });
+    let (groups, users) = with_state(|s| (s.active_groups.clone(), s.active.clone()));
     with_shared_state(|s| s.sync_active(&groups, &users));
 }
 

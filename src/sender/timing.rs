@@ -15,8 +15,6 @@ pub struct ResponseTiming {
     pub speed_modifier: f32,
     /// 回复前额外等待（模拟思考）的概率
     pub thinking_pause_probability: f32,
-    /// 长回复拆成两条的概率
-    pub split_reply_probability: f32,
 }
 
 impl Default for ResponseTiming {
@@ -27,7 +25,6 @@ impl Default for ResponseTiming {
             base_typing_speed: h.base_typing_speed,
             speed_modifier: 1.0,
             thinking_pause_probability: h.thinking_pause_probability,
-            split_reply_probability: h.split_reply_probability,
         }
     }
 }
@@ -50,13 +47,12 @@ impl ResponseTiming {
 
         // 对极短回复（"嗯""好""哦"等），延迟极短
         if char_count <= 2.0 {
-            return (typing_delay.min(500)).max(100);
+            return typing_delay.clamp(100, 500);
         }
 
         // 思考暂停：有概率添加额外延迟（模拟思考时间）
         let thinking_delay = if fastrand::f32() < self.thinking_pause_probability {
-            let pause_secs = fastrand::u64(500..3000);
-            pause_secs
+            fastrand::u64(500..3000)
         } else {
             0
         };
@@ -67,52 +63,6 @@ impl ResponseTiming {
             .min(cfg.conversation.max_typing_delay_ms);
 
         total.max(200)
-    }
-
-    /// 判断是否应该将长回复拆成两条
-    pub fn should_split_reply(&self, reply_text: &str) -> bool {
-        let char_count = reply_text.chars().count();
-        if char_count < 30 {
-            return false; // 太短不拆
-        }
-        // 越长越可能拆
-        let base_prob = self.split_reply_probability;
-        let length_bonus = ((char_count - 30) as f32 / 100.0).min(0.3);
-        fastrand::f32() < (base_prob + length_bonus)
-    }
-
-    /// 拆分回复："先发简短反应，再发完整内容"
-    pub fn split_reply(reply_text: &str) -> Option<(String, String)> {
-        let chars: Vec<char> = reply_text.chars().collect();
-        if chars.len() < 20 {
-            return None;
-        }
-
-        // 找第一个句子边界（句号、换行、逗号）
-        let split_points: Vec<usize> = chars.iter().enumerate()
-            .filter(|(_, c)| matches!(c, '。' | '\n' | '！' | '？' | '…'))
-            .map(|(i, _)| i + 1)
-            .filter(|&i| i >= 5 && i <= chars.len() / 2)
-            .collect();
-
-        if let Some(&point) = split_points.first() {
-            let first: String = chars[..point].iter().collect();
-            let second: String = chars[point..].iter().collect();
-            if first.len() >= 3 && second.len() >= 3 {
-                return Some((first, second));
-            }
-        }
-
-        // 备选：在第一个逗号处拆分
-        if let Some(pos) = chars.iter().position(|&c| c == '，' || c == ',') {
-            if pos >= 5 && pos <= chars.len() - 5 {
-                let first: String = chars[..pos + 1].iter().collect();
-                let second: String = chars[pos + 1..].iter().collect();
-                return Some((first, second));
-            }
-        }
-
-        None
     }
 
     /// 根据当前状态更新修正系数
@@ -133,56 +83,4 @@ impl ResponseTiming {
 
         self.speed_modifier = (battery_mod * circadian_mod * attention_mod).clamp(0.3, 1.5);
     }
-}
-
-/// 为回复添加人性扰动
-///
-/// - 根据注意力水平调整回复长度
-/// - 根据电量调整语气活力
-/// - 小概率添加口头禅
-pub fn apply_humanity_filter(
-    reply: &str,
-    attention_level: f32,
-    battery_level: f32,
-) -> String {
-    let cfg = config::get();
-    let h = &cfg.humanity;
-
-    if !h.humanity_filter_enabled {
-        return reply.to_string();
-    }
-
-    let mut result = reply.to_string();
-
-    // 低注意力时自然缩短回复
-    if attention_level < 0.3 {
-        // 截断到前1-2句
-        let sentences: Vec<&str> = result.split_inclusive(&['。', '！', '？', '…', '\n'][..])
-            .collect();
-        if sentences.len() > 2 {
-            result = sentences[..2].join("");
-        }
-    }
-
-    // 小概率添加口头禅
-    if fastrand::f32() < h.catchphrase_probability {
-        let catchphrases = [
-            "就是说", "嗯…", "啊这", "害", "就很", "怎么说呢",
-            "大概", "反正", "嘛", "吧",
-        ];
-        let idx = fastrand::usize(0..catchphrases.len());
-        // 在开头添加
-        if fastrand::f32() < 0.5 {
-            result = format!("{}，{}", catchphrases[idx], result);
-        }
-    }
-
-    // 低电量时语气更平淡（减少感叹号和表情相关表达）
-    if battery_level < 0.3 {
-        result = result.replace('！', "。");
-        result = result.replace("哈哈哈", "嗯");
-        result = result.replace("哈哈", "");
-    }
-
-    result
 }

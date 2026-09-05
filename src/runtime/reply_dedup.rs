@@ -77,6 +77,12 @@ pub struct ReplyDedupTracker {
     reply_text_hashes: VecDeque<u64>,
 }
 
+impl Default for ReplyDedupTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReplyDedupTracker {
     pub fn new() -> Self {
         Self {
@@ -121,10 +127,10 @@ impl ReplyDedupTracker {
 
     /// 检查是否在冷却期（对同一用户的回复间隔）
     pub fn is_user_on_cooldown(&self, group_id: u64, user_id: u64) -> bool {
-        if let Some(replies) = self.group_replies.get(&group_id) {
-            if let Some(last) = replies.iter().rev().find(|r| r.target_user == user_id) {
-                return last.sent_at.elapsed().as_secs() < USER_COOLDOWN_SECS;
-            }
+        if let Some(replies) = self.group_replies.get(&group_id)
+            && let Some(last) = replies.iter().rev().find(|r| r.target_user == user_id)
+        {
+            return last.sent_at.elapsed().as_secs() < USER_COOLDOWN_SECS;
         }
         false
     }
@@ -174,7 +180,8 @@ fn text_hash(text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     // 归一化：去空格、转小写
-    let normalized: String = text.chars()
+    let normalized: String = text
+        .chars()
         .filter(|c| !c.is_whitespace())
         .flat_map(|c| c.to_lowercase())
         .collect();

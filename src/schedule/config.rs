@@ -55,9 +55,15 @@ impl Default for DailySchedule {
     }
 }
 
-fn default_true() -> bool { true }
-fn default_wake_up() -> u32 { 7 }
-fn default_sleep() -> u32 { 23 }
+fn default_true() -> bool {
+    true
+}
+fn default_wake_up() -> u32 {
+    7
+}
+fn default_sleep() -> u32 {
+    23
+}
 
 pub(crate) fn load_config() -> ScheduleConfig {
     let path = crate::config::data_dir().join("schedule.json");

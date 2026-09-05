@@ -82,10 +82,18 @@ pub(crate) struct ChatChoice {
     pub message: ChatMessage,
 }
 
+/// 工具执行结果（语音管线的工具循环使用）
+pub enum ToolOutcome {
+    /// 把执行结果回传给模型，继续本轮推理
+    Continue(String),
+    /// 立即结束循环且不产生任何发言（如 finish 工具 = 她选择沉默）
+    Abort,
+}
+
 /// 记忆纠错条目
 pub struct MemoryCorrection {
-    pub old: String,   // 需要修正的旧内容 (模糊匹配)
-    pub new: String,   // 修正后的正确内容 (空 = 删除)
+    pub old: String,    // 需要修正的旧内容 (模糊匹配)
+    pub new: String,    // 修正后的正确内容 (空 = 删除)
     pub target: String, // "user" | "self"
 }
 
@@ -95,6 +103,6 @@ pub struct PostAnalysis {
     pub emotion: String,
     pub intensity: f32,
     pub corrections: Vec<MemoryCorrection>,
-    pub concerns: Vec<(String, String)>,      // (content, category)
-    pub deliberations: Vec<String>,            // content
+    pub concerns: Vec<(String, String)>, // (content, category)
+    pub deliberations: Vec<String>,      // content
 }

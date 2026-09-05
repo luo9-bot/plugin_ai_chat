@@ -45,25 +45,45 @@ fn load_cache_from_disk() -> HashMap<String, Vec<f32>> {
 
     let mut cache = HashMap::with_capacity(count);
     for _ in 0..count {
-        if offset + 4 > data.len() { break; }
-        let key_len = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+        if offset + 4 > data.len() {
+            break;
+        }
+        let key_len = u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
         offset += 4;
 
-        if offset + key_len > data.len() { break; }
-        let key = String::from_utf8_lossy(&data[offset..offset+key_len]).into_owned();
+        if offset + key_len > data.len() {
+            break;
+        }
+        let key = String::from_utf8_lossy(&data[offset..offset + key_len]).into_owned();
         offset += key_len;
 
-        if offset + 4 > data.len() { break; }
-        let dim = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+        if offset + 4 > data.len() {
+            break;
+        }
+        let dim = u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
         offset += 4;
 
-        if offset + dim * 4 > data.len() { break; }
+        if offset + dim * 4 > data.len() {
+            break;
+        }
         let mut vec = Vec::with_capacity(dim);
         for d in 0..dim {
             let byte_offset = offset + d * 4;
             vec.push(f32::from_le_bytes([
-                data[byte_offset], data[byte_offset+1],
-                data[byte_offset+2], data[byte_offset+3],
+                data[byte_offset],
+                data[byte_offset + 1],
+                data[byte_offset + 2],
+                data[byte_offset + 3],
             ]));
         }
         offset += dim * 4;
@@ -110,7 +130,7 @@ pub fn get_cached_query_embedding(query: &str) -> Option<Vec<f32>> {
 pub fn cache_query_embedding(query: String, embedding: Vec<f32>) {
     let should_save = {
         let mut guard = QUERY_CACHE.lock().unwrap();
-        let cache = guard.get_or_insert_with(|| load_cache_from_disk());
+        let cache = guard.get_or_insert_with(load_cache_from_disk);
 
         // 容量控制：超过上限时清理旧条目
         if cache.len() >= MAX_CACHE_SIZE {
@@ -121,7 +141,7 @@ pub fn cache_query_embedding(query: String, embedding: Vec<f32>) {
         }
 
         cache.insert(query, embedding);
-        cache.len() % 32 == 0 // 每 32 次写入保存一次
+        cache.len().is_multiple_of(32) // 每 32 次写入保存一次
     };
 
     if should_save {
@@ -154,7 +174,10 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
     let json_body = serde_json::to_string(&request_body).ok()?;
 
     let mut resp = ureq::post(&url)
-        .header("Authorization", &format!("Bearer {}", cfg.embedding.api_key))
+        .header(
+            "Authorization",
+            &format!("Bearer {}", cfg.embedding.api_key),
+        )
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
         .ok()?;
@@ -178,17 +201,16 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
 
     // 缓存结果（内存 + 磁盘）
     cache_query_embedding(query.to_string(), vec.clone());
-    debug!(query_len = query.len(), "vector: query embedding generated and cached");
+    debug!(
+        query_len = query.len(),
+        "vector: query embedding generated and cached"
+    );
 
     Some(vec)
 }
 
 /// 向量搜索：计算余弦相似度
-pub fn search(
-    query: &[f32],
-    embeddings: &[(String, Vec<f32>)],
-    top_k: usize,
-) -> Vec<VectorResult> {
+pub fn search(query: &[f32], embeddings: &[(String, Vec<f32>)], top_k: usize) -> Vec<VectorResult> {
     if query.is_empty() || embeddings.is_empty() {
         return Vec::new();
     }
@@ -214,7 +236,11 @@ pub fn search(
         })
         .collect();
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(top_k);
     results
 }

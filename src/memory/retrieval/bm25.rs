@@ -74,8 +74,8 @@ pub fn search(
                 if tf_val > 0.0 {
                     matched += 1;
                     let idf_val = idf.get(qtoken).copied().unwrap_or(0.0);
-                    let tf_norm = (tf_val * (K1 + 1.0))
-                        / (tf_val + K1 * (1.0 - B + B * doc_len / avg_len));
+                    let tf_norm =
+                        (tf_val * (K1 + 1.0)) / (tf_val + K1 * (1.0 - B + B * doc_len / avg_len));
                     score += idf_val * tf_norm;
                 }
             }
@@ -89,7 +89,11 @@ pub fn search(
         .filter(|r| r.score > 0.0)
         .collect();
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(top_k);
     results
 }

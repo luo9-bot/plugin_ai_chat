@@ -4,7 +4,7 @@ use super::state::{EmotionType, TriggerType, get_state, update_state};
 
 // 危机检测、状态更新、干预指令已移至 crisis 模块
 // 通过 emotion::detect_crisis 等重新导出保持向后兼容
-pub use crate::crisis::{detect_crisis, detect_crisis_ai, update_crisis, get_crisis_context};
+pub use crate::crisis::{detect_crisis, detect_crisis_ai, get_crisis_context, update_crisis};
 
 pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
@@ -32,7 +32,12 @@ pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     // 高频互动带来正向情绪
     if state.interaction_rate > crate::config::get().emotion.affinity_threshold {
         state.update_emotional_dynamics(
-            Some((&EmotionType::Happy, 0.02, "高频互动", TriggerType::UserMessage)),
+            Some((
+                &EmotionType::Happy,
+                0.02,
+                "高频互动",
+                TriggerType::UserMessage,
+            )),
             0.0,
         );
     }
@@ -48,7 +53,10 @@ pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
 pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
     let content = format!("用户消息: {}\nAI回复: {}", user_message, ai_reply);
 
-    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("emotion_analyze"), &content);
+    let result = crate::ai::analyze(
+        crate::prompt::PromptManager::get().raw("emotion_analyze"),
+        &content,
+    );
     match result {
         Ok(raw) => {
             let json_str = if let Some(start) = raw.find('{') {
@@ -62,10 +70,12 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
             };
 
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                let emotion_str = parsed.get("emotion")
+                let emotion_str = parsed
+                    .get("emotion")
                     .and_then(|v| v.as_str())
                     .unwrap_or("neutral");
-                let intensity = parsed.get("intensity")
+                let intensity = parsed
+                    .get("intensity")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.3) as f32;
 
@@ -74,7 +84,12 @@ pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
 
                 // 使用情绪动力学更新替代直接替换
                 state.update_emotional_dynamics(
-                    Some((&detected, intensity, "AI情绪分析", TriggerType::SelfReflection)),
+                    Some((
+                        &detected,
+                        intensity,
+                        "AI情绪分析",
+                        TriggerType::SelfReflection,
+                    )),
                     0.0,
                 );
                 update_state(user_id, state);
@@ -105,56 +120,96 @@ pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
 
     // 使用情绪动力学更新替代直接替换
     state.update_emotional_dynamics(
-        Some((&detected, intensity, "对话反思", TriggerType::SelfReflection)),
+        Some((
+            &detected,
+            intensity,
+            "对话反思",
+            TriggerType::SelfReflection,
+        )),
         0.0,
     );
     update_state(user_id, state);
 }
 
-pub fn parse_from_reply(user_id: u64, reply: &str) -> String {
-    let mut state = get_state(user_id);
-    let mut cleaned = reply.to_string();
-
-    let markers = ["[emotion:", "[Emotion:", "[EMOTION:"];
-    for marker in &markers {
-        if let Some(start) = cleaned.find(marker) {
-            let tag_start = start + marker.len();
-            if let Some(end) = cleaned[tag_start..].find(']') {
-                let emotion_str = cleaned[tag_start..tag_start + end].trim();
-                let detected = EmotionType::from_str(emotion_str);
-
-                // 使用情绪动力学更新
-                state.update_emotional_dynamics(
-                    Some((&detected, 0.2, "AI自我报告情绪", TriggerType::SelfReflection)),
-                    0.0,
-                );
-                update_state(user_id, state);
-
-                let full_end = tag_start + end + 1;
-                let mut remove_start = start;
-                if remove_start > 0 && cleaned.as_bytes().get(remove_start - 1) == Some(&b' ') {
-                    remove_start -= 1;
-                }
-                cleaned.replace_range(remove_start..full_end, "");
-                break;
-            }
-        }
-    }
-    cleaned
-}
-
 fn detect_emotion(message: &str) -> (EmotionType, f32) {
     let pairs: &[(&[&str], EmotionType, f32)] = &[
-        (&["哈哈", "嘻嘻", "开心", "高兴", "太好了", "棒", "赞", "爱", "喜欢", "嘿嘿", "哇", "感动", "幸福", "谢谢", "感谢"], EmotionType::Happy, 0.3),
-        (&["兴奋", "激动", "太棒了", "爽", "绝了", "666", "厉害"], EmotionType::Excited, 0.4),
-        (&["难过", "伤心", "哭", "呜呜", "唉", "可惜", "遗憾", "失望", "孤独", "寂寞"], EmotionType::Sad, 0.3),
-        (&["生气", "愤怒", "烦", "讨厌", "气死", "恼火", "受够了", "滚"], EmotionType::Angry, 0.4),
-        (&["担心", "焦虑", "紧张", "害怕", "恐惧", "不安", "慌"], EmotionType::Worried, 0.3),
-        (&["嗯", "哦", "这样", "好吧", "知道了", "了解"], EmotionType::Neutral, 0.1),
-        (&["想", "思考", "为什么", "怎么", "如何", "吗", "呢", "？"], EmotionType::Thinking, 0.15),
-        (&["惊", "啊", "天", "不会吧", "真的吗", "居然", "竟然", "没想到"], EmotionType::Surprised, 0.25),
-        (&["害羞", "脸红", "不好意思", "讨厌啦", "才不是", "哼"], EmotionType::Shy, 0.3),
-        (&["累", "困", "疲", "想睡", "没精神", "懒", "不想动"], EmotionType::Tired, 0.25),
+        (
+            &[
+                "哈哈",
+                "嘻嘻",
+                "开心",
+                "高兴",
+                "太好了",
+                "棒",
+                "赞",
+                "爱",
+                "喜欢",
+                "嘿嘿",
+                "哇",
+                "感动",
+                "幸福",
+                "谢谢",
+                "感谢",
+            ],
+            EmotionType::Happy,
+            0.3,
+        ),
+        (
+            &["兴奋", "激动", "太棒了", "爽", "绝了", "666", "厉害"],
+            EmotionType::Excited,
+            0.4,
+        ),
+        (
+            &[
+                "难过", "伤心", "哭", "呜呜", "唉", "可惜", "遗憾", "失望", "孤独", "寂寞",
+            ],
+            EmotionType::Sad,
+            0.3,
+        ),
+        (
+            &["生气", "愤怒", "烦", "讨厌", "气死", "恼火", "受够了", "滚"],
+            EmotionType::Angry,
+            0.4,
+        ),
+        (
+            &["担心", "焦虑", "紧张", "害怕", "恐惧", "不安", "慌"],
+            EmotionType::Worried,
+            0.3,
+        ),
+        (
+            &["嗯", "哦", "这样", "好吧", "知道了", "了解"],
+            EmotionType::Neutral,
+            0.1,
+        ),
+        (
+            &["想", "思考", "为什么", "怎么", "如何", "吗", "呢", "？"],
+            EmotionType::Thinking,
+            0.15,
+        ),
+        (
+            &[
+                "惊",
+                "啊",
+                "天",
+                "不会吧",
+                "真的吗",
+                "居然",
+                "竟然",
+                "没想到",
+            ],
+            EmotionType::Surprised,
+            0.25,
+        ),
+        (
+            &["害羞", "脸红", "不好意思", "讨厌啦", "才不是", "哼"],
+            EmotionType::Shy,
+            0.3,
+        ),
+        (
+            &["累", "困", "疲", "想睡", "没精神", "懒", "不想动"],
+            EmotionType::Tired,
+            0.25,
+        ),
     ];
 
     let mut best_emotion = EmotionType::Neutral;
@@ -162,11 +217,10 @@ fn detect_emotion(message: &str) -> (EmotionType, f32) {
 
     for (keywords, emotion, delta) in pairs {
         for kw in *keywords {
-            if message.contains(kw)
-                && *delta > best_delta {
-                    best_delta = *delta;
-                    best_emotion = *emotion;
-                }
+            if message.contains(kw) && *delta > best_delta {
+                best_delta = *delta;
+                best_emotion = *emotion;
+            }
         }
     }
 

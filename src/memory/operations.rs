@@ -21,7 +21,11 @@ fn flush_embed_queue() {
     let batch = {
         let mut guard = EMBED_QUEUE.lock().unwrap();
         guard.as_mut().and_then(|q| {
-            if q.is_empty() { None } else { Some(std::mem::take(q)) }
+            if q.is_empty() {
+                None
+            } else {
+                Some(std::mem::take(q))
+            }
         })
     };
     if let Some(texts) = batch {
@@ -30,7 +34,9 @@ fn flush_embed_queue() {
 }
 
 fn queue_embedding(content: &str) {
-    if !crate::config::get().embedding.enabled() { return; }
+    if !crate::config::get().embedding.enabled() {
+        return;
+    }
     let mut guard = EMBED_QUEUE.lock().unwrap();
     let queue = guard.get_or_insert_with(Vec::new);
     queue.push(content.to_string());
@@ -115,8 +121,19 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
     queue_embedding(content);
     crate::memory::graph::update_graph_from_memory(user_id, content);
 
-    let loc = if group_id == 0 { "global" } else { &format!("group_{}", group_id) };
-    super::ops_log::record("add", user_id, group_id, content, imp_str, &format!("saved ({})", loc));
+    let loc = if group_id == 0 {
+        "global"
+    } else {
+        &format!("group_{}", group_id)
+    };
+    super::ops_log::record(
+        "add",
+        user_id,
+        group_id,
+        content,
+        imp_str,
+        &format!("saved ({})", loc),
+    );
 }
 
 /// 添加群级别记忆（存 groups/{gid}/group.json）
@@ -141,10 +158,19 @@ pub fn add_group_memory(group_id: u64, content: &str, importance: Importance) {
     crate::memory::store::save_group_memory(group_id, &mem);
     debug!(group_id, content = %content.chars().take(40).collect::<String>(), "memory: saved (group level)");
 
-    super::ops_log::record("add_group", 0, group_id, content, imp_str, "saved (group level)");
+    super::ops_log::record(
+        "add_group",
+        0,
+        group_id,
+        content,
+        imp_str,
+        "saved (group level)",
+    );
 }
 
-pub fn flush_pending_embeddings() { flush_embed_queue(); }
+pub fn flush_pending_embeddings() {
+    flush_embed_queue();
+}
 
 // ── 删除/修正 ────────────────────────────────────────────────────
 
@@ -156,8 +182,11 @@ fn filter_and_archive(
     let mut archived = Vec::new();
     let mut remaining = Vec::new();
     for entry in user_entries.drain(..) {
-        if predicate(&entry) { archived.push(entry); }
-        else { remaining.push(entry); }
+        if predicate(&entry) {
+            archived.push(entry);
+        } else {
+            remaining.push(entry);
+        }
     }
     *user_entries = remaining;
     if !archived.is_empty() {
@@ -186,7 +215,8 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
         for entry in entries.flatten() {
             if let Ok(gid) = entry.file_name().to_string_lossy().parse::<u64>() {
                 let mut gmem = crate::memory::store::load_group_user_memory(gid, user_id);
-                let archived = filter_and_archive(&mut gmem.entries, |e| e.content.contains(pattern), user_id);
+                let archived =
+                    filter_and_archive(&mut gmem.entries, |e| e.content.contains(pattern), user_id);
                 if !archived.is_empty() {
                     crate::memory::store::save_group_user_memory(gid, user_id, &gmem);
                     total += archived.len();
@@ -196,9 +226,18 @@ pub fn forget(user_id: u64, pattern: &str) -> Vec<String> {
     }
 
     if total > 0 {
-        super::ops_log::record("forget", user_id, 0, pattern, "normal", &format!("forgot {} entries", total));
+        super::ops_log::record(
+            "forget",
+            user_id,
+            0,
+            pattern,
+            "normal",
+            &format!("forgot {} entries", total),
+        );
         vec![format!("已遗忘 {} 条记忆", total)]
-    } else { vec!["没有找到匹配的记忆".to_string()] }
+    } else {
+        vec!["没有找到匹配的记忆".to_string()]
+    }
 }
 
 pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
@@ -215,7 +254,9 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
             count += 1;
         }
     }
-    if count > 0 { crate::memory::store::save_user_memory(user_id, &mem); }
+    if count > 0 {
+        crate::memory::store::save_user_memory(user_id, &mem);
+    }
 
     // 群内记忆
     let groups_dir = crate::config::data_dir().join("memory").join("groups");
@@ -231,23 +272,41 @@ pub fn correct(user_id: u64, old: &str, new: &str) -> usize {
                         count += 1;
                     }
                 }
-                if count > 0 { crate::memory::store::save_group_user_memory(gid, user_id, &gmem); }
+                if count > 0 {
+                    crate::memory::store::save_group_user_memory(gid, user_id, &gmem);
+                }
             }
         }
     }
 
     if count > 0 {
         debug!(user_id, old, new, count, "memory: corrected entries");
-        super::ops_log::record("correct", user_id, 0, old, "normal", &format!("corrected {} entries: {} -> {}", count, old, new));
+        super::ops_log::record(
+            "correct",
+            user_id,
+            0,
+            old,
+            "normal",
+            &format!("corrected {} entries: {} -> {}", count, old, new),
+        );
     }
     count
 }
 
 pub fn forget_all(user_id: u64) {
-    super::ops_log::record("forget_all", user_id, 0, "*", "normal", "forget all memories");
+    super::ops_log::record(
+        "forget_all",
+        user_id,
+        0,
+        "*",
+        "normal",
+        "forget all memories",
+    );
     let mem = crate::memory::store::load_user_memory(user_id);
     if !mem.entries.is_empty() {
-        for entry in &mem.entries { crate::memory::vector_store::remove_vector(&entry.content); }
+        for entry in &mem.entries {
+            crate::memory::vector_store::remove_vector(&entry.content);
+        }
         crate::archive::archive_long_term_memory(user_id, mem.entries);
     }
     crate::memory::store::save_user_memory(user_id, &MemoryFile::default());
@@ -259,7 +318,9 @@ pub fn forget_all(user_id: u64) {
             if let Ok(gid) = dir_entry.file_name().to_string_lossy().parse::<u64>() {
                 let gmem = crate::memory::store::load_group_user_memory(gid, user_id);
                 if !gmem.entries.is_empty() {
-                    for entry in &gmem.entries { crate::memory::vector_store::remove_vector(&entry.content); }
+                    for entry in &gmem.entries {
+                        crate::memory::vector_store::remove_vector(&entry.content);
+                    }
                     crate::archive::archive_long_term_memory(user_id, gmem.entries);
                 }
                 crate::memory::store::save_group_user_memory(gid, user_id, &MemoryFile::default());
@@ -331,19 +392,24 @@ fn collect_entries(
 
     for entry in entries {
         if entry.importance == Importance::Normal
-            && now.saturating_sub(entry.last_accessed) > normal_expire {
+            && now.saturating_sub(entry.last_accessed) > normal_expire
+        {
             continue;
         }
         if entry.importance != Importance::Permanent
-            && is_recently_injected(user_id, group_id, &entry.content) {
+            && is_recently_injected(user_id, group_id, &entry.content)
+        {
             continue;
         }
         let tag = match entry.importance {
             Importance::Permanent => "[永久]",
             Importance::Important => "[重要]",
             Importance::Normal => {
-                if now.saturating_sub(entry.last_accessed) > important_fade { "[淡忘]" }
-                else { "" }
+                if now.saturating_sub(entry.last_accessed) > important_fade {
+                    "[淡忘]"
+                } else {
+                    ""
+                }
             }
         };
         let formatted = format!("- {}{}", tag, entry.content);
@@ -377,19 +443,28 @@ pub fn get_context(user_id: u64, current_group_id: u64) -> String {
     // 群特定记忆（仅群聊上下文时显示）
     if current_group_id > 0 {
         let group_user = crate::memory::store::load_group_user_memory(current_group_id, user_id);
-        let (g_perm, g_imp, g_norm) = collect_entries(&group_user.entries, user_id, current_group_id, cfg);
+        let (g_perm, g_imp, g_norm) =
+            collect_entries(&group_user.entries, user_id, current_group_id, cfg);
         if !g_perm.is_empty() || !g_imp.is_empty() || !g_norm.is_empty() {
             if !lines.is_empty() {
                 lines.push(String::new());
             }
             lines.push(format!("--- 在群{}中的记忆 ---", current_group_id));
-            for e in g_perm { lines.push(e); }
-            for e in g_imp { lines.push(e); }
-            for e in g_norm.into_iter().take(5) { lines.push(e); }
+            for e in g_perm {
+                lines.push(e);
+            }
+            for e in g_imp {
+                lines.push(e);
+            }
+            for e in g_norm.into_iter().take(5) {
+                lines.push(e);
+            }
         }
     }
 
-    if lines.is_empty() { return String::new(); }
+    if lines.is_empty() {
+        return String::new();
+    }
     let display_name = crate::person_info::get_display_name(user_id, current_group_id)
         .unwrap_or_else(|| "群友".to_string());
     format!("# 关于{}的记忆\n{}", display_name, lines.join("\n"))
@@ -398,13 +473,17 @@ pub fn get_context(user_id: u64, current_group_id: u64) -> String {
 /// 获取群内其他成员的记忆（交叉引用）
 pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
     let participants = crate::working_memory::get_participants(group_id);
-    if participants.is_empty() { return String::new(); }
+    if participants.is_empty() {
+        return String::new();
+    }
 
     let cfg = &crate::config::get().memory;
     let mut user_blocks = Vec::new();
 
     for &uid in &participants {
-        if uid == exclude_user || uid == 0 { continue; }
+        if uid == exclude_user || uid == 0 {
+            continue;
+        }
 
         let global = crate::memory::store::load_user_memory(uid);
         let group_user = crate::memory::store::load_group_user_memory(group_id, uid);
@@ -419,15 +498,23 @@ pub fn get_group_context(group_id: u64, exclude_user: u64) -> String {
         }
     }
 
-    if user_blocks.is_empty() { return String::new(); }
+    if user_blocks.is_empty() {
+        return String::new();
+    }
     format!("# 群内其他成员的记忆\n{}", user_blocks.join("\n"))
 }
 
 /// 获取群级别记忆（groups/{gid}/group.json）
 pub fn get_group_level_context(group_id: u64) -> String {
     let mem = crate::memory::store::load_group_memory(group_id);
-    if mem.entries.is_empty() { return String::new(); }
-    let lines: Vec<String> = mem.entries.iter().map(|e| format!("- {}", e.content)).collect();
+    if mem.entries.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = mem
+        .entries
+        .iter()
+        .map(|e| format!("- {}", e.content))
+        .collect();
     format!("# 群记忆\n{}", lines.join("\n"))
 }
 
@@ -439,8 +526,11 @@ pub fn check_forget_command(user_id: u64, message: &str) -> Option<String> {
         if message.contains(pattern) {
             let content = message
                 .replace(pattern, "")
-                .replace("我刚才说的", "").replace("刚才说的", "").replace("刚才说", "")
-                .trim().to_string();
+                .replace("我刚才说的", "")
+                .replace("刚才说的", "")
+                .replace("刚才说", "")
+                .trim()
+                .to_string();
             if content.is_empty() {
                 forget_all(user_id);
                 return Some("已清除相关记忆".to_string());

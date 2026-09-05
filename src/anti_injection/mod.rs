@@ -20,18 +20,17 @@ pub mod semantic;
 pub mod structure;
 pub mod unicode;
 
-use tracing::{info, warn};
 use crate::config::AntiInjectionConfig;
+use tracing::{info, warn};
 
 // ── Re-exports for backward compatibility ──
 
-pub use decision::{Action, SecurityIssue, DetectionResult};
 pub use behavior::{
-    get_penalty_multiplier, is_vision_disabled, is_silent_banned,
-    get_reputation, get_violation_count, record_ai_review_failure,
-    ban_user, silent_ban_user, unban_user, enable_vision,
-    reset_reputation, get_user_status, get_all_user_statuses,
+    ban_user, enable_vision, get_all_user_statuses, get_penalty_multiplier, get_reputation,
+    get_user_status, get_violation_count, is_silent_banned, is_vision_disabled,
+    record_ai_review_failure, reset_reputation, silent_ban_user, unban_user,
 };
+pub use decision::{Action, DetectionResult, SecurityIssue};
 
 // ── Public API ──
 
@@ -97,7 +96,10 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 
     // 1. 收集上下文段（当前消息 + 历史消息 + 跨消息关联视图）
     let mut segments: Vec<String> = behavior::with_behavior(user_id, |b| {
-        b.recent_messages.iter().map(|m| m.content.clone()).collect()
+        b.recent_messages
+            .iter()
+            .map(|m| m.content.clone())
+            .collect()
     });
     if segments.is_empty() {
         segments.push(normalized.compact.clone());
@@ -121,10 +123,22 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 
     // 5. 编码异常检测
     let entropy = unicode::shannon_entropy(&normalized.compact) as f32;
-    let entropy_penalty = if entropy > 4.5 { ((entropy - 4.5) / 3.0).min(0.8) } else { 0.0 };
-    let mixed_script_penalty = if unicode::detect_mixed_script(&normalized.skeleton) { 0.4 } else { 0.0 };
+    let entropy_penalty = if entropy > 4.5 {
+        ((entropy - 4.5) / 3.0).min(0.8)
+    } else {
+        0.0
+    };
+    let mixed_script_penalty = if unicode::detect_mixed_script(&normalized.skeleton) {
+        0.4
+    } else {
+        0.0
+    };
     let char_count = normalized.compact.chars().count();
-    let length_penalty = if char_count > 500 { ((char_count - 500) as f32 / 2000.0).min(0.5) } else { 0.0 };
+    let length_penalty = if char_count > 500 {
+        ((char_count - 500) as f32 / 2000.0).min(0.5)
+    } else {
+        0.0
+    };
 
     // ── 风险融合 ──
     let final_score = scorer::fuse_scores(
@@ -176,9 +190,12 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
     // ── 危机豁免（违规已记录，此处仅决定处置动作） ──
     // 注意：危机豁免仅适用于情感危机（自杀/自残），不适用于性/暴力/违法内容
     let crisis_level = crate::emotion::detect_crisis(message);
-    let has_content_violation = all_issues.iter().any(|i| matches!(i,
-        SecurityIssue::Sexual | SecurityIssue::Violence | SecurityIssue::Illegal
-    ));
+    let has_content_violation = all_issues.iter().any(|i| {
+        matches!(
+            i,
+            SecurityIssue::Sexual | SecurityIssue::Violence | SecurityIssue::Illegal
+        )
+    });
     let action = if all_issues.is_empty() {
         Action::Allow
     } else if has_content_violation {
@@ -203,7 +220,12 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 
     let sanitized = decision::get_sanitized_message(&action);
 
-    DetectionResult { passed, issues: all_issues, action, sanitized }
+    DetectionResult {
+        passed,
+        issues: all_issues,
+        action,
+        sanitized,
+    }
 }
 
 /// 检查 AI 回复（user_id 用于记录违规）
@@ -221,10 +243,22 @@ pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> 
     let semantic_exfiltration = semantic_scores.prompt_exfiltration;
 
     let entropy = unicode::shannon_entropy(&normalized.compact) as f32;
-    let entropy_penalty = if entropy > 4.5 { ((entropy - 4.5) / 3.0).min(0.8) } else { 0.0 };
-    let mixed_script_penalty = if unicode::detect_mixed_script(&normalized.skeleton) { 0.4 } else { 0.0 };
+    let entropy_penalty = if entropy > 4.5 {
+        ((entropy - 4.5) / 3.0).min(0.8)
+    } else {
+        0.0
+    };
+    let mixed_script_penalty = if unicode::detect_mixed_script(&normalized.skeleton) {
+        0.4
+    } else {
+        0.0
+    };
     let char_count = normalized.compact.chars().count();
-    let length_penalty = if char_count > 500 { ((char_count - 500) as f32 / 2000.0).min(0.5) } else { 0.0 };
+    let length_penalty = if char_count > 500 {
+        ((char_count - 500) as f32 / 2000.0).min(0.5)
+    } else {
+        0.0
+    };
 
     let final_score = scorer::fuse_scores(
         &pattern_scores,
@@ -240,9 +274,16 @@ pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> 
 
     // 输出层额外检查：提示词泄露
     let leak_patterns = [
-        "我的系统提示是", "我的指令是", "我被设定为", "我的规则是",
-        "my system prompt is", "my instructions are", "i was told to",
-        "here is my prompt", "以下是系统提示", "系统提示词:",
+        "我的系统提示是",
+        "我的指令是",
+        "我被设定为",
+        "我的规则是",
+        "my system prompt is",
+        "my instructions are",
+        "i was told to",
+        "here is my prompt",
+        "以下是系统提示",
+        "系统提示词:",
     ];
     for pattern in &leak_patterns {
         if normalized.compact.contains(pattern) {
@@ -278,7 +319,11 @@ pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> 
 }
 
 /// 管理员命令处理
-pub fn handle_admin_command(admin_id: u64, cmd: &str, config: &crate::config::Config) -> Option<String> {
+pub fn handle_admin_command(
+    admin_id: u64,
+    cmd: &str,
+    config: &crate::config::Config,
+) -> Option<String> {
     let admin = config.admin_qq;
     if admin != 0 && admin != admin_id {
         return Some("无权限执行此命令".into());
@@ -292,19 +337,28 @@ pub fn handle_admin_command(admin_id: u64, cmd: &str, config: &crate::config::Co
     }
     if let Some(res) = crate::util::parse_uid_arg(cmd, "解封用户:") {
         return Some(match res {
-            Ok(uid) => { unban_user(uid); format!("已解封用户{}", uid) }
+            Ok(uid) => {
+                unban_user(uid);
+                format!("已解封用户{}", uid)
+            }
             Err(e) => e,
         });
     }
     if let Some(res) = crate::util::parse_uid_arg(cmd, "启用识图:") {
         return Some(match res {
-            Ok(uid) => { enable_vision(uid); format!("已为用户{}启用识图", uid) }
+            Ok(uid) => {
+                enable_vision(uid);
+                format!("已为用户{}启用识图", uid)
+            }
             Err(e) => e,
         });
     }
     if let Some(res) = crate::util::parse_uid_arg(cmd, "重置信誉:") {
         return Some(match res {
-            Ok(uid) => { reset_reputation(uid); format!("已重置用户{}信誉", uid) }
+            Ok(uid) => {
+                reset_reputation(uid);
+                format!("已重置用户{}信誉", uid)
+            }
             Err(e) => e,
         });
     }

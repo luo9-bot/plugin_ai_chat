@@ -133,7 +133,8 @@ pub fn get_dominant_motivation() -> Option<(String, f32)> {
         ("好奇心", m.curiosity_drive),
     ];
 
-    motivations.into_iter()
+    motivations
+        .into_iter()
         .filter(|(_, v)| *v > 0.3)
         .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
         .map(|(name, strength)| (name.to_string(), strength))
@@ -158,7 +159,8 @@ pub fn record_open_thread(user_id: u64, group_id: u64, topic: &str, unfinished: 
     let now = crate::util::now_secs();
 
     // 去重
-    m.open_threads.retain(|t| t.topic != topic || t.user_id != user_id);
+    m.open_threads
+        .retain(|t| t.topic != topic || t.user_id != user_id);
 
     m.open_threads.push(OpenThread {
         topic: topic.to_string(),

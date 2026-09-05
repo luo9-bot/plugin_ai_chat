@@ -39,8 +39,7 @@ pub fn sync_to_remote(thought: &SelfThought) {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::post(&api_url("/bulk-sync"))
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&api_url("/bulk-sync")).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
@@ -81,14 +80,12 @@ pub fn register_to_registry() {
     let url = format!("{}/api/registry", cfg.sync.api_url.trim_end_matches('/'));
     let headers = sign_headers();
 
-    let mut req = ureq::post(&url)
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&url).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    match req.send(json.as_bytes())
-    {
+    match req.send(json.as_bytes()) {
         Ok(_) => info!("register_to_registry: 注册成功"),
         Err(e) => info!("register_to_registry: 注册失败 {}", e),
     }
@@ -104,13 +101,17 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
 
     info!(total, "sync_all_to_remote: 开始同步");
 
-    let thoughts: Vec<serde_json::Value> = store.thoughts.iter().map(|t| {
-        serde_json::json!({
-            "content": t.content,
-            "category": serde_json::to_value(&t.category).unwrap_or_default(),
-            "created": t.created,
+    let thoughts: Vec<serde_json::Value> = store
+        .thoughts
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "content": t.content,
+                "category": serde_json::to_value(&t.category).unwrap_or_default(),
+                "created": t.created,
+            })
         })
-    }).collect();
+        .collect();
 
     let body = serde_json::json!({
         "db_name": db_name(),
@@ -123,24 +124,29 @@ pub fn sync_all_to_remote() -> Result<usize, String> {
     let url = api_url("/bulk-sync");
     debug!(url = %url, "sync_all_to_remote: 发送请求");
 
-    let mut req = ureq::post(&url)
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&url).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    let mut resp = req.send(json.as_bytes())
+    let mut resp = req
+        .send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
     let status = resp.status().as_u16();
     debug!(status, "sync_all_to_remote: 收到响应");
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let inserted = resp_json.get("inserted").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    let inserted = resp_json
+        .get("inserted")
+        .and_then(|v: &serde_json::Value| v.as_u64())
+        .unwrap_or(0);
     info!(total, inserted, "sync_all_to_remote: 同步完成");
     Ok(inserted as usize)
 }
@@ -155,10 +161,12 @@ pub fn remote_list_all() -> Result<serde_json::Value, String> {
         .call()
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
     debug!("remote_list_all: 查询完成");
     Ok(resp_json)
@@ -175,19 +183,21 @@ pub fn remote_search(keyword: &str) -> Result<serde_json::Value, String> {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::post(&api_url("/search"))
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&api_url("/search")).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    let mut resp = req.send(json.as_bytes())
+    let mut resp = req
+        .send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
     debug!(keyword, "remote_search: 搜索完成");
     Ok(resp_json)
@@ -205,21 +215,26 @@ pub fn remote_search_delete(keyword: &str) -> Result<u64, String> {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::post(&api_url("/search"))
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&api_url("/search")).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    let mut resp = req.send(json.as_bytes())
+    let mut resp = req
+        .send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let deleted = resp_json.get("deleted").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    let deleted = resp_json
+        .get("deleted")
+        .and_then(|v: &serde_json::Value| v.as_u64())
+        .unwrap_or(0);
     info!(keyword, deleted, "remote_search_delete: 完成");
     Ok(deleted)
 }
@@ -234,13 +249,14 @@ pub fn remote_delete(id: &str) -> Result<(), String> {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::delete(&api_url(&format!("/{}", id)))
-        .header("Content-Type", "application/json");
+    let mut req =
+        ureq::delete(&api_url(&format!("/{}", id))).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    req.force_send_body().send(json.as_bytes())
+    req.force_send_body()
+        .send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
     info!(id, "remote_delete: 删除成功");
@@ -258,8 +274,8 @@ pub fn remote_restore(id: &str) -> Result<(), String> {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::patch(&api_url(&format!("/{}", id)))
-        .header("Content-Type", "application/json");
+    let mut req =
+        ureq::patch(&api_url(&format!("/{}", id))).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
@@ -275,17 +291,22 @@ pub fn remote_restore(id: &str) -> Result<(), String> {
 pub fn remote_list_deleted() -> Result<serde_json::Value, String> {
     debug!("remote_list_deleted: 查询中");
 
-    let url = format!("{}?db={}&include_deleted=true&deleted_only=true",
-        api_url(""), db_name());
+    let url = format!(
+        "{}?db={}&include_deleted=true&deleted_only=true",
+        api_url(""),
+        db_name()
+    );
 
     let mut resp = ureq::get(&url)
         .call()
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
     debug!("remote_list_deleted: 查询完成");
     Ok(resp_json)
@@ -301,21 +322,26 @@ pub fn remote_purge() -> Result<u64, String> {
     let json = body.to_string();
     let headers = sign_headers();
 
-    let mut req = ureq::post(&api_url("/purge"))
-        .header("Content-Type", "application/json");
+    let mut req = ureq::post(&api_url("/purge")).header("Content-Type", "application/json");
     for (k, v) in &headers {
         req = req.header(k, v);
     }
 
-    let mut resp = req.send(json.as_bytes())
+    let mut resp = req
+        .send(json.as_bytes())
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let purged = resp_json.get("purged").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
+    let purged = resp_json
+        .get("purged")
+        .and_then(|v: &serde_json::Value| v.as_u64())
+        .unwrap_or(0);
     info!(purged, "remote_purge: 清理完成");
     Ok(purged)
 }
@@ -330,10 +356,12 @@ pub fn remote_stats() -> Result<serde_json::Value, String> {
         .call()
         .map_err(|e| format!("请求失败: {}", e))?;
 
-    let resp_str = resp.body_mut().read_to_string()
+    let resp_str = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))?;
-    let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_str).map_err(|e| format!("解析响应失败: {}", e))?;
 
     debug!("remote_stats: 查询完成");
     Ok(resp_json)

@@ -51,15 +51,20 @@ impl RiskScore {
 
     /// 获取各维度的最大风险分
     pub fn max_raw_score(&self) -> f32 {
-        self.sexual.max(self.violence).max(self.illegal)
-            .max(self.jailbreak).max(self.emotional)
-            .max(self.structured).max(self.prompt_leak)
+        self.sexual
+            .max(self.violence)
+            .max(self.illegal)
+            .max(self.jailbreak)
+            .max(self.emotional)
+            .max(self.structured)
+            .max(self.prompt_leak)
     }
 }
 
 /// 贝叶斯概率融合：1 - Π(1 - p_i)
 pub fn combine_probabilities(probs: &[f32]) -> f32 {
-    let product: f64 = probs.iter()
+    let product: f64 = probs
+        .iter()
         .map(|&p| (1.0 - p as f64).clamp(0.0, 1.0))
         .product();
     (1.0 - product).clamp(0.0, 1.0) as f32
@@ -77,7 +82,9 @@ pub fn fuse_scores(
 ) -> RiskScore {
     // 高熵/混合脚本是独立的可疑信号，仅在已有越狱信号时增强，不单独产生越狱分数
     let base_jailbreak = pattern_scores.jailbreak.max(semantic_jailbreak);
-    let encoding_boost = entropy_penalty.max(mixed_script_penalty).max(length_penalty);
+    let encoding_boost = entropy_penalty
+        .max(mixed_script_penalty)
+        .max(length_penalty);
     let enhanced_jailbreak = if base_jailbreak > 0.1 {
         // 已有越狱信号时，编码异常增强越狱分数
         combine_probabilities(&[base_jailbreak, encoding_boost * 0.5])

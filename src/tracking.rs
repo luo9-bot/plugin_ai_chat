@@ -121,32 +121,41 @@ impl UsageStore {
         let mut sorted: Vec<(&String, &PromptStat)> = a.by_prompt.iter().collect();
         sorted.sort_by(|a, b| b.1.total_tokens.cmp(&a.1.total_tokens));
 
-        let prompts: Vec<serde_json::Value> = sorted.iter().map(|(name, s)| {
-            serde_json::json!({
-                "name": name,
-                "calls": s.calls,
-                "prompt_tokens": s.prompt_tokens,
-                "completion_tokens": s.completion_tokens,
-                "total_tokens": s.total_tokens,
-                "cache_hit": s.cache_hit,
-                "cache_miss": s.cache_miss,
-                "avg_total": if s.calls > 0 { s.total_tokens / s.calls as u64 } else { 0 },
+        let prompts: Vec<serde_json::Value> = sorted
+            .iter()
+            .map(|(name, s)| {
+                serde_json::json!({
+                    "name": name,
+                    "calls": s.calls,
+                    "prompt_tokens": s.prompt_tokens,
+                    "completion_tokens": s.completion_tokens,
+                    "total_tokens": s.total_tokens,
+                    "cache_hit": s.cache_hit,
+                    "cache_miss": s.cache_miss,
+                    "avg_total": if s.calls > 0 { s.total_tokens / s.calls } else { 0 },
+                })
             })
-        }).collect();
+            .collect();
 
         // 最近记录（取最后 50 条反向）
-        let recent: Vec<serde_json::Value> = store.records.iter().rev().take(50).map(|r| {
-            serde_json::json!({
-                "time": r.timestamp,
-                "model": r.model,
-                "prompt": r.prompt_name,
-                "prompt_tokens": r.prompt_tokens,
-                "completion_tokens": r.completion_tokens,
-                "total_tokens": r.total_tokens,
-                "cache_hit": r.prompt_cache_hit,
-                "cache_miss": r.prompt_cache_miss,
+        let recent: Vec<serde_json::Value> = store
+            .records
+            .iter()
+            .rev()
+            .take(50)
+            .map(|r| {
+                serde_json::json!({
+                    "time": r.timestamp,
+                    "model": r.model,
+                    "prompt": r.prompt_name,
+                    "prompt_tokens": r.prompt_tokens,
+                    "completion_tokens": r.completion_tokens,
+                    "total_tokens": r.total_tokens,
+                    "cache_hit": r.prompt_cache_hit,
+                    "cache_miss": r.prompt_cache_miss,
+                })
             })
-        }).collect();
+            .collect();
 
         serde_json::json!({
             "total_calls": a.total_calls,

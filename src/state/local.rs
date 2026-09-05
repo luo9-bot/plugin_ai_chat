@@ -67,19 +67,28 @@ impl State {
             batch.last_update = now;
             batch.record_timestamps.push(record_ts);
         } else {
-            self.batches.insert(key, MessageBatch {
-                messages: message.to_string(),
-                last_update: now,
-                record_timestamps: vec![record_ts],
-            });
+            self.batches.insert(
+                key,
+                MessageBatch {
+                    messages: message.to_string(),
+                    last_update: now,
+                    record_timestamps: vec![record_ts],
+                },
+            );
         }
     }
 
-    pub fn take_expired_batch(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<MessageBatch> {
+    pub fn take_expired_batch(
+        &mut self,
+        group_id: u64,
+        user_id: u64,
+        timeout_ms: u64,
+    ) -> Option<MessageBatch> {
         let key: CtxKey = (group_id, user_id);
-        let should_take = self.batches.get(&key).is_some_and(|batch| {
-            batch.last_update.elapsed().as_millis() >= timeout_ms as u128
-        });
+        let should_take = self
+            .batches
+            .get(&key)
+            .is_some_and(|batch| batch.last_update.elapsed().as_millis() >= timeout_ms as u128);
         if should_take {
             self.batches.remove(&key)
         } else {
@@ -87,16 +96,28 @@ impl State {
         }
     }
 
-    pub fn take_batch_for_processing(&mut self, group_id: u64, user_id: u64) -> Option<(String, Vec<u64>)> {
+    pub fn take_batch_for_processing(
+        &mut self,
+        group_id: u64,
+        user_id: u64,
+    ) -> Option<(String, Vec<u64>)> {
         let key: CtxKey = (group_id, user_id);
-        self.batches.remove(&key).map(|batch| (batch.messages, batch.record_timestamps))
+        self.batches
+            .remove(&key)
+            .map(|batch| (batch.messages, batch.record_timestamps))
     }
 
-    pub fn take_new_messages(&mut self, group_id: u64, user_id: u64, timeout_ms: u64) -> Option<String> {
+    pub fn take_new_messages(
+        &mut self,
+        group_id: u64,
+        user_id: u64,
+        timeout_ms: u64,
+    ) -> Option<String> {
         let key: CtxKey = (group_id, user_id);
-        let should_take = self.batches.get(&key).is_some_and(|batch| {
-            batch.last_update.elapsed().as_millis() >= timeout_ms as u128
-        });
+        let should_take = self
+            .batches
+            .get(&key)
+            .is_some_and(|batch| batch.last_update.elapsed().as_millis() >= timeout_ms as u128);
         if should_take {
             self.batches.remove(&key).map(|batch| batch.messages)
         } else {

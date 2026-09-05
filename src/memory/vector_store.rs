@@ -16,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tracing::{debug, warn};
 
-use sha1::Digest;
 use super::embedding::l2_normalize;
+use sha1::Digest;
 
 // ── 文件格式 v2 ─────────────────────────────────────────────────
 // [magic: u32 = 0x56435452] ("VCTR")
@@ -146,7 +146,11 @@ impl VectorStore {
     /// 添加向量（以 content 为唯一键）
     fn add(&mut self, content: &str, vector: Vec<f32>) -> bool {
         if vector.len() != self.dim {
-            warn!("vector_store: dimension mismatch, expected {}, got {}", self.dim, vector.len());
+            warn!(
+                "vector_store: dimension mismatch, expected {}, got {}",
+                self.dim,
+                vector.len()
+            );
             return false;
         }
 
@@ -155,8 +159,8 @@ impl VectorStore {
         l2_normalize(&mut vec);
 
         // 检查是否已存在（同时检查两个存储）
-        let exists = self.raw_vectors.contains_key(content)
-            || self.quantized_vectors.contains_key(content);
+        let exists =
+            self.raw_vectors.contains_key(content) || self.quantized_vectors.contains_key(content);
 
         if exists {
             // 更新已有向量
@@ -188,7 +192,8 @@ impl VectorStore {
         }
 
         // 写缓冲区
-        self.write_buffer.push((id, content.to_string(), vec.clone()));
+        self.write_buffer
+            .push((id, content.to_string(), vec.clone()));
 
         // 储水池采样
         self.reservoir_seen += 1;
@@ -265,7 +270,11 @@ impl VectorStore {
             })
             .collect();
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(top_k);
         results
     }
@@ -290,9 +299,11 @@ impl VectorStore {
             .iter()
             .map(|(content, qvec)| {
                 // 在 u8 空间直接计算点积，然后用量化参数缩放
-                let dot: u32 = quantized_query.iter().zip(qvec.iter())
+                let dot: u32 = quantized_query
+                    .iter()
+                    .zip(qvec.iter())
                     .map(|(&a, &b)| a as u32 * b as u32)
-                .sum();
+                    .sum();
                 SearchResult {
                     content: content.clone(),
                     score: dot as f64,
@@ -300,29 +311,22 @@ impl VectorStore {
             })
             .collect();
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(top_k);
         results
     }
 
-    /// 查询是否包含某 content
-    fn contains(&self, content: &str) -> bool {
-        if self.trained {
-            self.quantized_vectors.contains_key(content)
-        } else {
-            self.raw_vectors.contains_key(content)
-        }
-    }
-
     /// 移除向量
     fn remove(&mut self, content: &str) {
-        if let Some(id) = self.id_to_content.iter().find_map(|(k, v)| {
-            if v == content {
-                Some(*k)
-            } else {
-                None
-            }
-        }) {
+        if let Some(id) = self
+            .id_to_content
+            .iter()
+            .find_map(|(k, v)| if v == content { Some(*k) } else { None })
+        {
             self.id_to_content.remove(&id);
         }
         self.raw_vectors.remove(content);
@@ -410,7 +414,12 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
     if offset + 4 > data.len() {
         return (HashMap::new(), 0);
     }
-    let count = u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]) as usize;
+    let count = u32::from_le_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]) as usize;
     offset += 4;
 
     let mut vectors = HashMap::with_capacity(count);
@@ -418,21 +427,36 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
     for _ in 0..count {
         // v2: 读取 content 作为 key
         let key = if version >= 2 {
-            if offset + 4 > data.len() { break; }
+            if offset + 4 > data.len() {
+                break;
+            }
             let content_len = u32::from_le_bytes([
-                data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
             ]) as usize;
             offset += 4;
-            if offset + content_len > data.len() { break; }
+            if offset + content_len > data.len() {
+                break;
+            }
             let content = String::from_utf8_lossy(&data[offset..offset + content_len]).into_owned();
             offset += content_len;
             content
         } else {
             // v1: 读取 id，用 id 字符串作为 key
-            if offset + 8 > data.len() { break; }
+            if offset + 8 > data.len() {
+                break;
+            }
             let id = i64::from_le_bytes([
-                data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-                data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
             ]);
             offset += 8;
             id.to_string()
@@ -467,7 +491,10 @@ fn load_from_disk() -> (HashMap<String, Vec<f32>>, usize) {
         }
     }
 
-    debug!(count = vectors.len(), dim, trained, version, "vector_store: loaded from disk");
+    debug!(
+        count = vectors.len(),
+        dim, trained, version, "vector_store: loaded from disk"
+    );
     (vectors, dim)
 }
 
@@ -480,7 +507,11 @@ fn save_to_disk(store: &VectorStore) {
     } else {
         store.raw_vectors.len()
     };
-    let entry_size = if store.trained { store.dim } else { store.dim * 4 };
+    let entry_size = if store.trained {
+        store.dim
+    } else {
+        store.dim * 4
+    };
     let header_size = 17; // magic(4) + version(4) + dimension(4) + trained(1) + count(4)
     let quant_params_size = if store.trained { store.dim * 8 } else { 0 };
     // 预估 content 平均长度 100 字节
@@ -569,7 +600,10 @@ pub fn init() {
     }
 
     *guard = Some(store);
-    debug!("vector_store: initialized from disk, {} vectors, dim={}", vector_count, dim);
+    debug!(
+        "vector_store: initialized from disk, {} vectors, dim={}",
+        vector_count, dim
+    );
 }
 
 /// 添加向量（content 作为唯一键）
@@ -616,9 +650,14 @@ pub fn all_vectors() -> HashMap<String, Vec<f32>> {
     let store = guard.as_ref().expect("vector_store not initialized");
     if store.trained {
         // 训练后，反量化所有向量（仅用于兼容，不推荐使用）
-        store.quantized_vectors.iter()
+        store
+            .quantized_vectors
+            .iter()
             .filter_map(|(content, qvec)| {
-                store.quant_params.as_ref().map(|p| (content.clone(), p.dequantize(qvec)))
+                store
+                    .quant_params
+                    .as_ref()
+                    .map(|p| (content.clone(), p.dequantize(qvec)))
             })
             .collect()
     } else {

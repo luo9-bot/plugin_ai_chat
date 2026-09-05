@@ -112,23 +112,29 @@ pub fn run_forgetting_scan() {
                 && fastrand::f32() < forgetting_rate
             {
                 // 降级为Normal但标记为更低的access_count（相当于降权）
-                entry.access_count = entry.access_count.saturating_sub(
-                    (entry.access_count as f32 * 0.5) as u32
-                );
+                entry.access_count = entry
+                    .access_count
+                    .saturating_sub((entry.access_count as f32 * 0.5) as u32);
                 modified = true;
                 forgotten_count += 1;
             }
         }
 
         if modified {
-            crate::memory::store::save_user_memory(user_id, &crate::memory::store::MemoryFile {
-                entries: new_entries,
-            });
+            crate::memory::store::save_user_memory(
+                user_id,
+                &crate::memory::store::MemoryFile {
+                    entries: new_entries,
+                },
+            );
         }
     }
 
     save_state(&state);
-    debug!(forgotten_count, "unpredictability: forgetting scan completed");
+    debug!(
+        forgotten_count,
+        "unpredictability: forgetting scan completed"
+    );
 }
 
 /// 检查是否应该触发联想跳跃
@@ -146,12 +152,7 @@ pub fn should_association_jump() -> bool {
 /// 记录观点漂移
 ///
 /// 每次生成回复后，检查是否暗示了与现有偏好矛盾的倾向
-pub fn record_opinion_drift(
-    topic: &str,
-    old_stance: &str,
-    new_stance: &str,
-    reason: Option<&str>,
-) {
+pub fn record_opinion_drift(topic: &str, old_stance: &str, new_stance: &str, reason: Option<&str>) {
     let cfg = config::get();
     if !cfg.humanity.unpredictability_enabled {
         return;
@@ -177,7 +178,10 @@ pub fn record_opinion_drift(
     }
 
     save_state(&state);
-    debug!(topic, old_stance, new_stance, "unpredictability: opinion drift recorded");
+    debug!(
+        topic,
+        old_stance, new_stance, "unpredictability: opinion drift recorded"
+    );
 }
 
 /// 心血来潮检查

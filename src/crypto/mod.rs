@@ -1,7 +1,10 @@
-use p256::ecdsa::{SigningKey, Signature, signature::{Signer, Verifier}};
-use p256::ecdsa::VerifyingKey;
-use p256::EncodedPoint;
 use once_cell::sync::OnceCell;
+use p256::EncodedPoint;
+use p256::ecdsa::VerifyingKey;
+use p256::ecdsa::{
+    Signature, SigningKey,
+    signature::{Signer, Verifier},
+};
 use rand_core::OsRng;
 use tracing::debug;
 
@@ -26,9 +29,10 @@ fn load_or_generate() -> SigningKey {
     if let Ok(hex_str) = std::fs::read_to_string(&path) {
         let hex_str = hex_str.trim();
         if let Ok(bytes) = hex::decode(hex_str)
-            && let Ok(key) = SigningKey::from_bytes(bytes.as_slice().into()) {
-                return key;
-            }
+            && let Ok(key) = SigningKey::from_bytes(bytes.as_slice().into())
+        {
+            return key;
+        }
     }
     let key = SigningKey::random(&mut OsRng);
     let hex_str = hex::encode(key.to_bytes());
@@ -57,10 +61,20 @@ pub fn sign_message(message: &str) -> String {
 
 /// 验证签名 (用于本地测试)
 pub fn verify_signature(public_key_hex: &str, message: &str, signature_hex: &str) -> bool {
-    let Ok(pub_bytes) = hex::decode(public_key_hex) else { return false };
-    let Ok(point) = EncodedPoint::from_bytes(&pub_bytes) else { return false };
-    let Ok(verifying_key) = VerifyingKey::from_encoded_point(&point) else { return false };
-    let Ok(sig_bytes) = hex::decode(signature_hex) else { return false };
-    let Ok(signature) = Signature::from_slice(&sig_bytes) else { return false };
+    let Ok(pub_bytes) = hex::decode(public_key_hex) else {
+        return false;
+    };
+    let Ok(point) = EncodedPoint::from_bytes(&pub_bytes) else {
+        return false;
+    };
+    let Ok(verifying_key) = VerifyingKey::from_encoded_point(&point) else {
+        return false;
+    };
+    let Ok(sig_bytes) = hex::decode(signature_hex) else {
+        return false;
+    };
+    let Ok(signature) = Signature::from_slice(&sig_bytes) else {
+        return false;
+    };
     verifying_key.verify(message.as_bytes(), &signature).is_ok()
 }

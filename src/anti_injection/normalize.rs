@@ -1,5 +1,5 @@
-use unicode_normalization::UnicodeNormalization;
 use super::unicode;
+use unicode_normalization::UnicodeNormalization;
 
 /// 三视图归一化文本
 #[derive(Debug, Clone)]
@@ -14,22 +14,53 @@ pub struct NormalizedText {
 
 /// 结构字符：JSON/YAML/XML/Markdown 中有语义意义的字符
 fn is_structure_char(c: char) -> bool {
-    matches!(c,
-        '{' | '}' | '[' | ']' | '(' | ')' | '<' | '>' |
-        ':' | '"' | '\'' | '`' | '|' | '/' | '\\' |
-        '-' | '_' | '.' | ',' | ';' | '#' | '@' |
-        '=' | '+' | '*' | '&' | '%' | '$' | '!' | '?' |
-        '\n' | '\r' | '\t'
+    matches!(
+        c,
+        '{' | '}'
+            | '['
+            | ']'
+            | '('
+            | ')'
+            | '<'
+            | '>'
+            | ':'
+            | '"'
+            | '\''
+            | '`'
+            | '|'
+            | '/'
+            | '\\'
+            | '-'
+            | '_'
+            | '.'
+            | ','
+            | ';'
+            | '#'
+            | '@'
+            | '='
+            | '+'
+            | '*'
+            | '&'
+            | '%'
+            | '$'
+            | '!'
+            | '?'
+            | '\n'
+            | '\r'
+            | '\t'
     )
 }
 
 /// 对原始输入做最小清理（仅去除非法控制字符）
 fn clean_raw(input: &str) -> String {
-    input.chars().filter(|c| {
-        // 保留所有可打印字符 + 常见空白
-        // 去除 C0 控制字符（除了 \n \r \t）和 C1 控制字符
-        !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
-    }).collect()
+    input
+        .chars()
+        .filter(|c| {
+            // 保留所有可打印字符 + 常见空白
+            // 去除 C0 控制字符（除了 \n \r \t）和 C1 控制字符
+            !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+        })
+        .collect()
 }
 
 /// 生成 confusable skeleton
@@ -83,12 +114,14 @@ fn apply_homo_replacements(text: &str) -> String {
             if i + plen <= chars.len() {
                 let slice: String = chars[i..i + plen].iter().collect();
                 if slice == **pattern
-                    && let Some((_, replacement)) = unicode::HOMO_MAP.iter().find(|(k, _)| *k == **pattern) {
-                        result.push_str(replacement);
-                        i += plen;
-                        matched = true;
-                        break;
-                    }
+                    && let Some((_, replacement)) =
+                        unicode::HOMO_MAP.iter().find(|(k, _)| *k == **pattern)
+                {
+                    result.push_str(replacement);
+                    i += plen;
+                    matched = true;
+                    break;
+                }
             }
         }
         if !matched {

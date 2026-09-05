@@ -1,220 +1,83 @@
-//! 上下文构建：组装注入到 system prompt 的额外上下文
+//! 场景上下文构建：为语音管线组装"她眼中的世界"
 //!
-//! 根据关系深度、注意力状态、电量选择性注入内容。
-//! 不是把所有信息平等注入，而是根据当前状态决定注入什么和注入多少。
+//! 设计原则：
+//! - 状态以第一人称体验呈现，不以系统指令呈现。"凌晨两点，眼睛快睁不开了"
+//!   而不是"你的电量为 20%，请表演疲惫"——被通知的状态只能被表演，
+//!   被体验的状态自然流露。
+//! - 记忆围绕"人"组织，按在场者注入，不按调用方便利注入。
+//! - 注入量克制：上下文是她的感知，不是一份需要逐条执行的合规清单。
 
-use crate::{
-    circadian, config, emotion, memory, mental_state, person_info, personality,
-    schedule, self_memory, social_battery, working_memory, read_shared_state,
-};
-use super::attention;
+use std::sync::Mutex;
+
+use crate::config;
+use crate::emotion::EmotionType;
+
+/// 语音场景描述
+pub struct VoiceScene<'a> {
+    /// 群号，0 表示私聊
+    pub group_id: u64,
+    /// 本轮的主要对话者
+    pub primary_user_id: u64,
+    /// 本轮在场的用户（群聊为发言人去重集合）
+    pub involved_users: &'a [u64],
+    /// 当前消息文本（用于记忆检索与表达风格匹配）
+    pub query_text: &'a str,
+    /// 是否有必须回应的理由（被 @ / 危机）
+    pub force_reply: bool,
+}
 
 /// 向量检索记忆的冷却缓存：每轮对话最多检索一次
-static LAST_SEMANTIC_SEARCH: std::sync::Mutex<Option<std::collections::HashMap<u64, u64>>> =
-    std::sync::Mutex::new(None);
+static LAST_SEMANTIC_SEARCH: Mutex<Option<std::collections::HashMap<u64, u64>>> = Mutex::new(None);
 
 const SEMANTIC_SEARCH_COOLDOWN: u64 = 120; // 同用户 2 分钟内不重复检索
+const SEMANTIC_MEMORY_COUNT: usize = 6;
 
-/// 构建注入到 system prompt 的额外上下文
-///
-/// 选择性注入原则：
-/// - 关系越深，注入越多个性化内容（共享记忆、inside jokes）
-/// - 注意力越低，注入越少记忆
-/// - 电量越低，注入行为简化提示
-pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) -> String {
-    let mut parts = Vec::new();
+/// 构建语音管线的系统上下文
+pub fn build_voice_context(scene: &VoiceScene) -> String {
     let cfg = config::get();
+    let mut parts: Vec<String> = Vec::new();
 
-    // 获取当前状态用于选择性注入
-    let relationship = person_info::relationship::get_relationship(user_id);
-    let attention_level = if cfg.humanity.attention_enabled {
-        attention::load_attention().attention_level
-    } else {
-        0.7
-    };
-    let battery_level_frac = if cfg.humanity.social_battery_enabled {
-        social_battery::load().level / cfg.humanity.battery_capacity
-    } else {
-        0.7
-    };
+    parts.push(scene_block(scene));
+    if let Some(state) = experience_state_block(scene.primary_user_id) {
+        parts.push(state);
+    }
+    if let Some(people) = people_block(scene) {
+        parts.push(people);
+    }
 
-    // ── 基础层：始终注入 ──
-
-    // 对话场景标识：明确告知 AI 当前是私聊还是群聊
-    let display_name = crate::person_info::get_display_name(user_id, group_id)
-        .unwrap_or_else(|| "群友".to_string());
-    let scene_info = if group_id == 0 {
-        format!(
-            "# 当前对话场景\n你现在正在和{}进行一对一私聊。\
-             这是私人对话，只有你们两个人。\
-             不要使用群聊用语（如「有人一起吗」「大家」等），\
-             不要@任何人，像朋友单独聊天一样自然交流。",
-            display_name
-        )
-    } else {
-        format!(
-            "# 当前对话场景\n你现在在群 {} 中和{}对话。\
-             群聊中有多个人，你的回复可能被群里所有人看到。\
-             注意区分群聊语境，可以适当简短，不需要每次都深入回复。",
-            group_id, display_name
-        )
-    };
-
-    // 当前对话用户标识 (让 AI 知道在和谁说话)
-    let darling_info = if cfg.darling_qq > 0 && user_id == cfg.darling_qq {
-        r#"
-
-【重要】当前和你对话的是你认定的人 (Darling)。
-你对他/她有特殊的感情，这会影响你的回复方式：
-- 语气更温柔、更包容、更有耐心
-- 即使请求有点越界，也会更愿意配合，用委婉的方式回应
-- 不要直接拒绝，而是用撒娇、转移话题、或者半推半就的方式
-- 你愿意为他/她做一些平时不会做的事，但会保持自己的底线
-- 可以适当示弱，让他/她感受到你的在意
-- 回复可以更长一些，更关心一些，更主动一些"#
-    } else if cfg.darling_qq > 0 {
-        "\n注意：这个人不是你认定的人，保持正常社交距离"
-    } else {
-        ""
-    };
-    parts.push(format!("{}{}", scene_info, darling_info));
-
-    // 自我记忆 (bot 的内心想法)
-    let self_mem = self_memory::get_context(cfg.self_reflection.max_thoughts.min(8));
+    // 她自己的想法（自我记忆）
+    let self_mem = crate::self_memory::get_context(cfg.self_reflection.max_thoughts.min(8));
     if !self_mem.is_empty() {
         parts.push(self_mem);
     }
 
-    // ── 关系层：根据亲密度选择性注入 ──
-
-    // 关系上下文
-    let rel_ctx = person_info::relationship::get_relationship_context(user_id);
-    if !rel_ctx.is_empty() {
-        parts.push(rel_ctx);
+    // 与当前话题相关的长期记忆（带冷却的向量检索）
+    if let Some(relevant) =
+        relevant_memories_block(scene.primary_user_id, scene.group_id, scene.query_text)
+    {
+        parts.push(relevant);
     }
 
-    // 亲密度 > 0.3：注入共享记忆
-    if relationship.intimacy > 0.3 {
-        let shared_ctx = person_info::relationship::get_shared_memories_context(user_id, 3);
-        if !shared_ctx.is_empty() {
-            parts.push(shared_ctx);
-        }
-    }
-
-    // 亲密度 > 0.6：注入 inside jokes
-    if relationship.intimacy > 0.6 {
-        let jokes_ctx = person_info::relationship::get_inside_jokes_context(user_id);
-        if !jokes_ctx.is_empty() {
-            parts.push(jokes_ctx);
-        }
-    }
-
-    // 人物档案上下文
-    let person_ctx = person_info::get_person_context(user_id);
-    if !person_ctx.is_empty() {
-        parts.push(person_ctx);
-    }
-
-    // ── 记忆层：根据注意力决定注入量 ──
-
-    // 向量检索相关记忆：用最近一条用户消息查询最相关的记忆（2 分钟冷却）
-    if let Some((_, last_user_msg)) = history.iter().rev().find(|(role, _)| role == "user") {
-        let now = crate::util::now_secs();
-        let should_search = {
-            let guard = LAST_SEMANTIC_SEARCH.lock().unwrap();
-            guard.as_ref().and_then(|m| m.get(&user_id))
-                .map_or(true, |&last| now.saturating_sub(last) >= SEMANTIC_SEARCH_COOLDOWN)
-        };
-        if should_search {
-            // 根据注意力调整检索数量
-            let memory_count = (attention_level * 8.0) as usize;
-            let memory_count = memory_count.max(2); // 至少检索2条
-            let relevant = crate::memory::search_memories(user_id, group_id, last_user_msg, memory_count);
-            if !relevant.is_empty() {
-                let rel_lines: Vec<String> = relevant.iter().map(|r| {
-                    format!("- {}", r.content)
-                }).collect();
-                parts.push(format!("# 相关记忆（与当前对话相关）\n{}", rel_lines.join("\n")));
-            }
-            let mut guard = LAST_SEMANTIC_SEARCH.lock().unwrap();
-            guard.get_or_insert_with(std::collections::HashMap::new).insert(user_id, now);
-        }
-    }
-
-    // 记忆上下文（全量，但受冷却控制）
-    let mem = memory::get_context(user_id, group_id);
-    if !mem.is_empty() {
-        parts.push(mem);
-    }
-
-    // 群内其他成员的记忆 (群聊时)
-    if group_id > 0 {
-        let group_mem = memory::get_group_context(group_id, user_id);
-        if !group_mem.is_empty() {
-            parts.push(group_mem);
-        }
-    }
-
-    // ── 人格层 ──
-
-    let pers = personality::get_prompt_context();
-    if !pers.is_empty() {
-        parts.push(pers);
-    }
-
-    // ── 状态层：情绪 + 注意力 + 电量 + 节律 ──
-
-    // 对话历史摘要（AI 注意力机制压缩的长期记忆）
+    // 对话历史摘要
     let summary = crate::read_shared_state(|s| {
-        s.contexts.get(&(group_id, user_id))
+        s.contexts
+            .get(&(scene.group_id, scene.primary_user_id))
             .map(|ctx| ctx.conversation_summary.clone())
             .unwrap_or_default()
     });
     if !summary.is_empty() {
-        parts.push(format!("# 对话历史摘要\n以下是对之前对话中重要内容的回顾：\n{}", summary));
+        parts.push(format!("# 之前聊过的事（大致记得）\n{}", summary));
     }
 
-    // 日程/时间上下文
-    let schedule_ctx = schedule::get_current_context();
+    // 日程 / 活动 / 心里的牵挂
+    let schedule_ctx = crate::schedule::get_current_context();
     if !schedule_ctx.is_empty() {
         parts.push(schedule_ctx);
     }
-
-    // 情绪上下文
-    let emo = emotion::get_prompt_context(user_id);
-    if !emo.is_empty() {
-        parts.push(emo);
+    if let Some(activity_ctx) = crate::activity::get_activity_context(scene.primary_user_id) {
+        parts.push(activity_ctx);
     }
-
-    // 注意力状态上下文
-    if cfg.humanity.attention_enabled {
-        let attn_state = attention::load_attention();
-        let attn_ctx = attention::get_attention_context(&attn_state);
-        if !attn_ctx.is_empty() {
-            parts.push(attn_ctx);
-        }
-    }
-
-    // 社交电量上下文
-    if cfg.humanity.social_battery_enabled {
-        let battery = social_battery::load();
-        let battery_ctx = social_battery::get_battery_context(&battery);
-        if !battery_ctx.is_empty() {
-            parts.push(battery_ctx);
-        }
-    }
-
-    // 昼夜节律上下文
-    if cfg.humanity.circadian_enabled {
-        let rhythm = circadian::calculate();
-        let rhythm_ctx = circadian::get_circadian_context(&rhythm);
-        if !rhythm_ctx.is_empty() {
-            parts.push(rhythm_ctx);
-        }
-    }
-
-    // 心理状态上下文 (担忧 + 要考量)
-    let mental_ctx = mental_state::get_prompt_context(
+    let mental_ctx = crate::mental_state::get_prompt_context(
         cfg.mental_state.concerns_max,
         cfg.mental_state.deliberations_max,
     );
@@ -222,42 +85,227 @@ pub fn build_context(user_id: u64, group_id: u64, history: &[(String, String)]) 
         parts.push(mental_ctx);
     }
 
-    // ── 行为暗示层：电量/注意力驱动的行为提示 ──
-
-    // 对话阶段提示
-    let interaction_count = history.len();
-    if interaction_count > 20 {
-        parts.push("- 你们已经聊了很久了，关系很亲近，可以更自然随意".into());
-    } else if interaction_count > 10 {
-        parts.push("- 你们已经有一定的了解了".into());
+    // 群友的表达习惯（学到的说话方式）
+    let expression = crate::learner::get_expression_context(scene.group_id, 5, scene.query_text);
+    if !expression.is_empty() {
+        parts.push(expression);
     }
 
-    // 电量相关的行为暗示（自然语言，非数值）
-    if battery_level_frac < 0.15 {
-        parts.push("- 你现在非常累，不想回复的话可以简单说「累了」之类的话".into());
-    } else if battery_level_frac < 0.3 {
-        parts.push("- 你现在有些疲惫，可以简短回复，不用每条都说很多。如果不想说话可以用表情包代替".into());
+    // 自己最近说过的消息（防止复读自己）
+    let recent_own =
+        crate::read_shared_state(|s| s.get_recent_bot_messages(scene.group_id, 600, 5));
+    if !recent_own.is_empty() {
+        parts.push(format!(
+            "# 你最近说过的话（别重复自己）\n{}",
+            recent_own.join("\n")
+        ));
     }
 
-    // 注意力相关的行为暗示
-    if attention_level < 0.3 {
-        parts.push("- 你现在注意力不太集中，不需要进行分析或深入思考，简单回应即可".into());
-    }
-
-    // Bot 自己最近的消息 (帮助保持一致性，群聊和私聊都需要)
-    let bot_msgs = read_shared_state(|s| {
-        s.get_recent_bot_messages(group_id, 600, 5)
-    });
-    if !bot_msgs.is_empty() {
-        let label = if group_id > 0 { format!("在群{}里", group_id) } else { String::new() };
-        parts.push(format!("# 你最近说过的消息{}\n{}", label, bot_msgs.join("\n")));
-    }
-
-    // 工作记忆 (消息流，含时间戳帮助 AI 区分新旧消息)
-    let wm_ctx = working_memory::get_context(group_id, 3600);
-    if !wm_ctx.is_empty() {
-        parts.push(wm_ctx);
+    // 可用表情包提示
+    let sticker_ctx = crate::sticker::get_sticker_context();
+    if !sticker_ctx.is_empty() {
+        parts.push(sticker_ctx);
     }
 
     parts.join("\n\n")
+}
+
+// ── 场景块 ──────────────────────────────────────────────────────
+
+fn scene_block(scene: &VoiceScene) -> String {
+    let mut text = if scene.group_id == 0 {
+        let name = crate::person_info::get_display_name(scene.primary_user_id, 0)
+            .unwrap_or_else(|| "对方".to_string());
+        format!(
+            "# 现在的场景\n你和{name}在一对一私聊，只有你们两个人。\
+             这是你们之间的事，不需要@任何人，也不用管群里发生了什么。"
+        )
+    } else {
+        let names: Vec<String> = scene
+            .involved_users
+            .iter()
+            .map(|&uid| {
+                crate::person_info::get_display_name(uid, scene.group_id)
+                    .unwrap_or_else(|| "群友".to_string())
+            })
+            .collect();
+        format!(
+            "# 现在的场景\n你在群 {} 里。这轮说话的人：{}。\
+             群里不止你一个人，你的回复所有人都看得到。\
+             先看清谁在跟谁说话、有没有人在等你，再决定接不接。",
+            scene.group_id,
+            names.join("、")
+        )
+    };
+
+    if scene.force_reply {
+        text.push_str("\n这一轮有人直接叫你（或情况特殊），应该给出回应。");
+    }
+    text
+}
+
+// ── 状态 → 第一人称体验 ─────────────────────────────────────────
+
+/// 把当前的电量/节律/情绪/注意力转成她此刻的主观感受
+fn experience_state_block(user_id: u64) -> Option<String> {
+    let cfg = config::get();
+    let mut lines: Vec<String> = Vec::new();
+
+    if cfg.humanity.circadian_enabled
+        && let Some(line) = circadian_line(crate::util::current_hour_cst())
+    {
+        lines.push(line.to_string());
+    }
+
+    if cfg.humanity.social_battery_enabled {
+        let battery = crate::social_battery::load();
+        let frac = battery.level / cfg.humanity.battery_capacity;
+        if frac < 0.15 {
+            lines.push("今天社交电量见底了，连打字都嫌费劲，谁爱聊谁聊".into());
+        } else if frac < 0.3 {
+            lines.push("有点累了，不太想多说话".into());
+        }
+    }
+
+    let emo = crate::emotion::get_state(user_id);
+    if let Some(line) = emotion_line(&emo.current, emo.intensity) {
+        lines.push(line);
+    }
+
+    if cfg.humanity.attention_enabled {
+        let attn = crate::conversation::attention::load_attention();
+        if attn.attention_level < 0.3 {
+            lines.push("注意力有点散，消息都是扫一眼，没在认真想".into());
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!("# 你此刻的状态\n{}", lines.join("\n")))
+}
+
+/// 按小时给出一天里的体感
+fn circadian_line(hour: u32) -> Option<&'static str> {
+    match hour {
+        0..=5 => Some("现在是深夜，世界安静得只剩手机屏幕的光，脑子有点木"),
+        6..=8 => Some("刚起来没多久，还有点迷糊"),
+        9..=11 => Some("上午，精神还行"),
+        12..=13 => Some("刚吃过饭，有点犯困"),
+        14..=17 => Some("下午，状态不错"),
+        18..=22 => Some("晚上，一天里最松弛的时候"),
+        23 => Some("夜深了，开始有点困"),
+        _ => None,
+    }
+}
+
+/// 把情绪状态转成她此刻的心情（低强度不提，别没病呻吟）
+fn emotion_line(emotion: &EmotionType, intensity: f32) -> Option<String> {
+    if intensity < 0.3 {
+        return None;
+    }
+    let text = match emotion {
+        EmotionType::Happy => Some("心情不错"),
+        EmotionType::Excited => Some("有点兴奋，静不下来"),
+        EmotionType::Sad => Some("心里有点闷闷的"),
+        EmotionType::Angry => Some("有点火气，说话可能冲"),
+        EmotionType::Worried => Some("心里有点惦记事，不太踏实"),
+        EmotionType::Tired => Some("累，只想瘫着"),
+        EmotionType::Thinking => Some("脑子里在想事情，有点出神"),
+        EmotionType::Surprised => None, // 惊讶是瞬时的，不需要注入
+        EmotionType::Shy => Some("有点不好意思"),
+        _ => None,
+    }?;
+    Some(format!("此刻的心情：{text}"))
+}
+
+// ── 在场的人 ────────────────────────────────────────────────────
+
+/// 每个在场者：怎么称呼、什么关系、记得对方什么
+fn people_block(scene: &VoiceScene) -> Option<String> {
+    let cfg = config::get();
+    let mut blocks: Vec<String> = Vec::new();
+
+    for &uid in scene.involved_users {
+        let name = crate::person_info::get_display_name(uid, scene.group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        let mut lines: Vec<String> = Vec::new();
+
+        if cfg.darling_qq > 0 && uid == cfg.darling_qq {
+            lines.push(format!(
+                "{name} 是你认定的人。在他面前你不用想那么多，语气自然更软、更有耐心，也更诚实。"
+            ));
+        }
+
+        let rel = crate::person_info::relationship::get_relationship_context(uid);
+        if !rel.is_empty() {
+            lines.push(rel);
+        }
+
+        let person = crate::person_info::get_person_context(uid);
+        if !person.is_empty() {
+            lines.push(person);
+        }
+
+        let mem = crate::memory::get_context(uid, scene.group_id);
+        if !mem.is_empty() {
+            lines.push(mem);
+        }
+
+        // 危机干预：安全相关，必须保留
+        let crisis_level = crate::emotion::get_state(uid).crisis_level;
+        let crisis_ctx = crate::emotion::get_crisis_context(crisis_level);
+        if !crisis_ctx.is_empty() {
+            lines.push(crisis_ctx);
+        }
+
+        if lines.is_empty() {
+            continue;
+        }
+        blocks.push(format!("关于{name}：\n{}", lines.join("\n")));
+    }
+
+    if blocks.is_empty() {
+        return None;
+    }
+    Some(blocks.join("\n\n"))
+}
+
+// ── 相关记忆 ────────────────────────────────────────────────────
+
+fn relevant_memories_block(user_id: u64, group_id: u64, query: &str) -> Option<String> {
+    if query.trim().is_empty() {
+        return None;
+    }
+
+    let now = crate::util::now_secs();
+    let should_search = {
+        let guard = LAST_SEMANTIC_SEARCH.lock().ok()?;
+        guard
+            .as_ref()
+            .and_then(|m| m.get(&user_id))
+            .is_none_or(|&last| now.saturating_sub(last) >= SEMANTIC_SEARCH_COOLDOWN)
+    };
+    if !should_search {
+        return None;
+    }
+
+    let relevant = crate::memory::search_memories(user_id, group_id, query, SEMANTIC_MEMORY_COUNT);
+    if let Ok(mut guard) = LAST_SEMANTIC_SEARCH.lock() {
+        guard
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(user_id, now);
+    }
+    if relevant.is_empty() {
+        return None;
+    }
+
+    let lines: Vec<String> = relevant
+        .iter()
+        .map(|r| format!("- {}", r.content))
+        .collect();
+    Some(format!(
+        "# 想起来的事（跟眼前话题有关）\n{}",
+        lines.join("\n")
+    ))
 }

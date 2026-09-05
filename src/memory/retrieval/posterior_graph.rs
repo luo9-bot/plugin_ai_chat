@@ -67,7 +67,11 @@ pub fn apply_posterior_graph_gate(
     }
 
     // 重新排序
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // 丢弃分数最低的一部分结果
     let drop_count = (results.len() as f64 * config.drop_ratio).round() as usize;
@@ -96,7 +100,10 @@ fn compute_connectivity(result_entities: &[HashSet<String>]) -> HashMap<usize, f
                 continue;
             }
             // 两个结果共享实体即为连通
-            if result_entities[i].iter().any(|e| result_entities[j].contains(e)) {
+            if result_entities[i]
+                .iter()
+                .any(|e| result_entities[j].contains(e))
+            {
                 connected_count += 1;
             }
         }

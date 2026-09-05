@@ -1,11 +1,11 @@
 use tracing::debug;
 
+use super::store::{
+    STORE, SegmentCount, SegmentLogEntry, SegmentMessage, current_max_replies,
+    current_segment_start, get_segment_count, save_store,
+};
 use crate::config;
 use crate::util::now_secs;
-use super::store::{
-    STORE, save_store, current_segment_start, current_max_replies, get_segment_count,
-    SegmentCount, SegmentMessage, SegmentLogEntry,
-};
 
 // ── 核心 API ────────────────────────────────────────────────
 
@@ -67,7 +67,10 @@ pub fn check_and_consume(group_id: u64) -> bool {
             }
         }
         None => {
-            counts.push(SegmentCount { segment_start: seg_start, count: 1 });
+            counts.push(SegmentCount {
+                segment_start: seg_start,
+                count: 1,
+            });
             save_store(store);
             true
         }
@@ -78,7 +81,9 @@ pub fn check_and_consume(group_id: u64) -> bool {
 pub fn get_used(group_id: u64) -> u32 {
     let seg_start = current_segment_start();
     let store = STORE.lock().unwrap();
-    store.as_ref().map_or(0, |s| get_segment_count(s, group_id, seg_start))
+    store
+        .as_ref()
+        .map_or(0, |s| get_segment_count(s, group_id, seg_start))
 }
 
 // ── 段日志记录 ────────────────────────────────────────────────
@@ -124,12 +129,15 @@ pub fn mark_segment_replied(group_id: u64, user_id: u64, reason: &str) {
     if let Some(store) = store_guard.as_mut() {
         if let Some(logs) = store.segment_log.get_mut(&group_id)
             && let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start)
-                && let Some(msg) = entry.messages.iter_mut().rev()
-                    .find(|m| m.user_id == user_id && !m.replied)
-                {
-                    msg.replied = true;
-                    msg.reason = reason.to_string();
-                }
+            && let Some(msg) = entry
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.user_id == user_id && !m.replied)
+        {
+            msg.replied = true;
+            msg.reason = reason.to_string();
+        }
         save_store(store);
     }
 }
@@ -140,11 +148,14 @@ pub fn mark_segment_reason(group_id: u64, user_id: u64, reason: &str) {
     if let Some(store) = store_guard.as_mut() {
         if let Some(logs) = store.segment_log.get_mut(&group_id)
             && let Some(entry) = logs.iter_mut().find(|e| e.segment_start == seg_start)
-                && let Some(msg) = entry.messages.iter_mut().rev()
-                    .find(|m| m.user_id == user_id && m.reason.is_empty())
-                {
-                    msg.reason = reason.to_string();
-                }
+            && let Some(msg) = entry
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.user_id == user_id && m.reason.is_empty())
+        {
+            msg.reason = reason.to_string();
+        }
         save_store(store);
     }
 }
@@ -155,7 +166,8 @@ pub fn check_and_review_segment(group_id: u64) {
     let current_seg = current_segment_start();
     let last_reviewed = {
         let store_guard = STORE.lock().unwrap();
-        store_guard.as_ref()
+        store_guard
+            .as_ref()
             .and_then(|s| s.last_reviewed_segment.get(&group_id).copied())
             .unwrap_or(0)
     };
@@ -181,7 +193,8 @@ fn review_previous_segment(group_id: u64) {
     let current_seg = current_segment_start();
     let logs = store.segment_log.entry(group_id).or_default();
 
-    let prev_entry = logs.iter_mut()
+    let prev_entry = logs
+        .iter_mut()
         .filter(|e| e.segment_start < current_seg && !e.reviewed)
         .max_by_key(|e| e.segment_start);
 
@@ -192,7 +205,9 @@ fn review_previous_segment(group_id: u64) {
 
     entry.reviewed = true;
 
-    let interesting_user = entry.messages.iter()
+    let interesting_user = entry
+        .messages
+        .iter()
         .find(|m| !m.replied && !m.reason.is_empty())
         .map(|m| (m.user_id, m.timestamp));
 
@@ -202,7 +217,11 @@ fn review_previous_segment(group_id: u64) {
         interest.marked_count += 1;
         interest.last_reviewed = now_secs();
         interest.last_message = msg_ts;
-        debug!(user_id = uid, score = interest.score, "interest: 用户被标记为感兴趣");
+        debug!(
+            user_id = uid,
+            score = interest.score,
+            "interest: 用户被标记为感兴趣"
+        );
     }
     save_store(store);
 }

@@ -78,9 +78,10 @@ pub fn add(content: &str, category: ThoughtCategory) {
 
     // 远程同步 (fire-and-forget)
     if crate::config::get().sync.enabled
-        && let Some(thought) = store.thoughts.last() {
-            super::sync::sync_to_remote(thought);
-        }
+        && let Some(thought) = store.thoughts.last()
+    {
+        super::sync::sync_to_remote(thought);
+    }
 }
 
 /// 标准化想法文本用于比较
@@ -108,8 +109,16 @@ fn is_similar(a: &str, b: &str) -> bool {
     let shorter_len = a_chars.len().min(b_chars.len());
 
     // 子串包含
-    let (shorter, longer) = if a_chars.len() <= b_chars.len() { (&a_chars, &b_chars) } else { (&b_chars, &a_chars) };
-    if longer.len() >= 6 && longer.windows(shorter.len()).any(|w| w == shorter.as_slice()) {
+    let (shorter, longer) = if a_chars.len() <= b_chars.len() {
+        (&a_chars, &b_chars)
+    } else {
+        (&b_chars, &a_chars)
+    };
+    if longer.len() >= 6
+        && longer
+            .windows(shorter.len())
+            .any(|w| w == shorter.as_slice())
+    {
         return true;
     }
 
@@ -128,7 +137,9 @@ fn is_similar(a: &str, b: &str) -> bool {
 fn lcs_len(a: &[char], b: &[char]) -> usize {
     let a_len = a.len();
     let b_len = b.len();
-    if a_len == 0 || b_len == 0 { return 0; }
+    if a_len == 0 || b_len == 0 {
+        return 0;
+    }
     let mut prev = vec![0usize; b_len + 1];
     for i in 1..=a_len {
         let mut curr = vec![0usize; b_len + 1];
@@ -203,23 +214,38 @@ pub fn get_context(max_count: usize) -> String {
 
 /// 轻量主题分类：用于避免最近记忆堆叠在同一个主题上
 fn thought_topic(content: &str) -> &'static str {
-    const FOOD_WORDS: [&str; 12] = ["吃", "饭", "饿", "西瓜", "火锅", "水果", "猪脚", "麻辣",
-        "番茄", "夜宵", "宵夜", "早餐"];
+    const FOOD_WORDS: [&str; 12] = [
+        "吃", "饭", "饿", "西瓜", "火锅", "水果", "猪脚", "麻辣", "番茄", "夜宵", "宵夜", "早餐",
+    ];
     if FOOD_WORDS.iter().any(|w| content.contains(w)) {
         return "food";
     }
-    const HEALTH_WORDS: [&str; 12] = ["嗓子", "睡", "累", "病", "疼", "感冒", "水", "药",
-        "困", "不舒服", "头疼", "嗓子疼"];
+    const HEALTH_WORDS: [&str; 12] = [
+        "嗓子",
+        "睡",
+        "累",
+        "病",
+        "疼",
+        "感冒",
+        "水",
+        "药",
+        "困",
+        "不舒服",
+        "头疼",
+        "嗓子疼",
+    ];
     if HEALTH_WORDS.iter().any(|w| content.contains(w)) {
         return "health";
     }
-    const PEOPLE_WORDS: [&str; 12] = ["他", "她", "豆", "群", "消息", "回", "人", "洛屿",
-        "土豆", "大家", "朋友", "队友"];
+    const PEOPLE_WORDS: [&str; 12] = [
+        "他", "她", "豆", "群", "消息", "回", "人", "洛屿", "土豆", "大家", "朋友", "队友",
+    ];
     if PEOPLE_WORDS.iter().any(|w| content.contains(w)) {
         return "people";
     }
-    const PLAN_WORDS: [&str; 10] = ["计划", "明天", "打算", "安排", "准备", "记得",
-        "要去", "得去", "该去", "安排"];
+    const PLAN_WORDS: [&str; 10] = [
+        "计划", "明天", "打算", "安排", "准备", "记得", "要去", "得去", "该去", "安排",
+    ];
     if PLAN_WORDS.iter().any(|w| content.contains(w)) {
         return "plan";
     }
@@ -227,7 +253,10 @@ fn thought_topic(content: &str) -> &'static str {
 }
 
 /// 从记忆里按主题抽样：同一主题最多取 2 条，再按最新补齐，保证上下文主题多样
-pub(super) fn pick_diverse_thoughts(thoughts: &[SelfThought], max_count: usize) -> Vec<&SelfThought> {
+pub(super) fn pick_diverse_thoughts(
+    thoughts: &[SelfThought],
+    max_count: usize,
+) -> Vec<&SelfThought> {
     use std::collections::{HashMap, HashSet};
 
     let mut picked: Vec<&SelfThought> = Vec::new();

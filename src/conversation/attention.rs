@@ -109,7 +109,9 @@ pub fn get_attention_context(state: &AttentionState) -> String {
     let mut lines = Vec::new();
 
     if state.attention_level < 0.3 {
-        lines.push("- 你现在注意力不太集中，回复可以简短一些，用表情包代替文字也完全可以".to_string());
+        lines.push(
+            "- 你现在注意力不太集中，回复可以简短一些，用表情包代替文字也完全可以".to_string(),
+        );
     } else if state.attention_level < 0.5 {
         lines.push("- 你现在注意力一般，不需要对每个话题都深入回应".to_string());
     } else if state.attention_level > 0.8 {
@@ -140,9 +142,10 @@ pub fn load_attention() -> AttentionState {
         Ok(content) => {
             let store: cognitive_biases::CognitiveStateStore =
                 serde_json::from_str(&content).unwrap_or_default();
-            store.attention_json
+            store
+                .attention_json
                 .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_else(AttentionState::new)
+                .unwrap_or_default()
         }
         Err(_) => AttentionState::new(),
     }
@@ -152,11 +155,10 @@ pub fn load_attention() -> AttentionState {
 pub fn save_attention(state: &AttentionState) {
     use super::super::memory::cognitive_biases;
     let path = cognitive_biases::state_path();
-    let mut store: cognitive_biases::CognitiveStateStore =
-        match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => cognitive_biases::CognitiveStateStore::default(),
-        };
+    let mut store: cognitive_biases::CognitiveStateStore = match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => cognitive_biases::CognitiveStateStore::default(),
+    };
     store.attention_json = Some(serde_json::to_value(state).unwrap_or_default());
     if let Ok(json) = serde_json::to_string_pretty(&store) {
         std::fs::write(path, json).ok();

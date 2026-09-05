@@ -9,29 +9,18 @@ use crate::config;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeeklyGoal {
     pub content: String,
-    pub target_day: String,    // "Monday" | "Tuesday" | ...
+    pub target_day: String, // "Monday" | "Tuesday" | ...
     pub completed: bool,
     #[serde(default)]
-    pub completed_at: u64,     // Unix timestamp when completed
+    pub completed_at: u64, // Unix timestamp when completed
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WeeklyPlan {
-    pub week_start: String,    // YYYY-MM-DD (周一)
+    pub week_start: String, // YYYY-MM-DD (周一)
     pub goals: Vec<WeeklyGoal>,
     pub created_at: u64,
     pub week_reflection: String, // 周反思摘要
-}
-
-impl Default for WeeklyPlan {
-    fn default() -> Self {
-        Self {
-            week_start: String::new(),
-            goals: Vec::new(),
-            created_at: 0,
-            week_reflection: String::new(),
-        }
-    }
 }
 
 // ── 月计划 ──────────────────────────────────────────────────────
@@ -44,21 +33,11 @@ pub struct MonthlyGoal {
     pub completed_at: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MonthlyPlan {
-    pub month: String,         // YYYY-MM
+    pub month: String, // YYYY-MM
     pub goals: Vec<MonthlyGoal>,
     pub created_at: u64,
-}
-
-impl Default for MonthlyPlan {
-    fn default() -> Self {
-        Self {
-            month: String::new(),
-            goals: Vec::new(),
-            created_at: 0,
-        }
-    }
 }
 
 // ── 今日推动状态 ────────────────────────────────────────────────
@@ -271,12 +250,17 @@ pub fn check_plan_push() -> Vec<String> {
 
     // 2. 月计划任务：每天推动一次当月目标（随机选一个未完成的）
     let monthly = load_monthly_plan();
-    let unfinished_monthly: Vec<&str> = monthly.goals
+    let unfinished_monthly: Vec<&str> = monthly
+        .goals
         .iter()
         .filter(|g| !g.completed)
         .map(|g| g.content.as_str())
         .collect();
-    if !unfinished_monthly.is_empty() && !state.pushed_today.contains(&format!("月:{}", unfinished_monthly[0])) {
+    if !unfinished_monthly.is_empty()
+        && !state
+            .pushed_today
+            .contains(&format!("月:{}", unfinished_monthly[0]))
+    {
         let pick = unfinished_monthly[0];
         to_push.push(format!("月计划：{}", pick));
         state.pushed_today.push(format!("月:{}", pick));
@@ -289,8 +273,14 @@ pub fn check_plan_push() -> Vec<String> {
         }
         // 记录到历史
         for p in &to_push {
-            let kind = if p.starts_with("周计划") { "周计划" } else { "月计划" };
-            let content = p.trim_start_matches("周计划：").trim_start_matches("月计划：");
+            let kind = if p.starts_with("周计划") {
+                "周计划"
+            } else {
+                "月计划"
+            };
+            let content = p
+                .trim_start_matches("周计划：")
+                .trim_start_matches("月计划：");
             record_push_log(kind, content);
         }
     }
@@ -313,19 +303,27 @@ pub fn get_plan_context() -> String {
 
     let weekly = load_weekly_plan();
     if !weekly.goals.is_empty() {
-        let goals_str: Vec<String> = weekly.goals.iter().map(|g| {
-            let status = if g.completed { "✓" } else { "○" };
-            format!("  {}[{}] {}", status, g.target_day, g.content)
-        }).collect();
+        let goals_str: Vec<String> = weekly
+            .goals
+            .iter()
+            .map(|g| {
+                let status = if g.completed { "✓" } else { "○" };
+                format!("  {}[{}] {}", status, g.target_day, g.content)
+            })
+            .collect();
         parts.push(format!("# 本周计划\n{}", goals_str.join("\n")));
     }
 
     let monthly = load_monthly_plan();
     if !monthly.goals.is_empty() {
-        let goals_str: Vec<String> = monthly.goals.iter().map(|g| {
-            let status = if g.completed { "✓" } else { "○" };
-            format!("  {} {}", status, g.content)
-        }).collect();
+        let goals_str: Vec<String> = monthly
+            .goals
+            .iter()
+            .map(|g| {
+                let status = if g.completed { "✓" } else { "○" };
+                format!("  {} {}", status, g.content)
+            })
+            .collect();
         parts.push(format!("# 本月目标\n{}", goals_str.join("\n")));
     }
 

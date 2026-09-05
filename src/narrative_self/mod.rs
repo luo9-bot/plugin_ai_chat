@@ -16,7 +16,7 @@ use crate::config;
 // ── 数据结构 ────────────────────────────────────────────────────
 
 /// 叙事自我状态
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NarrativeSelf {
     /// 核心自我认知（一句话描述"我是谁"，缓慢变化）
     pub core_identity: String,
@@ -132,20 +132,6 @@ impl NarrativeSelf {
     }
 }
 
-impl Default for NarrativeSelf {
-    fn default() -> Self {
-        Self {
-            core_identity: String::new(),
-            current_narrative: String::new(),
-            values: Vec::new(),
-            ongoing_concerns: Vec::new(),
-            timeline: Vec::new(),
-            last_update: 0,
-            last_narrative_refresh: 0,
-        }
-    }
-}
-
 // ── 公开接口 ────────────────────────────────────────────────────
 
 /// 添加时间线事件
@@ -158,9 +144,12 @@ pub fn add_timeline_event(
     let mut ns = NarrativeSelf::load();
 
     // 去重：检查是否有高度相似的最近事件
-    let is_dup = ns.timeline.iter().rev().take(5).any(|e| {
-        e.content == content || is_content_similar(&e.content, content)
-    });
+    let is_dup = ns
+        .timeline
+        .iter()
+        .rev()
+        .take(5)
+        .any(|e| e.content == content || is_content_similar(&e.content, content));
     if is_dup {
         debug!(content, "narrative_self: skipped duplicate timeline event");
         return;
@@ -204,9 +193,13 @@ pub fn add_value(content: &str, strength: f32, source: Option<&str>) {
     // 保留最多20个价值
     if ns.values.len() > 20 {
         // 移除最弱的
-        if let Some(min_idx) = ns.values.iter().enumerate()
+        if let Some(min_idx) = ns
+            .values
+            .iter()
+            .enumerate()
             .min_by(|a, b| a.1.strength.partial_cmp(&b.1.strength).unwrap())
-            .map(|(i, _)| i) {
+            .map(|(i, _)| i)
+        {
             ns.values.remove(min_idx);
         }
     }
@@ -222,7 +215,9 @@ pub fn add_ongoing_concern(content: &str, concern_type: ConcernType, strength: f
     let now = crate::util::now_secs();
 
     // 如果已有类似关注，强化它
-    if let Some(existing) = ns.ongoing_concerns.iter_mut()
+    if let Some(existing) = ns
+        .ongoing_concerns
+        .iter_mut()
         .find(|c| c.content == content || is_content_similar(&c.content, content))
     {
         existing.strength = (existing.strength + 0.1).min(1.0);
@@ -243,9 +238,13 @@ pub fn add_ongoing_concern(content: &str, concern_type: ConcernType, strength: f
     // 保留最多15个关注
     if ns.ongoing_concerns.len() > 15 {
         // 移除最弱的
-        if let Some(min_idx) = ns.ongoing_concerns.iter().enumerate()
+        if let Some(min_idx) = ns
+            .ongoing_concerns
+            .iter()
+            .enumerate()
             .min_by(|a, b| a.1.strength.partial_cmp(&b.1.strength).unwrap())
-            .map(|(i, _)| i) {
+            .map(|(i, _)| i)
+        {
             ns.ongoing_concerns.remove(min_idx);
         }
     }
@@ -336,7 +335,9 @@ pub fn get_narrative_context() -> String {
     if !ns.values.is_empty() {
         let mut sorted = ns.values.clone();
         sorted.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap());
-        let lines: Vec<String> = sorted.iter().take(3)
+        let lines: Vec<String> = sorted
+            .iter()
+            .take(3)
             .map(|v| format!("- {}（{:.0}%）", v.content, v.strength * 100.0))
             .collect();
         parts.push(format!("# 你在乎的事\n{}", lines.join("\n")));
@@ -346,22 +347,24 @@ pub fn get_narrative_context() -> String {
     if !ns.ongoing_concerns.is_empty() {
         let mut sorted = ns.ongoing_concerns.clone();
         sorted.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap());
-        let lines: Vec<String> = sorted.iter().take(3)
+        let lines: Vec<String> = sorted
+            .iter()
+            .take(3)
             .map(|c| format!("- {}", c.content))
             .collect();
         parts.push(format!("# 你一直在关注的事\n{}", lines.join("\n")));
     }
 
     // 最近时间线（取最近5条未整合的）
-    let recent: Vec<&TimelineEvent> = ns.timeline.iter()
+    let recent: Vec<&TimelineEvent> = ns
+        .timeline
+        .iter()
         .rev()
         .filter(|e| !e.integrated)
         .take(5)
         .collect();
     if !recent.is_empty() {
-        let lines: Vec<String> = recent.iter()
-            .map(|e| format!("- {}", e.content))
-            .collect();
+        let lines: Vec<String> = recent.iter().map(|e| format!("- {}", e.content)).collect();
         parts.push(format!("# 你最近的经历\n{}", lines.join("\n")));
     }
 
@@ -432,9 +435,17 @@ pub fn extract_from_conversation(_group_id: u64, messages_text: &str) {
                 if let Some(events) = parsed.get("timeline_events").and_then(|v| v.as_array()) {
                     for event in events {
                         let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let significance = event.get("significance").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                        let significance = event
+                            .get("significance")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.5) as f32;
                         if !content.is_empty() {
-                            add_timeline_event(content, TimelineEventType::Conversation, significance, None);
+                            add_timeline_event(
+                                content,
+                                TimelineEventType::Conversation,
+                                significance,
+                                None,
+                            );
                         }
                     }
                 }
@@ -443,7 +454,8 @@ pub fn extract_from_conversation(_group_id: u64, messages_text: &str) {
                 if let Some(values) = parsed.get("values").and_then(|v| v.as_array()) {
                     for val in values {
                         let content = val.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let strength = val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                        let strength =
+                            val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
                         if !content.is_empty() {
                             add_value(content, strength, Some("conversation"));
                         }
@@ -453,8 +465,14 @@ pub fn extract_from_conversation(_group_id: u64, messages_text: &str) {
                 // 提取关注
                 if let Some(concerns) = parsed.get("concerns").and_then(|v| v.as_array()) {
                     for concern in concerns {
-                        let content = concern.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let type_str = concern.get("type").and_then(|v| v.as_str()).unwrap_or("Topic");
+                        let content = concern
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let type_str = concern
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Topic");
                         let concern_type = match type_str {
                             "Person" => ConcernType::Person,
                             "Event" => ConcernType::Event,
@@ -477,11 +495,15 @@ pub fn extract_from_conversation(_group_id: u64, messages_text: &str) {
 // ── 工具函数 ────────────────────────────────────────────────────
 
 fn is_content_similar(a: &str, b: &str) -> bool {
-    if a == b { return true; }
-    if a.is_empty() || b.is_empty() { return false; }
+    if a == b {
+        return true;
+    }
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
     // 简单的包含检查
-    if a.len() > 6 && b.len() > 6 {
-        if a.contains(b) || b.contains(a) { return true; }
+    if a.len() > 6 && b.len() > 6 && (a.contains(b) || b.contains(a)) {
+        return true;
     }
     false
 }

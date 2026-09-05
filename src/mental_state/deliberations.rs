@@ -31,18 +31,24 @@ pub fn add_deliberation(content: &str, source: &str) {
 
     let max = config::get().mental_state.deliberations_max;
     if store.deliberations.len() >= max
-        && let Some(weakest_idx) = store.deliberations.iter()
+        && let Some(weakest_idx) = store
+            .deliberations
+            .iter()
             .enumerate()
-            .min_by(|a, b| a.1.strength.partial_cmp(&b.1.strength).unwrap_or(std::cmp::Ordering::Equal))
+            .min_by(|a, b| {
+                a.1.strength
+                    .partial_cmp(&b.1.strength)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
-        {
-            if store.deliberations[weakest_idx].strength < 0.2 {
-                store.deliberations.remove(weakest_idx);
-            } else {
-                debug!(content, "mental_state: deliberations full, skipping");
-                return;
-            }
+    {
+        if store.deliberations[weakest_idx].strength < 0.2 {
+            store.deliberations.remove(weakest_idx);
+        } else {
+            debug!(content, "mental_state: deliberations full, skipping");
+            return;
         }
+    }
 
     debug!(content, source, "mental_state: added deliberation");
     store.deliberations.push(Deliberation {

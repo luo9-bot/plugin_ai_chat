@@ -1,14 +1,14 @@
-mod store;
-mod reflect;
-mod sync;
 pub mod inner_thought;
+mod reflect;
+mod store;
+mod sync;
 
 // ── re-exports ────────────────────────────────────────────────
 
 // store.rs
 pub use store::{
-    ThoughtCategory, SelfThought, SelfMemoryStore,
-    load_count, add, total_count, correct, get_context,
+    SelfMemoryStore, SelfThought, ThoughtCategory, add, correct, get_context, load_count,
+    total_count,
 };
 
 // reflect.rs
@@ -16,8 +16,7 @@ pub use reflect::{GroupProfile, reflect};
 
 // sync.rs
 pub use sync::{
-    sync_to_remote, register_to_registry, sync_all_to_remote,
-    remote_list_all, remote_search, remote_search_delete,
-    remote_delete, remote_restore, remote_list_deleted,
-    remote_purge, remote_stats,
+    register_to_registry, remote_delete, remote_list_all, remote_list_deleted, remote_purge,
+    remote_restore, remote_search, remote_search_delete, remote_stats, sync_all_to_remote,
+    sync_to_remote,
 };

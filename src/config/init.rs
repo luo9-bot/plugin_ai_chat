@@ -17,7 +17,9 @@ fn to_absolute(p: &PathBuf) -> PathBuf {
     if p.is_absolute() {
         p.clone()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(p)
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
     }
 }
 

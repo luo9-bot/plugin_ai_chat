@@ -3,13 +3,17 @@
 //! 管理表情包的注册、选择和发送。
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
-pub mod store;
 mod manager;
+pub mod store;
 
 use luo9_sdk::Msg;
+pub use manager::{
+    StickerSelection, describe_sticker_cq, do_replace_eviction, get_stats, get_sticker_path,
+    init_ne_stickers, is_sticker_cq, maintenance, register_from_cq, register_sticker,
+    select_sticker_vlm, steal_emoji_scan, update_usage,
+};
 pub use store::StickerEntry;
 pub use store::{find_entry_by_hash, update_vlm_description};
-pub use manager::{StickerSelection, register_sticker, register_from_cq, is_sticker_cq, describe_sticker_cq, select_sticker_vlm, update_usage, get_sticker_path, get_stats, maintenance, init_ne_stickers, steal_emoji_scan, do_replace_eviction};
 
 use tracing::info;
 
@@ -42,7 +46,7 @@ pub fn send_sticker(
             luo9_sdk::Bot::send_private_msg(user_id, msg);
         }
     } else {
-        return Err(format!("表情包文件缺失，请用文字表达情绪"));
+        return Err("表情包文件缺失，请用文字表达情绪".to_string());
     }
 
     // 更新使用次数

@@ -32,11 +32,58 @@ impl Default for FallbackConfig {
 
 /// 中文停用词（精简版）
 const STOP_WORDS: &[&str] = &[
-    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
-    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着",
-    "没有", "看", "好", "自己", "这", "他", "她", "它", "们", "那", "什么",
-    "怎么", "如何", "哪个", "为什么", "啥", "吗", "吧", "呢", "啊", "嗯",
-    "请问", "请", "帮", "能", "可以", "应该", "需要", "想",
+    "的",
+    "了",
+    "在",
+    "是",
+    "我",
+    "有",
+    "和",
+    "就",
+    "不",
+    "人",
+    "都",
+    "一",
+    "一个",
+    "上",
+    "也",
+    "很",
+    "到",
+    "说",
+    "要",
+    "去",
+    "你",
+    "会",
+    "着",
+    "没有",
+    "看",
+    "好",
+    "自己",
+    "这",
+    "他",
+    "她",
+    "它",
+    "们",
+    "那",
+    "什么",
+    "怎么",
+    "如何",
+    "哪个",
+    "为什么",
+    "啥",
+    "吗",
+    "吧",
+    "呢",
+    "啊",
+    "嗯",
+    "请问",
+    "请",
+    "帮",
+    "能",
+    "可以",
+    "应该",
+    "需要",
+    "想",
 ];
 
 /// 查询简化：移除停用词，保留关键词
@@ -78,11 +125,7 @@ pub fn expand_with_graph(seeds: &[String], depth: usize) -> Vec<String> {
 }
 
 /// 执行智能回退：按策略依次尝试
-pub fn smart_fallback(
-    query: &str,
-    current_count: usize,
-    config: &FallbackConfig,
-) -> Vec<String> {
+pub fn smart_fallback(query: &str, current_count: usize, config: &FallbackConfig) -> Vec<String> {
     let mut fallback_queries = Vec::new();
 
     if current_count >= config.min_results {

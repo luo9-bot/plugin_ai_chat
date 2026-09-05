@@ -7,23 +7,13 @@ use std::collections::HashMap;
 /// • 缺失占位符默认保留原样，但可以开启严格模式报错
 pub struct PromptRenderer;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RenderOptions {
     /// 严格模式：缺失占位符时报错而非静默保留
     pub strict: bool,
     /// 自定义渲染前/后处理
     pub pre_process: Option<fn(&str) -> String>,
     pub post_process: Option<fn(&str) -> String>,
-}
-
-impl Default for RenderOptions {
-    fn default() -> Self {
-        Self {
-            strict: false,
-            pre_process: None,
-            post_process: None,
-        }
-    }
 }
 
 impl PromptRenderer {
@@ -91,7 +81,10 @@ impl PromptRenderer {
     }
 
     /// strict 模式下：在模板中查找所有占位符，检测 vars 中是否都提供了
-    fn find_missing_placeholders_in_template(template: &str, vars: &HashMap<&str, &str>) -> Vec<String> {
+    fn find_missing_placeholders_in_template(
+        template: &str,
+        vars: &HashMap<&str, &str>,
+    ) -> Vec<String> {
         let mut missing = Vec::new();
         let re = regex::Regex::new(r"\{([a-zA-Z_][a-zA-Z0-9_]*)}").unwrap();
         for cap in re.captures_iter(template) {
@@ -126,7 +119,10 @@ mod tests {
         let result = PromptRenderer::render(
             "我叫{name}，今天{emotion}",
             &vars,
-            &RenderOptions { strict: true, ..Default::default() },
+            &RenderOptions {
+                strict: true,
+                ..Default::default()
+            },
         );
         assert!(result.is_err());
     }

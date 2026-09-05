@@ -374,8 +374,14 @@ pub fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str
         return;
     };
     for candidate in tasks.iter().take(2) {
-        let title = candidate.get("title").and_then(|value| value.as_str()).unwrap_or("");
-        let next_action = candidate.get("next_action").and_then(|value| value.as_str()).unwrap_or("");
+        let title = candidate
+            .get("title")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let next_action = candidate
+            .get("next_action")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let waiting = candidate
             .get("waiting_for_person")
             .and_then(crate::ai::parse_bool)
@@ -385,10 +391,11 @@ pub fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str
         }
         let task_user = if waiting { user_id } else { 0 };
         let task_group = if waiting { group_id } else { 0 };
-        if let Some(task) = add_or_reinforce(title, "conversation", next_action, task_user, task_group) {
-            if waiting {
-                mark_waiting_for_person(task.id);
-            }
+        if let Some(task) =
+            add_or_reinforce(title, "conversation", next_action, task_user, task_group)
+            && waiting
+        {
+            mark_waiting_for_person(task.id);
         }
     }
 }

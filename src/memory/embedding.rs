@@ -16,7 +16,7 @@ pub fn embed_text(text: &str) -> Option<Vec<f32>> {
     if !cfg.embedding.enabled() {
         return None;
     }
-    
+
     embed_single(text)
 }
 
@@ -55,11 +55,15 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(Duration::from_secs(10)))
-            .build()
+            .build(),
     );
 
-    let mut resp = match agent.post(&url)
-        .header("Authorization", &format!("Bearer {}", cfg.embedding.api_key))
+    let mut resp = match agent
+        .post(&url)
+        .header(
+            "Authorization",
+            &format!("Bearer {}", cfg.embedding.api_key),
+        )
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
     {
@@ -111,7 +115,7 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
     }
 
     debug!(model = %cfg.embedding.model, len = vec.len(), "embedding: completed");
-    
+
     Some(vec)
 }
 
@@ -131,16 +135,17 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
     let mut results = Vec::with_capacity(texts.len());
 
     for chunk in texts.chunks(MAX_BATCH_SIZE) {
-        let chunk_results: Vec<Option<Vec<f32>>> = chunk
-            .iter()
-            .map(|t| embed_single(t))
-            .collect();
+        let chunk_results: Vec<Option<Vec<f32>>> = chunk.iter().map(|t| embed_single(t)).collect();
         results.extend(chunk_results);
     }
 
     let success_count = results.iter().filter(|r| r.is_some()).count();
     if success_count < texts.len() {
-        debug!(total = texts.len(), success = success_count, "embedding: batch completed (partial)");
+        debug!(
+            total = texts.len(),
+            success = success_count,
+            "embedding: batch completed (partial)"
+        );
     } else {
         debug!(total = texts.len(), "embedding: batch completed");
     }
@@ -164,7 +169,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
         return 0.0;
     }
 
-    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+    let dot: f64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| (*x as f64) * (*y as f64))
+        .sum();
     let norm_a: f64 = a.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
     let norm_b: f64 = b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
 

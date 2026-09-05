@@ -25,13 +25,23 @@ pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)])
     let conversation_text = conversation.join("\n");
 
     // 尝试 AI 摘要
-    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("memory_summarize"), &conversation_text);
+    let result = crate::ai::analyze(
+        crate::prompt::PromptManager::get().raw("memory_summarize"),
+        &conversation_text,
+    );
     match result {
         Ok(summary) => {
             let summary = summary.trim();
             if !summary.is_empty() && summary.len() > 10 {
                 let content = format!("曾谈论: {}", summary);
-                super::ops_log::record("auto_summarize", user_id, group_id, &content, "normal", "AI summarized conversation");
+                super::ops_log::record(
+                    "auto_summarize",
+                    user_id,
+                    group_id,
+                    &content,
+                    "normal",
+                    "AI summarized conversation",
+                );
                 add(user_id, group_id, &content, Importance::Normal);
             }
         }
@@ -46,7 +56,12 @@ pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)])
             if recent.len() >= 3 {
                 let summary = recent.join("; ");
                 if summary.len() > 20 {
-                    add(user_id, group_id, &format!("曾谈论: {}", summary), Importance::Normal);
+                    add(
+                        user_id,
+                        group_id,
+                        &format!("曾谈论: {}", summary),
+                        Importance::Normal,
+                    );
                 }
             }
         }
@@ -79,22 +94,31 @@ pub fn ai_review_all() {
         let total_count = user_memory.entries.len();
         let memories_subset: Vec<&MemoryEntry> = if total_count > MAX_REVIEW_MEMORIES {
             // 取最新的 N 条记忆进行审查
-            user_memory.entries.iter().rev().take(MAX_REVIEW_MEMORIES).collect()
+            user_memory
+                .entries
+                .iter()
+                .rev()
+                .take(MAX_REVIEW_MEMORIES)
+                .collect()
         } else {
             user_memory.entries.iter().collect()
         };
-        let memories_text: Vec<String> = memories_subset.iter().map(|e| {
-            let imp = match e.importance {
-                Importance::Permanent => "永久",
-                Importance::Important => "重要",
-                Importance::Normal => "普通",
-            };
-            format!("- [{}] {}", imp, e.content)
-        }).collect();
+        let memories_text: Vec<String> = memories_subset
+            .iter()
+            .map(|e| {
+                let imp = match e.importance {
+                    Importance::Permanent => "永久",
+                    Importance::Important => "重要",
+                    Importance::Normal => "普通",
+                };
+                format!("- [{}] {}", imp, e.content)
+            })
+            .collect();
 
         // 获取最近对话历史 (取私聊上下文作为代表)
         let recent_history = crate::read_shared_state(|s| {
-            s.get_history_clone(0, user_id).iter()
+            s.get_history_clone(0, user_id)
+                .iter()
                 .rev()
                 .take(8)
                 .map(|(role, content)| format!("[{}]: {}", role, content))
@@ -103,7 +127,12 @@ pub fn ai_review_all() {
 
         let mut context_parts = Vec::new();
         let header = if total_count > MAX_REVIEW_MEMORIES {
-            format!("# 现有记忆 (共{}条，显示最新{}条)\n{}", total_count, MAX_REVIEW_MEMORIES, memories_text.join("\n"))
+            format!(
+                "# 现有记忆 (共{}条，显示最新{}条)\n{}",
+                total_count,
+                MAX_REVIEW_MEMORIES,
+                memories_text.join("\n")
+            )
         } else {
             format!("# 现有记忆\n{}", memories_text.join("\n"))
         };
@@ -117,11 +146,14 @@ pub fn ai_review_all() {
             crate::prompt::PromptManager::get().raw("memory_review"),
             &context,
             &[crate::ai::memory_review_tool()],
-            Some(serde_json::json!("auto"))
+            Some(serde_json::json!("auto")),
         );
         match result {
             Ok(parsed) => {
-                let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("keep");
+                let action = parsed
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("keep");
                 if action == "keep" {
                     debug!(user_id, "memory: review skipped (keep)");
                     continue;
@@ -133,7 +165,14 @@ pub fn ai_review_all() {
                 if let Some(removes) = parsed.get("removes").and_then(|v| v.as_array()) {
                     for remove in removes {
                         if let Some(content) = remove.as_str() {
-                            super::ops_log::record("review_remove", user_id, 0, content, "normal", "AI review: removed outdated memory");
+                            super::ops_log::record(
+                                "review_remove",
+                                user_id,
+                                0,
+                                content,
+                                "normal",
+                                "AI review: removed outdated memory",
+                            );
                             memory.entries.retain(|e| !e.content.contains(content));
                         }
                     }
@@ -142,17 +181,37 @@ pub fn ai_review_all() {
                 // 更新记忆
                 if let Some(updates) = parsed.get("updates").and_then(|v| v.as_array()) {
                     for update in updates {
-                        let old = update.get("old_content").and_then(|v| v.as_str()).unwrap_or("");
-                        let new = update.get("new_content").and_then(|v| v.as_str()).unwrap_or("");
-                        let imp_str = update.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
-                        if old.is_empty() || new.is_empty() { continue; }
+                        let old = update
+                            .get("old_content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let new = update
+                            .get("new_content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let imp_str = update
+                            .get("importance")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal");
+                        if old.is_empty() || new.is_empty() {
+                            continue;
+                        }
                         let importance = match imp_str {
                             "permanent" => Importance::Permanent,
                             "important" => Importance::Important,
                             _ => Importance::Normal,
                         };
-                        if let Some(entry) = memory.entries.iter_mut().find(|e| e.content.contains(old)) {
-                            super::ops_log::record("review_update", user_id, 0, old, imp_str, &format!("updated: {} -> {}", old, new));
+                        if let Some(entry) =
+                            memory.entries.iter_mut().find(|e| e.content.contains(old))
+                        {
+                            super::ops_log::record(
+                                "review_update",
+                                user_id,
+                                0,
+                                old,
+                                imp_str,
+                                &format!("updated: {} -> {}", old, new),
+                            );
                             entry.content = new.to_string();
                             entry.importance = importance;
                         }
@@ -163,15 +222,27 @@ pub fn ai_review_all() {
                 if let Some(adds) = parsed.get("adds").and_then(|v| v.as_array()) {
                     for item in adds {
                         let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let imp_str = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
-                        if content.is_empty() { continue; }
+                        let imp_str = item
+                            .get("importance")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal");
+                        if content.is_empty() {
+                            continue;
+                        }
                         let importance = match imp_str {
                             "permanent" => Importance::Permanent,
                             "important" => Importance::Important,
                             _ => Importance::Normal,
                         };
                         if !memory.entries.iter().any(|e| e.content == content) {
-                            super::ops_log::record("review_add", user_id, 0, content, imp_str, "AI review: added new memory");
+                            super::ops_log::record(
+                                "review_add",
+                                user_id,
+                                0,
+                                content,
+                                imp_str,
+                                "AI review: added new memory",
+                            );
                             let now = crate::util::now_secs();
                             memory.entries.push(MemoryEntry {
                                 content: content.to_string(),

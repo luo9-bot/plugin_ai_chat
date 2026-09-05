@@ -3,8 +3,8 @@
 //! 负责表情包的注册、选择和维护。
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
-use tracing::{debug, info, warn};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use tracing::{debug, info, warn};
 
 use super::store::*;
 
@@ -81,29 +81,30 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
     for url in &urls {
         // 下载图片
         if let Ok(mut resp) = ureq::get(url).call()
-            && let Ok(bytes) = resp.body_mut().read_to_vec() {
-                let format = detect_format(&bytes);
+            && let Ok(bytes) = resp.body_mut().read_to_vec()
+        {
+            let format = detect_format(&bytes);
 
-                // 内容过滤
-                if !content_filtration(&bytes, &format) {
-                    warn!("sticker: content filtration rejected");
-                    return None;
-                }
-
-                if let Some(hash) = register_sticker(&bytes, &format) {
-                    // 异步获取并持久化自然语言描述
-                    let hash_cp = hash.clone();
-                    let url_cp = url.clone();
-                    std::thread::spawn(move || {
-                        if let Some(nl_desc) = crate::vision::recognize(&url_cp) {
-                            super::store::update_vlm_description(&hash_cp, &nl_desc);
-                            debug!(hash = %hash_cp[..16.min(hash_cp.len())], "sticker: stored VLM description");
-                        }
-                    });
-
-                    return Some(hash);
-                }
+            // 内容过滤
+            if !content_filtration(&bytes, &format) {
+                warn!("sticker: content filtration rejected");
+                return None;
             }
+
+            if let Some(hash) = register_sticker(&bytes, &format) {
+                // 异步获取并持久化自然语言描述
+                let hash_cp = hash.clone();
+                let url_cp = url.clone();
+                std::thread::spawn(move || {
+                    if let Some(nl_desc) = crate::vision::recognize(&url_cp) {
+                        super::store::update_vlm_description(&hash_cp, &nl_desc);
+                        debug!(hash = %hash_cp[..16.min(hash_cp.len())], "sticker: stored VLM description");
+                    }
+                });
+
+                return Some(hash);
+            }
+        }
     }
     None
 }
@@ -171,12 +172,11 @@ pub fn is_sticker_cq(cq_message: &str) -> bool {
 /// 2. 加载图片
 /// 3. 发送给 VLM 让它选择
 /// 4. 解析选择结果
-pub fn select_sticker_vlm(
-    context: &str,
-    exclude_hashes: &[String],
-) -> Option<StickerSelection> {
+pub fn select_sticker_vlm(context: &str, exclude_hashes: &[String]) -> Option<StickerSelection> {
     let store = load_store();
-    let candidates: Vec<&StickerEntry> = store.stickers.iter()
+    let candidates: Vec<&StickerEntry> = store
+        .stickers
+        .iter()
         .filter(|e| e.is_registered && !e.is_banned)
         .filter(|e| !exclude_hashes.contains(&e.hash))
         .collect();
@@ -190,7 +190,8 @@ pub fn select_sticker_vlm(
 
     // 加载图片路径
     let data_dir = crate::config::data_dir();
-    let image_paths: Vec<String> = sampled.iter()
+    let image_paths: Vec<String> = sampled
+        .iter()
         .map(|e| data_dir.join(&e.path).to_string_lossy().to_string())
         .collect();
 
@@ -234,36 +235,6 @@ pub fn select_sticker_vlm(
             })
         }
     }
-}
-
-/// 情绪标签匹配选择（VLM 的 fallback）
-fn select_sticker_by_emotion(
-    target_emotion: &str,
-    candidates: &[&StickerEntry],
-) -> Option<StickerSelection> {
-    let mut scored: Vec<(&StickerEntry, f64)> = candidates.iter()
-        .map(|e| {
-            let emotion_score = calculate_emotion_similarity(target_emotion, &e.emotions);
-            let usage_bonus = (e.query_count as f64).ln().max(0.0) * 0.1;
-            (*e, emotion_score + usage_bonus)
-        })
-        .collect();
-
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let top_n: Vec<_> = scored.into_iter().take(10).collect();
-    if top_n.is_empty() {
-        return None;
-    }
-
-    let idx = (crate::util::now_millis() as usize) % top_n.len();
-    let (selected, _) = &top_n[idx];
-
-    Some(StickerSelection {
-        hash: selected.hash.clone(),
-        path: selected.path.clone(),
-        description: selected.description.clone(),
-        reason: format!("情绪标签匹配: {}", target_emotion),
-    })
 }
 
 // ── VLM 调用 ────────────────────────────────────────────────────
@@ -325,7 +296,9 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
     // 保存临时文件
     let temp_dir = std::env::current_dir()
         .unwrap_or_default()
-        .join("data").join("plugin_ai_chat").join("temp");
+        .join("data")
+        .join("plugin_ai_chat")
+        .join("temp");
     std::fs::create_dir_all(&temp_dir).ok();
 
     let timestamp = std::time::SystemTime::now()
@@ -339,11 +312,9 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
     let prompt = if format == "gif" {
         format!(
             "这是一个动态图表情包，每一张图代表了动态图的一帧。{}",
-            crate::prompt::PromptManager::get()
-            .raw("sticker_content_filtration")
+            crate::prompt::PromptManager::get().raw("sticker_content_filtration")
         )
-    }
-    else {
+    } else {
         crate::prompt::PromptManager::get()
             .raw("sticker_content_filtration")
             .to_string()
@@ -374,10 +345,7 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
 /// 使用 VLM 从多个候选中选择最佳表情包
 ///
 /// 使用 VLM 网格选择最合适的表情包
-fn select_with_vlm(
-    image_paths: &[String],
-    context: &str,
-) -> Option<(usize, String)> {
+fn select_with_vlm(image_paths: &[String], context: &str) -> Option<(usize, String)> {
     let cfg = crate::config::get();
     if !cfg.vision.enabled() || image_paths.is_empty() {
         return None;
@@ -403,7 +371,11 @@ fn select_with_vlm(
          请根据对话情境和语气，选择最合适的一个表情包。\n\
          只返回 JSON：{{\"index\": N, \"reason\": \"选择原因\"}}\n\
          N 为候选列表中的序号（从 1 开始）。",
-        context, image_paths.len(), cols, rows, image_paths.len()
+        context,
+        image_paths.len(),
+        cols,
+        rows,
+        image_paths.len()
     );
 
     let request_body = serde_json::json!({
@@ -425,17 +397,20 @@ fn select_with_vlm(
     match result {
         Some(response) => {
             if let Some(json_str) = crate::ai::extract_json(&response)
-                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    let index = parsed.get("index")
-                        .and_then(|v| v.as_u64())
-                        .map(|n| (n as usize).saturating_sub(1))
-                        .unwrap_or(0);
-                    let reason = parsed.get("reason")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    return Some((index, reason));
-                }
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str)
+            {
+                let index = parsed
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| (n as usize).saturating_sub(1))
+                    .unwrap_or(0);
+                let reason = parsed
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                return Some((index, reason));
+            }
             if let Some(n) = extract_number(&response) {
                 return Some((n.saturating_sub(1), "从文本提取".to_string()));
             }
@@ -478,7 +453,8 @@ fn create_grid_image(image_paths: &[String]) -> Option<Vec<u8>> {
 
         // 加载并缩放图片
         if let Ok(img) = image::open(path) {
-            let resized = img.resize_exact(tile_size, tile_size, image::imageops::FilterType::Lanczos3);
+            let resized =
+                img.resize_exact(tile_size, tile_size, image::imageops::FilterType::Lanczos3);
             let rgb = resized.to_rgb8();
 
             // 复制到画布
@@ -497,7 +473,14 @@ fn create_grid_image(image_paths: &[String]) -> Option<Vec<u8>> {
     // 编码为 PNG
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    image::ImageEncoder::write_image(encoder, canvas.as_raw(), canvas.width(), canvas.height(), image::ExtendedColorType::Rgb8).ok()?;
+    image::ImageEncoder::write_image(
+        encoder,
+        canvas.as_raw(),
+        canvas.width(),
+        canvas.height(),
+        image::ExtendedColorType::Rgb8,
+    )
+    .ok()?;
     Some(buf)
 }
 
@@ -632,27 +615,40 @@ fn call_vlm_api(url: &str, api_key: &str, body: &serde_json::Value) -> Option<St
     let resp_str = resp.body_mut().read_to_string().ok()?;
 
     // 解析响应
-    serde_json::from_str::<serde_json::Value>(&resp_str).ok().and_then(|v| {
-        // responses 格式
-        v.get("output").and_then(|o| o.as_array()).and_then(|output| {
-            output.iter().find_map(|item| {
-                item.get("content").and_then(|c| c.as_array()).and_then(|contents| {
-                    contents.iter().find_map(|content| {
-                        content.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+    serde_json::from_str::<serde_json::Value>(&resp_str)
+        .ok()
+        .and_then(|v| {
+            // responses 格式
+            v.get("output")
+                .and_then(|o| o.as_array())
+                .and_then(|output| {
+                    output.iter().find_map(|item| {
+                        item.get("content")
+                            .and_then(|c| c.as_array())
+                            .and_then(|contents| {
+                                contents.iter().find_map(|content| {
+                                    content
+                                        .get("text")
+                                        .and_then(|t| t.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                            })
                     })
                 })
-            })
-        })
-        // chat completions 格式
-        .or_else(|| {
-            v.get("choices").and_then(|c| c.as_array()).and_then(|choices| {
-                choices.first().and_then(|c| {
-                    c.get("message").and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_str()).map(|s| s.to_string())
+                // chat completions 格式
+                .or_else(|| {
+                    v.get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|choices| {
+                            choices.first().and_then(|c| {
+                                c.get("message")
+                                    .and_then(|m| m.get("content"))
+                                    .and_then(|c| c.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                        })
                 })
-            })
         })
-    })
 }
 
 // ── 工具函数 ────────────────────────────────────────────────────
@@ -670,16 +666,27 @@ pub fn update_usage(hash: &str) {
 /// 获取表情包文件路径
 pub fn get_sticker_path(hash: &str) -> Option<String> {
     let store = load_store();
-    store.stickers.iter()
+    store
+        .stickers
+        .iter()
         .find(|e| e.hash == hash && e.is_registered && !e.is_banned)
-        .map(|e| crate::config::data_dir().join(&e.path).to_string_lossy().to_string())
+        .map(|e| {
+            crate::config::data_dir()
+                .join(&e.path)
+                .to_string_lossy()
+                .to_string()
+        })
 }
 
 /// 获取表情包统计
 pub fn get_stats() -> (usize, usize) {
     let store = load_store();
     let total = store.stickers.len();
-    let registered = store.stickers.iter().filter(|e| e.is_registered && !e.is_banned).count();
+    let registered = store
+        .stickers
+        .iter()
+        .filter(|e| e.is_registered && !e.is_banned)
+        .count();
     (total, registered)
 }
 
@@ -713,7 +720,10 @@ fn weighted_sample<'a>(candidates: &[&'a StickerEntry], n: usize) -> Vec<&'a Sti
     }
 
     // 简单实现：按使用次数加权随机选择
-    let total_weight: f64 = candidates.iter().map(|e| (e.query_count as f64 + 1.0).sqrt()).sum();
+    let total_weight: f64 = candidates
+        .iter()
+        .map(|e| (e.query_count as f64 + 1.0).sqrt())
+        .sum();
     let mut selected = Vec::new();
     let mut used = std::collections::HashSet::new();
 
@@ -723,7 +733,9 @@ fn weighted_sample<'a>(candidates: &[&'a StickerEntry], n: usize) -> Vec<&'a Sti
         roll = (roll * 7919.0) % 1.0;
         let mut cumulative = 0.0;
         for (i, candidate) in candidates.iter().enumerate() {
-            if used.contains(&i) { continue; }
+            if used.contains(&i) {
+                continue;
+            }
             let weight = (candidate.query_count as f64 + 1.0).sqrt();
             cumulative += weight / total_weight;
             if roll < cumulative {
@@ -736,7 +748,9 @@ fn weighted_sample<'a>(candidates: &[&'a StickerEntry], n: usize) -> Vec<&'a Sti
 
     // 如果没选够，补上未选的
     for (i, candidate) in candidates.iter().enumerate() {
-        if selected.len() >= n { break; }
+        if selected.len() >= n {
+            break;
+        }
         if !used.contains(&i) {
             selected.push(*candidate);
         }
@@ -763,36 +777,6 @@ fn parse_emotions(description: &str) -> Vec<String> {
         .collect()
 }
 
-/// 计算目标情绪与表情包情绪标签的匹配度
-fn calculate_emotion_similarity(target: &str, emotions: &[String]) -> f64 {
-    if emotions.is_empty() {
-        return 0.1;
-    }
-    let target_lower = target.to_lowercase();
-    let mut max_score: f64 = 0.0;
-
-    for emotion in emotions {
-        let emotion_lower = emotion.to_lowercase();
-        if target_lower == emotion_lower {
-            max_score = max_score.max(1.0);
-        } else if target_lower.contains(&emotion_lower) || emotion_lower.contains(&target_lower) {
-            max_score = max_score.max(0.7);
-        } else {
-            let overlap = text_similarity(&target_lower, &emotion_lower);
-            max_score = max_score.max(overlap * 0.5);
-        }
-    }
-    max_score
-}
-
-fn text_similarity(a: &str, b: &str) -> f64 {
-    if a.is_empty() || b.is_empty() { return 0.0; }
-    let chars_a: Vec<char> = a.chars().collect();
-    let chars_b: std::collections::HashSet<char> = b.chars().collect();
-    let overlap = chars_a.iter().filter(|c| chars_b.contains(c)).count();
-    overlap as f64 / chars_a.len().max(1) as f64
-}
-
 /// 从文本中提取第一个数字
 fn extract_number(text: &str) -> Option<usize> {
     let mut num = String::new();
@@ -809,12 +793,14 @@ fn extract_number(text: &str) -> Option<usize> {
 /// 检测图片格式
 fn detect_format(bytes: &[u8]) -> String {
     if bytes.len() >= 4 {
-        if bytes[0] == 0x89 && bytes[1] == 0x50 { return "png".to_string(); }
-        if bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg".to_string(); }
-        if bytes[0] == 0x47 && bytes[1] == 0x49 { return "gif".to_string(); }
-        if bytes[0] == 0x52 && bytes[1] == 0x49 { return "webp".to_string(); }
+        if bytes[0] == 0x89 && bytes[1] == 0x50 {
+            return "png".to_string();
+        }
+        if bytes[0] == 0xFF && bytes[1] == 0xD8 {
+            return "jpg".to_string();
+        }
     }
-    "png".to_string()
+    "unknown".to_string()
 }
 
 // ── NeSticker 内置表情注册 ──────────────────────────────────────
@@ -877,11 +863,11 @@ pub fn init_ne_stickers() {
 
     // 从注册表中收集已记录的内置表情文件名
     let store = load_store();
-    let known: std::collections::HashSet<String> = store.stickers.iter()
+    let known: std::collections::HashSet<String> = store
+        .stickers
+        .iter()
         .filter(|e| e.is_builtin)
-        .filter_map(|e| {
-            e.path.strip_prefix("ne_sticker/").map(|s| s.to_string())
-        })
+        .filter_map(|e| e.path.strip_prefix("ne_sticker/").map(|s| s.to_string()))
         .collect();
     drop(store);
 
@@ -919,7 +905,11 @@ pub fn init_ne_stickers() {
     let start = std::time::Instant::now();
 
     for (i, path) in pending.iter().enumerate() {
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_string();
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(_) => {
@@ -928,7 +918,8 @@ pub fn init_ne_stickers() {
             }
         };
 
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("png")
             .to_lowercase();
@@ -955,8 +946,15 @@ pub fn steal_emoji_scan() -> usize {
     }
 
     let store = load_store();
-    let known_paths: std::collections::HashSet<String> = store.stickers.iter()
-        .map(|e| crate::config::data_dir().join(&e.path).to_string_lossy().to_string())
+    let known_paths: std::collections::HashSet<String> = store
+        .stickers
+        .iter()
+        .map(|e| {
+            crate::config::data_dir()
+                .join(&e.path)
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     let mut registered = 0;
@@ -981,7 +979,8 @@ pub fn steal_emoji_scan() -> usize {
             Err(_) => continue,
         };
 
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("png")
             .to_lowercase();
@@ -1010,7 +1009,11 @@ pub fn steal_emoji_scan() -> usize {
 }
 
 /// 从文件路径注册表情包（steal_emoji 内部使用）
-fn register_sticker_from_path(path: &std::path::Path, format: &str, bytes: &[u8]) -> Option<String> {
+fn register_sticker_from_path(
+    path: &std::path::Path,
+    format: &str,
+    bytes: &[u8],
+) -> Option<String> {
     let hash = compute_hash(bytes);
     let (description, emotions) = generate_description_with_vlm(path);
 
@@ -1061,7 +1064,9 @@ pub fn do_replace_eviction(max_reg_num: usize) -> usize {
     let excess = non_builtin_count - max_reg_num;
 
     // 收集非内置表情索引，按 (query_count, last_used_at) 升序排序
-    let mut candidates: Vec<usize> = store.stickers.iter()
+    let mut candidates: Vec<usize> = store
+        .stickers
+        .iter()
         .enumerate()
         .filter(|(_, e)| !e.is_builtin)
         .map(|(i, _)| i)
@@ -1070,12 +1075,15 @@ pub fn do_replace_eviction(max_reg_num: usize) -> usize {
     candidates.sort_by(|&a, &b| {
         let entry_a = &store.stickers[a];
         let entry_b = &store.stickers[b];
-        entry_a.query_count.cmp(&entry_b.query_count)
+        entry_a
+            .query_count
+            .cmp(&entry_b.query_count)
             .then(entry_a.last_used_at.cmp(&entry_b.last_used_at))
     });
 
     // 收集待移除的哈希
-    let to_remove: std::collections::HashSet<String> = candidates.iter()
+    let to_remove: std::collections::HashSet<String> = candidates
+        .iter()
         .take(excess)
         .map(|&i| store.stickers[i].hash.clone())
         .collect();

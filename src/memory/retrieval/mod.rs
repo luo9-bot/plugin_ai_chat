@@ -5,15 +5,15 @@
 //! 支持后置图门控、自适应阈值、智能回退
 
 pub mod bm25;
-pub(crate) mod vector;
-mod fusion;
-pub mod threshold;
-pub mod posterior_graph;
 pub mod fallback;
+mod fusion;
+pub mod posterior_graph;
+pub mod threshold;
+pub(crate) mod vector;
 
 pub use fusion::RetrievalResult;
-pub use threshold::ThresholdConfig;
 pub use posterior_graph::PosteriorGraphConfig;
+pub use threshold::ThresholdConfig;
 
 use std::collections::HashMap;
 
@@ -67,12 +67,13 @@ impl Default for RetrievalConfig {
 /// 7. 智能回退（结果不足时）
 pub fn dual_path_retrieve(
     query: &str,
-    memories: &[(String, String)], // (id, content)
+    memories: &[(String, String)],     // (id, content)
     embeddings: &[(String, Vec<f32>)], // (id, embedding)
     config: &RetrievalConfig,
 ) -> Vec<RetrievalResult> {
     // 步骤1: 元数据过滤
-    let filtered_memories: Vec<(String, String)> = if let Some(ref filter) = config.metadata_filter {
+    let filtered_memories: Vec<(String, String)> = if let Some(ref filter) = config.metadata_filter
+    {
         apply_metadata_filter(memories, filter)
     } else {
         memories.to_vec()
@@ -133,14 +134,15 @@ pub fn dual_path_retrieve(
             let fb_map: HashMap<String, String> = HashMap::new();
             for r in fb_results {
                 if let Some(content) = fb_map.get(&r.id)
-                    && !fused.iter().any(|f| f.id == r.id) {
-                        fused.push(RetrievalResult {
-                            id: r.id,
-                            content: content.clone(),
-                            score: r.score * 0.5, // 回退结果降权
-                            source: "fallback",
-                        });
-                    }
+                    && !fused.iter().any(|f| f.id == r.id)
+                {
+                    fused.push(RetrievalResult {
+                        id: r.id,
+                        content: content.clone(),
+                        score: r.score * 0.5, // 回退结果降权
+                        source: "fallback",
+                    });
+                }
             }
         }
     }

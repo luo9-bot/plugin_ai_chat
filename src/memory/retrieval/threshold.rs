@@ -29,10 +29,7 @@ impl Default for ThresholdConfig {
 ///
 /// 计算分数分布的均值和标准差，
 /// 过滤掉低于 `mean - multiplier * std` 的结果。
-pub fn adaptive_threshold_filter(
-    results: &mut Vec<RetrievalResult>,
-    config: &ThresholdConfig,
-) {
+pub fn adaptive_threshold_filter(results: &mut Vec<RetrievalResult>, config: &ThresholdConfig) {
     if results.is_empty() {
         return;
     }
@@ -40,11 +37,7 @@ pub fn adaptive_threshold_filter(
     let threshold = if config.adaptive && results.len() > 1 {
         let scores: Vec<f64> = results.iter().map(|r| r.score).collect();
         let mean = scores.iter().sum::<f64>() / scores.len() as f64;
-        let variance = scores
-            .iter()
-            .map(|s| (s - mean).powi(2))
-            .sum::<f64>()
-            / scores.len() as f64;
+        let variance = scores.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / scores.len() as f64;
         let std = variance.sqrt();
         let adaptive_threshold = mean - config.std_multiplier * std;
         adaptive_threshold.max(config.min_score)

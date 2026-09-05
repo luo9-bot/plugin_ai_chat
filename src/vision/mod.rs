@@ -1,6 +1,6 @@
-use tracing::{debug, info};
-use crate::config;
 use crate::anti_injection;
+use crate::config;
+use tracing::{debug, info};
 
 /// 从消息中提取 [CQ:image,...] 的图片 URL
 pub fn extract_image_urls(message: &str) -> Vec<String> {
@@ -95,10 +95,7 @@ pub fn recognize(image_url: &str) -> Option<String> {
         "max_output_tokens": max_tokens
     });
 
-    let url = format!(
-        "{}/responses",
-        cfg.vision.base_url.trim_end_matches('/')
-    );
+    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
 
     debug!(url = %url, model = %cfg.vision.model, image = %image_url, "vision: sending request");
 
@@ -138,23 +135,37 @@ pub fn recognize(image_url: &str) -> Option<String> {
             // 尝试 responses 格式
             if let Some(output) = v.get("output").and_then(|o| o.as_array()) {
                 output.iter().find_map(|item| {
-                    item.get("content").and_then(|c| c.as_array()).and_then(|contents| {
-                        contents.iter().find_map(|content| {
-                            content.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    item.get("content")
+                        .and_then(|c| c.as_array())
+                        .and_then(|contents| {
+                            contents.iter().find_map(|content| {
+                                content
+                                    .get("text")
+                                    .and_then(|t| t.as_str())
+                                    .map(|s| s.to_string())
+                            })
                         })
-                    })
                 })
             }
             // 兼容 chat completions 格式
             else if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                 choices.first().and_then(|c| {
-                    c.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|s| s.to_string())
+                    c.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.to_string())
                 })
             }
             // 兼容直接 text 字段
             else {
-                v.get("output_text").and_then(|t| t.as_str()).map(|s| s.to_string())
-                    .or_else(|| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                v.get("output_text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        v.get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
+                    })
             }
         }
         Err(e) => {

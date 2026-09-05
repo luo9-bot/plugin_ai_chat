@@ -1,5 +1,5 @@
-use super::scorer::RiskScore;
 use super::sandbox;
+use super::scorer::RiskScore;
 use crate::config::AntiInjectionConfig;
 
 /// 检测到的安全问题
@@ -46,13 +46,27 @@ pub struct DetectionResult {
 /// 从 RiskScore 生成 SecurityIssue 列表
 pub fn score_to_issues(score: &RiskScore) -> Vec<SecurityIssue> {
     let mut issues = Vec::new();
-    if score.sexual >= 0.60 { issues.push(SecurityIssue::Sexual); }
-    if score.violence >= 0.60 { issues.push(SecurityIssue::Violence); }
-    if score.illegal >= 0.60 { issues.push(SecurityIssue::Illegal); }
-    if score.jailbreak >= 0.40 { issues.push(SecurityIssue::InjectionJailbreak); }
-    if score.structured >= 0.50 { issues.push(SecurityIssue::StructuredInjection); }
-    if score.prompt_leak >= 0.50 { issues.push(SecurityIssue::InjectionPromptLeak); }
-    if score.emotional >= 0.60 { issues.push(SecurityIssue::EmotionalManipulation); }
+    if score.sexual >= 0.60 {
+        issues.push(SecurityIssue::Sexual);
+    }
+    if score.violence >= 0.60 {
+        issues.push(SecurityIssue::Violence);
+    }
+    if score.illegal >= 0.60 {
+        issues.push(SecurityIssue::Illegal);
+    }
+    if score.jailbreak >= 0.40 {
+        issues.push(SecurityIssue::InjectionJailbreak);
+    }
+    if score.structured >= 0.50 {
+        issues.push(SecurityIssue::StructuredInjection);
+    }
+    if score.prompt_leak >= 0.50 {
+        issues.push(SecurityIssue::InjectionPromptLeak);
+    }
+    if score.emotional >= 0.60 {
+        issues.push(SecurityIssue::EmotionalManipulation);
+    }
     issues
 }
 
@@ -81,10 +95,7 @@ pub fn calculate_severity(issues: &[SecurityIssue]) -> f32 {
 }
 
 /// 确定处置动作
-pub fn determine_action(
-    score: &RiskScore,
-    config: &AntiInjectionConfig,
-) -> Action {
+pub fn determine_action(score: &RiskScore, config: &AntiInjectionConfig) -> Action {
     // 结构化注入和越狱：强拦截
     if score.jailbreak >= 0.40 || score.structured >= 0.50 {
         return Action::Block;

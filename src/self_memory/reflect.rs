@@ -3,7 +3,7 @@ use tracing::{debug, info};
 use crate::config;
 use crate::emotion;
 
-use super::store::{add, get_context, ThoughtCategory};
+use super::store::{ThoughtCategory, add, get_context};
 
 /// 群组画像：AI 用来判断往哪个群分享
 pub struct GroupProfile {

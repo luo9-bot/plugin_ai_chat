@@ -134,17 +134,17 @@ conversation:
   # 建议 120 ~ 600
   reply_follow_up_secs: 300
 
-  # 主动插话权重 (0.0 ~ 1.0)
-  # 控制机器人在群聊中回复非@消息的倾向
-  # 0.0 = 几乎什么都会回复 (话痨)
-  # 0.3 = 适度参与 (默认，像正常群友)
-  # 0.7 = 比较克制，只回复明显相关的
-  # 1.0 = 非常克制，只回复直接相关的
-  intrusiveness_weight: 0.3
-
   # 对同一用户的回复冷却时间 (秒)
   # 防止对同一用户连续回复刷屏
   reply_cooldown_secs: 15
+
+  # 群聊语音循环的最大轮数（工具调用轮次）
+  # 常规回复 1 轮即可完成；查询记忆/发表情包会增加轮次
+  voice_max_rounds: 3
+
+  # 群聊沉默冷却 (秒)
+  # 她刚决定不说话后，在此时间内不再重新权衡（省 API，也更像"刚看过一眼群里"）
+  silence_cooldown_secs: 90
 
   # 是否允许括号内的动作/表情描述
   # true = AI 可以用"（笑了笑）"、"（叹气）"等描述动作和表情
@@ -297,17 +297,8 @@ humanity:
   # 注意力模型：影响回复深度和风格
   attention_enabled: true
 
-  # 满足性决策：生成多个候选，选第一个够好的
-  satisficing_enabled: true
-  satisficing_threshold: 0.55      # 满足阈值
-  satisficing_max_iterations: 3    # 最大候选数
-  satisficing_good_enough_probability: 0.15  # "差不多得了"概率
-
-  # 变速回复：动态打字延迟和回复拆分
+  # 变速回复：动态打字延迟（拟人节奏，不做内容手术）
   response_timing_enabled: true
-  split_reply_probability: 0.1     # 拆分回复概率
-  follow_up_probability: 0.08      # 补充消息概率
-  self_correction_probability: 0.03  # 自我纠正概率
   thinking_pause_probability: 0.15   # 思考暂停概率
   base_typing_speed: 5.0           # 基础打字速度
 
@@ -318,18 +309,10 @@ humanity:
   forgetting_rate: 0.005           # 自然遗忘率
   association_jump_probability: 0.05  # 联想跳跃概率
 
-  # 回复人性扰动
-  humanity_filter_enabled: true
-  catchphrase_probability: 0.1     # 口头禅概率
-
   # 内心独白
   inner_thought_enabled: true
   inner_thought_interval_min: 300  # 最小间隔(秒)
   inner_thought_interval_max: 900  # 最大间隔(秒)
-
-  # 错别字模拟
-  typo_enabled: true               # 是否模拟人类打字时的错别字
-  typo_error_rate: 0.3             # 错别字出现概率 (0.0~1.0)
 
 
 # ── 群聊回复配额 (分时段限制回复次数) ───────────────────────

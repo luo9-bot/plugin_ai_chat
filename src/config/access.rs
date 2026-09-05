@@ -1,9 +1,9 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 use tracing::debug;
 
-use super::init::{CONFIG, PROMPT, DATA_DIR, DEFAULT_CONFIG_YAML, CONFIG_ERROR};
+use super::init::{CONFIG, CONFIG_ERROR, DATA_DIR, DEFAULT_CONFIG_YAML, PROMPT};
 use super::structs::Config;
 
 pub fn data_dir() -> &'static PathBuf {
@@ -12,7 +12,12 @@ pub fn data_dir() -> &'static PathBuf {
 
 /// 获取配置的克隆（每次调用会 clone，但 Config 很小且调用不频繁）
 pub fn get() -> Config {
-    CONFIG.read().unwrap().as_ref().expect("Config not initialized").clone()
+    CONFIG
+        .read()
+        .unwrap()
+        .as_ref()
+        .expect("Config not initialized")
+        .clone()
 }
 
 /// 获取配置解析错误信息，为空表示正常
@@ -23,8 +28,7 @@ pub fn error_message() -> String {
 /// 重新载入配置文件（热重载，无需重启插件）
 pub fn reload() -> Result<(), String> {
     let config_path = data_dir().join("config.yaml");
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取配置失败: {}", e))?;
+    let content = fs::read_to_string(&config_path).map_err(|e| format!("读取配置失败: {}", e))?;
     let config: Config = match serde_yaml::from_str(&content) {
         Ok(c) => c,
         Err(e) => {
@@ -175,7 +179,10 @@ pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, S
                     if comment.is_empty() {
                         output.push_str(&format!("{}{}: {}\n", indent_str, key, new_yaml));
                     } else {
-                        output.push_str(&format!("{}{}: {} {}\n", indent_str, key, new_yaml, comment));
+                        output.push_str(&format!(
+                            "{}{}: {} {}\n",
+                            indent_str, key, new_yaml, comment
+                        ));
                     }
                     if indent_stack.is_empty() {
                         handled_keys.insert(key);
@@ -242,9 +249,14 @@ fn value_to_yaml_inline(val: &serde_json::Value) -> String {
 }
 
 /// 已知结构的字段顺序（不在列表中的键按字母序追加到末尾）
-fn field_order_hint(obj: &serde_json::Map<String, serde_json::Value>) -> Option<&'static [&'static str]> {
+fn field_order_hint(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static [&'static str]> {
     // 配额时段
-    if obj.contains_key("start_hour") && obj.contains_key("end_hour") && obj.contains_key("max_replies") {
+    if obj.contains_key("start_hour")
+        && obj.contains_key("end_hour")
+        && obj.contains_key("max_replies")
+    {
         return Some(&["start_hour", "end_hour", "max_replies"]);
     }
     None

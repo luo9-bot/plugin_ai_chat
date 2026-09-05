@@ -1,11 +1,11 @@
 //! 对话处理模块：消息入口、批次处理、回复生成、上下文构建
 
+pub mod attention;
 pub mod batch;
 pub mod context;
 pub mod handler;
-pub mod attention;
 
-use crate::{config, with_state, with_shared_state, read_shared_state, is_admin};
+use crate::{config, is_admin, read_shared_state, with_shared_state, with_state};
 use tracing::{debug, info, warn};
 
 pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
@@ -16,7 +16,14 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let self_qq = config::get().self_qq;
     if self_qq > 0 && user_id == self_qq {
         let text_only = crate::vision::strip_image_cq(trimmed);
-        crate::working_memory::record_bot_reply(group_id, if text_only.is_empty() { "[图片]" } else { &text_only });
+        crate::working_memory::record_bot_reply(
+            group_id,
+            if text_only.is_empty() {
+                "[图片]"
+            } else {
+                &text_only
+            },
+        );
         debug!(user_id, group_id, "self message recorded to working memory");
         return;
     }
@@ -35,7 +42,8 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
 
     // ── 防注入检查 (非管理员，始终开启) ──
     if !is_admin(user_id) {
-        let check_result = crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
+        let check_result =
+            crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
         match check_result.action {
             crate::anti_injection::Action::Block | crate::anti_injection::Action::Ban => {
                 warn!(
@@ -93,7 +101,9 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                     crate::sender::send_msg(group_id, user_id, &config::get().messages.start.redo);
                     return;
                 }
-                with_state(|s| { s.active_groups.insert(group_id); });
+                with_state(|s| {
+                    s.active_groups.insert(group_id);
+                });
                 info!(user_id, group_id, "cmd: activated group");
                 crate::sender::send_msg(group_id, user_id, &config::get().messages.start.success);
                 return;
@@ -105,7 +115,9 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
                     crate::sender::send_msg(group_id, user_id, &config::get().messages.stop.redo);
                     return;
                 }
-                with_state(|s| { s.active_groups.remove(&group_id); });
+                with_state(|s| {
+                    s.active_groups.remove(&group_id);
+                });
                 info!(user_id, group_id, "cmd: deactivated group");
                 crate::sender::send_msg(group_id, user_id, &config::get().messages.stop.success);
                 return;
@@ -147,7 +159,16 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let text_only = crate::vision::strip_image_cq(trimmed);
     crate::proactive::record_user_reply(user_id);
     crate::emotion::analyze_user_message(user_id, &text_only);
-    let record_ts = crate::working_memory::record(group_id, user_id, if text_only.is_empty() { "[图片]" } else { &text_only }, false);
+    let record_ts = crate::working_memory::record(
+        group_id,
+        user_id,
+        if text_only.is_empty() {
+            "[图片]"
+        } else {
+            &text_only
+        },
+        false,
+    );
 
     // ── 人物档案：注册/更新 ──
     crate::person_info::register_person(user_id);
@@ -210,7 +231,8 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
 
     // ── 防注入检查 (非管理员，始终开启) ──
     if !is_admin(user_id) {
-        let check_result = crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
+        let check_result =
+            crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
         match check_result.action {
             crate::anti_injection::Action::Block | crate::anti_injection::Action::Ban => {
                 warn!(
@@ -265,10 +287,11 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
 
     // 通用管理员命令
     if is_admin(user_id)
-        && let Some(reply) = handle_admin_command(trimmed, 0, user_id) {
-            crate::sender::send_msg(0, user_id, &reply);
-            return;
-        }
+        && let Some(reply) = handle_admin_command(trimmed, 0, user_id)
+    {
+        crate::sender::send_msg(0, user_id, &reply);
+        return;
+    }
 
     if let Some(reply) = crate::memory::check_forget_command(user_id, trimmed) {
         crate::sender::send_msg(0, user_id, &reply);
@@ -311,7 +334,9 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
                 info!(user_id, "cmd: already active");
                 return Some(config::get().messages.start.redo.clone());
             }
-            with_state(|s| { s.active.insert(user_id); });
+            with_state(|s| {
+                s.active.insert(user_id);
+            });
             info!(user_id, "cmd: activated private chat");
             Some(config::get().messages.start.success.clone())
         }
@@ -343,7 +368,11 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
             with_shared_state(|s| s.forget_user_shared(user_id));
             with_state(|s| s.forget_user_local(user_id));
             info!(user_id, "cmd: forgot conversation");
-            Some(format!("{}\n\n{}", config::get().messages.forget.success, list))
+            Some(format!(
+                "{}\n\n{}",
+                config::get().messages.forget.success,
+                list
+            ))
         }
         "重启对话" => {
             let has = read_shared_state(|s| s.contexts.contains_key(&(0, user_id)));
@@ -371,7 +400,14 @@ pub fn handle_personality_command(msg: &str) -> Option<String> {
     }
 
     if msg == "人格模板" {
-        let templates = ["温柔体贴", "幽默风趣", "理性分析", "傲娇毒舌", "元气活泼", "安静内敛"];
+        let templates = [
+            "温柔体贴",
+            "幽默风趣",
+            "理性分析",
+            "傲娇毒舌",
+            "元气活泼",
+            "安静内敛",
+        ];
         return Some(format!("可用人格模板:\n{}", templates.join("\n")));
     }
 
@@ -383,9 +419,10 @@ pub fn handle_personality_command(msg: &str) -> Option<String> {
     if let Some(rest) = msg.strip_prefix("调整特质:") {
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
         if parts.len() == 2
-            && let Ok(value) = parts[1].parse::<f32>() {
-                return Some(crate::personality::adjust_trait(parts[0], value).unwrap_or_else(|e| e));
-            }
+            && let Ok(value) = parts[1].parse::<f32>()
+        {
+            return Some(crate::personality::adjust_trait(parts[0], value).unwrap_or_else(|e| e));
+        }
         return Some("格式: 调整特质:特质名 数值 (0.0~1.0)".into());
     }
 
@@ -426,10 +463,11 @@ pub fn handle_proactive_command(msg: &str) -> Option<String> {
     if let Some(rest) = msg.strip_prefix("设置免打扰:") {
         let parts: Vec<&str> = rest.splitn(2, '-').collect();
         if parts.len() == 2
-            && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                crate::proactive::set_quiet_hours(start, end);
-                return Some(format!("已设置免打扰: {}时 - {}时", start, end));
-            }
+            && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+        {
+            crate::proactive::set_quiet_hours(start, end);
+            return Some(format!("已设置免打扰: {}时 - {}时", start, end));
+        }
         return Some("格式: 设置免打扰:23-7".into());
     }
 
@@ -456,7 +494,11 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 return Some("当前没有开启的群聊".into());
             }
             let list: Vec<String> = groups.iter().map(|g| g.to_string()).collect();
-            return Some(format!("已开启的群聊 ({}):\n{}", list.len(), list.join("\n")));
+            return Some(format!(
+                "已开启的群聊 ({}):\n{}",
+                list.len(),
+                list.join("\n")
+            ));
         }
         "查看用户" => {
             let users = with_state(|s| s.active.iter().copied().collect::<Vec<u64>>());
@@ -464,7 +506,11 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 return Some("当前没有开启私聊的用户".into());
             }
             let list: Vec<String> = users.iter().map(|u| u.to_string()).collect();
-            return Some(format!("已开启的用户 ({}):\n{}", list.len(), list.join("\n")));
+            return Some(format!(
+                "已开启的用户 ({}):\n{}",
+                list.len(),
+                list.join("\n")
+            ));
         }
         "查看黑名单" => {
             let blocked = with_state(|s| s.blacklist.iter().copied().collect::<Vec<u64>>());
@@ -483,7 +529,9 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 if with_state(|s| s.active_groups.contains(&group_id)) {
                     format!("群{}已经是开启状态", group_id)
                 } else {
-                    with_state(|s| { s.active_groups.insert(group_id); });
+                    with_state(|s| {
+                        s.active_groups.insert(group_id);
+                    });
                     format!("已开启群{}", group_id)
                 }
             }
@@ -497,7 +545,9 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 if !with_state(|s| s.active_groups.contains(&group_id)) {
                     format!("群{}未开启", group_id)
                 } else {
-                    with_state(|s| { s.active_groups.remove(&group_id); });
+                    with_state(|s| {
+                        s.active_groups.remove(&group_id);
+                    });
                     format!("已关闭群{}", group_id)
                 }
             }
@@ -511,7 +561,9 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 if with_state(|s| s.active.contains(&uid)) {
                     format!("用户{}已开启", uid)
                 } else {
-                    with_state(|s| { s.active.insert(uid); });
+                    with_state(|s| {
+                        s.active.insert(uid);
+                    });
                     format!("已开启用户{}", uid)
                 }
             }
@@ -561,7 +613,9 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                 if !with_state(|s| s.is_blacklisted(uid)) {
                     format!("用户{}不在黑名单中", uid)
                 } else {
-                    with_state(|s| { s.remove_blacklist(uid); });
+                    with_state(|s| {
+                        s.remove_blacklist(uid);
+                    });
                     format!("已将用户{}移出黑名单", uid)
                 }
             }

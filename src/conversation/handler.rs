@@ -1,447 +1,471 @@
-//! 消息处理：process_message 核心逻辑、回复清理、群聊回复发送
+//! 消息处理：私聊语音路径 + 群聊语音调度
+//!
+//! 群聊和私聊都走同一条语音管线（`voice`）：
+//! 同一个"她"读完场面后，在同一口气里决定说话、沉默或发表情包。
+//! 本模块负责感知准备（视觉、历史、注意力）、调度与回复落地簿记。
 
-use super::attention;
-use crate::{
-    activity, anti_injection, config, conversation_end, emotion, mental_state, person_info,
-    personal_tasks, planner, processing_users, read_shared_state, replyer, sender, social_battery,
-    util, vision, with_shared_state, working_memory, ProcessingGuard,
-};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
 use tracing::{debug, info, warn};
 
-/// 清理 AI 回复：移除自记忆标签，将中文字符间的空格转为分段符
-fn clean_reply(reply: &str) -> String {
-    // 1. 移除自记忆分类标签 [经历] [反思] [计划] [感受]
-    const SELF_TAGS: &[&str] = &["[经历]", "[反思]", "[计划]", "[感受]"];
-    let mut result = reply.to_string();
-    for tag in SELF_TAGS {
-        result = result.replace(tag, "");
-    }
+use crate::voice::{self, GroupUtterance, VoiceAction};
+use crate::{ProcessingGuard, config, processing_users, read_shared_state, with_shared_state};
 
-    // 2. 将中文字符之间的空格转为 |^| 分段符
-    let chars: Vec<char> = result.chars().collect();
-    let mut out = String::with_capacity(result.len());
-    for i in 0..chars.len() {
-        if chars[i] == ' '
-            && i > 0
-            && i + 1 < chars.len()
-            && is_cjk(chars[i - 1])
-            && is_cjk(chars[i + 1])
-        {
-            out.push_str("|^|");
-        } else {
-            out.push(chars[i]);
-        }
-    }
+// ── 群聊沉默冷却 ────────────────────────────────────────────────
 
-    // 3. 规范化连续分段符
-    out.replace("|^||^|", "|^|")
+/// 她刚决定不说话，短时间内不再重新权衡。
+/// 省 API 调用，也符合"刚看过一眼群里，没什么想说的"的心理状态。
+static LAST_SILENCE: OnceLock<Mutex<HashMap<u64, Instant>>> = OnceLock::new();
+
+fn silence_cooling(group_id: u64) -> bool {
+    let cooldown = config::get().conversation.silence_cooldown_secs;
+    LAST_SILENCE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&group_id).copied())
+        .map(|t| t.elapsed().as_secs() < cooldown)
+        .unwrap_or(false)
 }
 
-fn is_cjk(ch: char) -> bool {
-    matches!(ch,
-        '\u{4E00}'..='\u{9FFF}'   |  // CJK Unified Ideographs
-        '\u{3400}'..='\u{4DBF}'   |  // CJK Extension A
-        '\u{F900}'..='\u{FAFF}'   |  // CJK Compatibility Ideographs
-        '\u{20000}'..='\u{2A6DF}' |  // CJK Extension B
-        '\u{2A700}'..='\u{2B73F}' |  // CJK Extension C
-        '\u{2B740}'..='\u{2B81F}' |  // CJK Extension D
-        '\u{3001}'..='\u{3003}'   |  // 、。〃
-        '\u{300C}'..='\u{3011}'   |  // 「」『』【】
-        '\u{FF01}'..='\u{FF5E}'   |  // Fullwidth ASCII (，？！ etc.)
-        '\u{2026}'                   // …
-    )
-}
-
-pub fn process_message(user_id: u64, group_id: u64, message: &str, record_timestamps: &[u64]) {
-    // 标记用户为处理中，防止并发处理同一用户的消息
+fn mark_silence(group_id: u64) {
+    if let Ok(mut m) = LAST_SILENCE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
     {
-        let mut processing = processing_users().lock().unwrap();
-        if processing.contains(&(group_id, user_id)) {
-            info!(
-                user_id,
-                group_id, "process_message: 用户消息正在处理中，跳过"
-            );
-            return;
-        }
-        processing.insert((group_id, user_id));
+        m.insert(group_id, Instant::now());
     }
-    // RAII guard: 确保在函数返回时移除标记
-    let _guard = ProcessingGuard { group_id, user_id };
+}
 
+// ── 视觉感知 ────────────────────────────────────────────────────
+
+/// 提取消息中的图片描述（表情包走持久化缓存路径）
+///
+/// 返回 (图片描述列表, 去除图片 CQ 码后的纯文本)
+fn perceive_images(user_id: u64, message: &str) -> (Vec<String>, String) {
     let cfg = config::get();
-    let max_history = cfg.conversation.max_history;
-
-    // ── 隐性惩罚：检查用户惩罚系数 ──
-    let penalty_multiplier = anti_injection::get_penalty_multiplier(user_id);
-
-    // ── 图片识别 (仅 vision 已配置时，检查用户识图禁用状态) ──
-    // 优先使用 sticker 持久化缓存（按哈希），避免重复 VLM 调用
-    let is_sticker_msg = crate::sticker::is_sticker_cq(message);
     let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
-    let image_descriptions: Vec<String> = if cfg.vision.enabled() && !vision_disabled {
-        let urls = vision::extract_image_urls(message);
-        urls.iter()
-            .filter_map(|url| {
-                // 表情包走持久化缓存路径（下载→哈希→查 stickers.json→VLM）
-                if is_sticker_msg {
-                    let desc = crate::sticker::describe_sticker_cq(message);
-                    if let Some(ref d) = desc {
-                        debug!("vision: got sticker description via hash cache");
-                        return Some(d.clone());
-                    }
+    if !cfg.vision.enabled() || vision_disabled {
+        return (Vec::new(), crate::vision::strip_image_cq(message));
+    }
+
+    let is_sticker_msg = crate::sticker::is_sticker_cq(message);
+    let descriptions: Vec<String> = crate::vision::extract_image_urls(message)
+        .iter()
+        .filter_map(|url| {
+            if is_sticker_msg {
+                // 表情包走持久化缓存（下载→哈希→查 stickers.json→VLM）
+                if let Some(desc) = crate::sticker::describe_sticker_cq(message) {
+                    debug!("vision: got sticker description via hash cache");
+                    return Some(desc);
                 }
-                // 普通图片或 VLM 缓存未命中，直接调用 VLM
-                vision::recognize_for_user(url, user_id)
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+            }
+            crate::vision::recognize_for_user(url, user_id)
+        })
+        .collect();
 
-    // 去除 CQ:image 标签，得到纯文本
-    let text_message = vision::strip_image_cq(message);
+    (descriptions, crate::vision::strip_image_cq(message))
+}
 
-    // 组装发给 AI 的消息：图片描述 + 纯文本
-    let ai_message = if image_descriptions.is_empty() {
-        if text_message.is_empty() {
+/// 把图片描述和文字组装成给她的感知内容
+fn compose_perception(descriptions: &[String], text: &str) -> String {
+    if descriptions.is_empty() {
+        if text.is_empty() {
             "[图片]".to_string()
         } else {
-            text_message.clone()
+            text.to_string()
         }
     } else {
-        let img_ctx: Vec<String> = image_descriptions
+        let img_ctx: Vec<String> = descriptions
             .iter()
             .enumerate()
             .map(|(i, d)| format!("[图片{}: {}]", i + 1, d))
             .collect();
-        if text_message.is_empty() {
+        if text.is_empty() {
             img_ctx.join("\n")
         } else {
-            format!("{}\n{}", img_ctx.join("\n"), text_message)
+            format!("{}\n{}", img_ctx.join("\n"), text)
         }
-    };
+    }
+}
 
-    // 图片识别完成后，用精确时间戳回写工作记忆中的 [图片] 为实际描述
-    if !image_descriptions.is_empty() && group_id > 0 {
-        working_memory::update_image_content(
+/// 感知一条批次消息：图片描述回写工作记忆，返回组装好的感知文本
+fn perceive_batch_message(
+    group_id: u64,
+    user_id: u64,
+    message: &str,
+    record_timestamps: &[u64],
+) -> String {
+    let (descriptions, text_only) = perceive_images(user_id, message);
+    if !descriptions.is_empty() && group_id > 0 {
+        // 用精确时间戳把工作记忆中的 [图片] 替换为实际描述
+        crate::working_memory::update_image_content(
             group_id,
             user_id,
-            &image_descriptions,
+            &descriptions,
             record_timestamps,
         );
     }
+    compose_perception(&descriptions, &text_only)
+}
 
-    // 追加用户消息到对话历史 (存储纯文本 + 图片描述)
-    with_shared_state(|s| s.push_history(group_id, user_id, "user", &ai_message, max_history));
+// ── 私聊 ────────────────────────────────────────────────────────
 
-    // 更新注意力模型
-    if config::get().humanity.attention_enabled {
-        let mut attn = attention::load_attention();
+/// 私聊消息处理：感知 → 语音 → 落地
+pub fn process_message(user_id: u64, message: &str) {
+    // 标记用户为处理中，防止并发处理同一用户的消息
+    {
+        let mut processing = processing_users().lock().unwrap();
+        if processing.contains(&(0, user_id)) {
+            info!(user_id, "process_message: 用户消息正在处理中，跳过");
+            return;
+        }
+        processing.insert((0, user_id));
+    }
+    let _guard = ProcessingGuard {
+        group_id: 0,
+        user_id,
+    };
 
-        // 话题切换检测：检查用户消息是否与当前专注话题相关
+    let cfg = config::get();
+    let max_history = cfg.conversation.max_history;
+
+    let (descriptions, text_only) = perceive_images(user_id, message);
+    let ai_message = compose_perception(&descriptions, &text_only);
+
+    // 追加用户消息到对话历史
+    with_shared_state(|s| s.push_history(0, user_id, "user", &ai_message, max_history));
+
+    // 注意力模型
+    if cfg.humanity.attention_enabled {
+        let mut attn = crate::conversation::attention::load_attention();
         if !attn.focused_topic.is_empty() && !ai_message.contains(&attn.focused_topic) {
-            // 简单的关键词匹配：如果用户消息不包含当前专注话题，认为话题切换
-            attention::interrupt_flow(&mut attn, &ai_message);
+            crate::conversation::attention::interrupt_flow(&mut attn, &ai_message);
         } else if attn.focused_topic.is_empty() {
-            // 首次对话，设置专注话题
             attn.focused_topic = ai_message.clone();
         }
-
-        attention::update_attention(&mut attn, user_id, true);
-        attention::save_attention(&attn);
+        crate::conversation::attention::update_attention(&mut attn, user_id, true);
+        crate::conversation::attention::save_attention(&attn);
     }
 
-    let history = read_shared_state(|s| {
-        let user_history = s.get_history_clone(group_id, user_id);
-        if group_id > 0 {
-            // 群聊时合并群级历史，让用户看到群内其他成员触发的 bot 主动消息
-            let group_history = s.get_group_history_clone(group_id);
-            if !group_history.is_empty() {
-                // 群级历史在前，用户历史在后（群级历史包含 bot 的主动消息）
-                let mut merged = group_history;
-                // 只追加用户历史中群级历史没有的部分（去重）
-                for item in &user_history {
-                    if !merged.contains(item) {
-                        merged.push(item.clone());
-                    }
-                }
-                return merged;
-            }
+    let history = read_shared_state(|s| s.get_history_clone(0, user_id));
+
+    // 对话结束检测：关键词预筛选 + 上下文注入
+    let extra_system = history.last().and_then(|(bot_last, _)| {
+        let hour = crate::util::current_hour_cst();
+        if crate::conversation_end::keyword_screen(bot_last, &ai_message, hour) {
+            debug!(
+                user_id,
+                "conversation_end: keyword triggered, injecting context"
+            );
+            Some(crate::conversation_end::get_context(bot_last, &ai_message))
+        } else {
+            None
         }
-        user_history
     });
 
-    // 组装额外上下文: 记忆 + 人格 + 情绪
-    let extra_context = super::context::build_context(user_id, group_id, &history);
+    match voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref()) {
+        VoiceAction::Reply(reply) => finish_private_reply(user_id, &ai_message, &reply),
+        VoiceAction::Silent => {
+            debug!(user_id, "voice: private silent");
+        }
+    }
+}
 
-    // 活动状态注入：bot 正在做某事时，注入活动上下文
-    let extra_context = if let Some(act_ctx) = activity::get_activity_context(user_id) {
-        format!("{}\n\n{}", extra_context, act_ctx)
-    } else {
-        extra_context
-    };
+/// 私聊回复落地：发送 + 簿记
+fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
+    if !crate::sender::safe_send(0, user_id, reply) {
+        return;
+    }
+    info!(user_id, reply, "voice: private reply sent");
 
-    // ASI 评分反馈：当回复效果持续不佳时，注入调整建议
-    let extra_context = if let Some(feedback) = crate::reply_effect::get_asi_feedback_hint() {
-        debug!(user_id, feedback = %feedback, "asi: injecting feedback hint");
-        format!("{}\n\n# 回复效果反馈\n{}", extra_context, feedback)
-    } else {
-        extra_context
-    };
+    let cfg = config::get();
+    with_shared_state(|s| {
+        s.push_history(0, user_id, "assistant", reply, cfg.conversation.max_history);
+        s.record_reply(0, user_id);
+    });
 
-    // 缺陷检查: 基于情绪状态和随机概率决定是否触发缺陷
-    let defect_instruction = {
-        let emo_state = emotion::get_state(user_id);
-        mental_state::check_defect(
-            emo_state.current,
-            emo_state.intensity,
-            config::get().mental_state.defect_base_probability,
-        )
-    };
-    let extra_context = if let Some(defect) = defect_instruction {
-        format!(
-            "{}\n\n# 当前状态\n{}",
-            extra_context,
-            mental_state::defect_to_instruction(defect)
-        )
-    } else {
-        extra_context
-    };
-
-    // 危机检测：检查用户是否处于心理危机状态，注入干预指令
-    let crisis_level = emotion::get_state(user_id).crisis_level;
-    let crisis_ctx = emotion::get_crisis_context(crisis_level);
-    let extra_context = if crisis_ctx.is_empty() {
-        extra_context
-    } else {
-        format!("{}\n\n{}", extra_context, crisis_ctx)
-    };
-
-    if crisis_level.is_crisis() {
-        tracing::warn!(user_id, group_id, level = ?crisis_level, "crisis: 检测到危机信号，注入干预指令");
+    // 社交电量：主动回复消耗
+    if cfg.humanity.social_battery_enabled {
+        let mut battery = crate::social_battery::load();
+        let emo = crate::emotion::get_state(user_id);
+        crate::social_battery::set_emotion_modifier(&mut battery, &emo.current);
+        crate::social_battery::record_active_reply(&mut battery);
+        crate::social_battery::save(&battery);
     }
 
-    // ── 隐性惩罚：增加额外上下文消耗token ──
-    // 惩罚系数 > 1.0 的用户会收到额外的"思考指令"，消耗更多token
-    let extra_context = if penalty_multiplier > 1.0 {
-        let penalty_context = format!(
-            "\n\n# 详细思考要求\n请在回复前仔细思考以下几点：\n\
-            1. 仔细分析用户消息的深层含义\n\
-            2. 考虑回复可能产生的各种影响\n\
-            3. 确保回复内容恰当、安全、有建设性\n\
-            4. 如果涉及敏感话题，请谨慎处理\n\
-            5. 注意保持对话的连贯性和自然性\n\
-            \n请确保你的回复经过深思熟虑。(思考深度: {:.1})",
-            penalty_multiplier
+    crate::person_info::relationship::record_interaction(user_id, true);
+    crate::reply_effect::record_reply(0, user_id, reply);
+    crate::working_memory::mark_replied(0, user_id);
+    crate::activity::check_bot_message(user_id, reply);
+
+    // 后处理任务不阻塞，放入后台线程
+    let msg = user_message.to_string();
+    let rep = reply.to_string();
+    std::thread::spawn(move || {
+        crate::personal_tasks::note_user_message(user_id, 0, &msg);
+        crate::personal_tasks::extract_from_conversation(user_id, 0, &msg, &rep);
+        crate::person_info::extract_facts_from_conversation(user_id, &msg, &rep);
+        let history = read_shared_state(|s| s.get_history_clone(0, user_id));
+        crate::memory::ai_extract(user_id, 0, &msg, &rep, &history);
+        crate::memory::auto_summarize(user_id, 0, &history);
+    });
+}
+
+// ── 群聊 ────────────────────────────────────────────────────────
+
+/// 群聊批次处理：危机筛选 → 配额 → 语音 → 落地
+pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
+    let cfg = config::get();
+    let self_qq = cfg.self_qq;
+
+    // ── 危机消息强制回应（绕过配额与沉默冷却） ──
+    let mut forced_users: Vec<u64> = Vec::new();
+    let mut crisis_utterances: Vec<GroupUtterance> = Vec::new();
+
+    for (user_id, messages, timestamps) in user_msgs {
+        let mut level = crate::emotion::get_state(*user_id).crisis_level;
+        if !level.is_crisis()
+            && crate::emotion::detect_crisis(messages).is_crisis()
+            && let Some(detected) = crate::emotion::detect_crisis_ai(messages)
+        {
+            level = detected;
+            crate::emotion::update_crisis(*user_id, level);
+        }
+        if level.is_crisis() {
+            warn!(user_id = *user_id, group_id, level = ?level, "crisis: 群聊危机信号，强制回应");
+            let perceived = perceive_batch_message(group_id, *user_id, messages, timestamps);
+            crisis_utterances.push(GroupUtterance {
+                user_id: *user_id,
+                text: perceived,
+            });
+            forced_users.push(*user_id);
+        }
+    }
+
+    if !crisis_utterances.is_empty() {
+        speak_and_deliver_group(group_id, &crisis_utterances, true, false);
+        record_group_activity(group_id);
+        return;
+    }
+
+    // ── 剩余消息 ──
+    let remaining: Vec<&(u64, String, Vec<u64>)> = user_msgs
+        .iter()
+        .filter(|(uid, _, _)| !forced_users.contains(uid))
+        .collect();
+    if remaining.is_empty() {
+        record_group_activity(group_id);
+        return;
+    }
+
+    // ── 配额记账 ──
+    crate::quota::check_and_review_segment(group_id);
+    for (uid, msg, _) in &remaining {
+        crate::quota::log_segment_message(group_id, *uid, msg);
+    }
+
+    let at_pattern = if self_qq > 0 {
+        format!("[CQ:at,qq={self_qq}]")
+    } else {
+        String::new()
+    };
+    let joined: String = remaining
+        .iter()
+        .map(|(_, m, _)| m.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let addressed =
+        !at_pattern.is_empty() && remaining.iter().any(|(_, m, _)| m.contains(&at_pattern));
+
+    // ── 配额门槛：有余量先说话后扣账；耗尽时只有高优先级（@/darling）能突破 ──
+    let quota_available = crate::quota::has_quota(group_id);
+    if !quota_available {
+        let bypass = crate::quota::try_reply(
+            group_id,
+            remaining[0].0,
+            &joined,
+            &at_pattern,
+            cfg.darling_qq,
         );
-        format!("{}{}", extra_context, penalty_context)
-    } else {
-        extra_context
-    };
+        if !bypass {
+            debug!(group_id, "quota: 配额耗尽且优先级不足，跳过");
+            record_group_activity(group_id);
+            return;
+        }
+    }
 
-    // ── 回复生成 ──
-    // 私聊：直接 ai::chat()，跳过 Planner 和 Replyer（保持 AI 自然输出）
-    // 群聊：Planner 多轮推理 → Replyer 生成回复
-    let result: Result<(String, String), String> = if group_id == 0 {
-        // 私聊：直接调用 ai::chat，不经过 Replyer 的额外 prompt 处理
-        debug!(user_id, "private chat: direct ai::chat");
+    // ── 沉默冷却：她刚决定不说话，短期内不再权衡 ──
+    if !addressed && silence_cooling(group_id) {
+        debug!(group_id, "voice: silence cooldown, skipping");
+        record_group_activity(group_id);
+        return;
+    }
 
-        // 对话结束检测：关键词预筛选 + 上下文注入
-        let extra_context = if let Some((bot_last, _)) = history.last() {
-            let hour = util::current_hour_cst();
-            if conversation_end::keyword_screen(bot_last, &ai_message, hour) {
-                debug!(
-                    user_id,
-                    "conversation_end: keyword triggered, injecting context"
-                );
-                let end_ctx = conversation_end::get_context(bot_last, &ai_message);
-                format!("{}\n\n{}", extra_context, end_ctx)
-            } else {
-                extra_context
-            }
+    let utterances: Vec<GroupUtterance> = remaining
+        .iter()
+        .map(|(uid, msg, ts)| GroupUtterance {
+            user_id: *uid,
+            text: perceive_batch_message(group_id, *uid, msg, ts),
+        })
+        .collect();
+
+    speak_and_deliver_group(group_id, &utterances, addressed, quota_available);
+    record_group_activity(group_id);
+
+    // ── 表达学习：从群聊消息中学习语言风格（后台） ──
+    if crate::learner::should_learn(group_id) {
+        let learn_msgs: Vec<(u64, String)> = remaining
+            .iter()
+            .map(|(uid, msg, _)| (*uid, msg.clone()))
+            .collect();
+        std::thread::spawn(move || {
+            crate::learner::learn_from_messages(group_id, &learn_msgs);
+        });
+    }
+}
+
+/// 语音调用 + 回复落地/沉默簿记
+fn speak_and_deliver_group(
+    group_id: u64,
+    utterances: &[GroupUtterance],
+    force_reply: bool,
+    consume_quota_on_reply: bool,
+) {
+    let cfg = config::get();
+    let max_history = cfg.conversation.max_history;
+
+    // 用户消息进入各自历史（摘要压缩依赖它）
+    for u in utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() {
+            u.text.clone()
         } else {
-            extra_context
+            text_only
         };
+        with_shared_state(|s| {
+            s.push_history(group_id, u.user_id, "user", &stored, max_history);
+        });
+    }
 
-        crate::ai::chat(&config::prompt(), &extra_context, &history, &ai_message)
-    } else {
-        // 群聊：Planner → Replyer
-        info!(user_id, group_id, ai_message = %ai_message, penalty = penalty_multiplier, "planner: starting");
-        let planner_ctx = planner::PlannerContext {
-            group_id,
-            user_id,
-            user_message: ai_message.clone(),
-            identity: config::prompt().to_string(),
-            extra_context: extra_context.clone(),
-            history: history.clone(),
-        };
+    // 注意力模型（以主要发言人计）
+    let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
+    if primary > 0 && cfg.humanity.attention_enabled {
+        let joined: String = utterances
+            .iter()
+            .map(|u| u.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut attn = crate::conversation::attention::load_attention();
+        if !attn.focused_topic.is_empty() && !joined.contains(&attn.focused_topic) {
+            crate::conversation::attention::interrupt_flow(&mut attn, &joined);
+        } else if attn.focused_topic.is_empty() {
+            attn.focused_topic = joined.clone();
+        }
+        crate::conversation::attention::update_attention(&mut attn, primary, true);
+        crate::conversation::attention::save_attention(&attn);
+    }
 
-        let reference_info = match planner::run_planner(&planner_ctx) {
-            planner::PlannerAction::Reply { reference_info, .. } => reference_info,
-            planner::PlannerAction::Silent => {
-                debug!(user_id, group_id, "planner: silent -> 不回复");
-                return;
+    match voice::speak_group(group_id, utterances, force_reply) {
+        VoiceAction::Reply(reply) => {
+            if consume_quota_on_reply {
+                crate::quota::check_and_consume(group_id);
             }
-            planner::PlannerAction::Interrupted => {
-                debug!(user_id, group_id, "planner: interrupted -> 不回复");
-                return;
-            }
-        };
-
-        let reply_ctx = replyer::ReplyContext {
-            user_id,
-            group_id,
-            user_message: ai_message.clone(),
-            identity: config::prompt().to_string(),
-            extra_context: extra_context.clone(),
-            history: history.clone(),
-            reference_info,
-        };
-        replyer::generate_reply(&reply_ctx).map(|r| (r, String::new()))
-    };
-
-    // ── 处理回复结果 ──
-    {
-        match result {
-            Ok((reply, _)) => {
-                // 从回复中解析情绪标签 (AI 自报告)
-                let cleaned_reply = emotion::parse_from_reply(user_id, &reply);
-                let cleaned_reply = clean_reply(&cleaned_reply);
-                info!(user_id, group_id, raw_reply = %reply, cleaned_reply = %cleaned_reply, "replyer: got reply");
-
-                // ── 人性滤镜：回复后处理 ──
-                let cleaned_reply = if config::get().humanity.humanity_filter_enabled {
-                    let battery_level = if config::get().humanity.social_battery_enabled {
-                        social_battery::load().level / config::get().humanity.battery_capacity
-                    } else {
-                        0.7
-                    };
-                    let attention_level = if config::get().humanity.attention_enabled {
-                        attention::load_attention().attention_level
-                    } else {
-                        0.7
-                    };
-                    crate::sender::timing::apply_humanity_filter(
-                        &cleaned_reply,
-                        attention_level,
-                        battery_level,
-                    )
-                } else {
-                    cleaned_reply
-                };
-
-                // ── 输出层防护：检查 AI 回复安全性 (始终开启) ──
-                let output_check = anti_injection::check_output(
-                    user_id,
-                    &cleaned_reply,
-                    &config::get().anti_injection,
-                );
-
-                let final_reply = if !output_check.passed {
-                    warn!(
-                        user_id, group_id,
-                        issues = ?output_check.issues,
-                        action = ?output_check.action,
-                        penalty = anti_injection::get_penalty_multiplier(user_id),
-                        "anti_injection: AI 回复被替换 (违规已记录)"
-                    );
-                    output_check
-                        .sanitized
-                        .unwrap_or_else(|| "抱歉，我无法回应这个话题。".to_string())
-                } else {
-                    cleaned_reply
-                };
-
-                // 追加 AI 回复到历史
-                with_shared_state(|s| {
-                    s.push_history(group_id, user_id, "assistant", &final_reply, max_history)
-                });
-
-                // 处理定时任务嵌入
-                let final_reply = crate::cron::handle_cron_in_reply(&final_reply, group_id);
-
-                // 发送回复（群聊需要去重检查）
-                if group_id > 0 {
-                    // 去重检查：防止短时间内发送相同的回复
-                    if crate::runtime::reply_dedup::is_duplicate(group_id, &final_reply) {
-                        info!(user_id, group_id, "dedup: 检测到重复回复，跳过发送");
-                        return;
-                    }
-                    send_group_reply(group_id, user_id, &final_reply);
-                } else {
-                    sender::send_with_typing(0, user_id, &final_reply);
-                }
-
-                // 记录社交电量消耗
-                if config::get().humanity.social_battery_enabled {
-                    let mut battery = social_battery::load();
-                    let emo = emotion::get_state(user_id);
-                    social_battery::set_emotion_modifier(&mut battery, &emo.current);
-                    social_battery::record_active_reply(&mut battery);
-                    social_battery::save(&battery);
-                }
-
-                // 记录关系交互
-                person_info::relationship::record_interaction(user_id, true);
-
-                // 记录回复时间
-                with_shared_state(|s| {
-                    s.record_reply(group_id, user_id);
-                    if group_id > 0 {
-                        s.record_bot_message(group_id, &final_reply);
-                    }
-                });
-
-                // 标记工作记忆中该用户的消息为已回复
-                working_memory::mark_replied(group_id, user_id);
-
-                // 回复效果追踪：记录发送的回复
-                crate::reply_effect::record_reply(group_id, user_id, &final_reply);
-
-                // 去重追踪：记录最近回复内容用于防重复
-                if group_id > 0 {
-                    crate::runtime::reply_dedup::record(group_id, user_id, &final_reply);
-                }
-
-                // 活动状态检测：bot 的回复是否声明了某个活动
-                activity::check_bot_message(user_id, &final_reply);
-
-                // 以下后处理任务不阻塞队列，放入后台线程
-                let bg_ai_msg = ai_message.clone();
-                let bg_final = final_reply.clone();
-                let bg_history = history.clone();
-                let bg_uid = user_id;
-                let bg_gid = group_id;
-                    std::thread::spawn(move || {
-                        personal_tasks::note_user_message(bg_uid, bg_gid, &bg_ai_msg);
-                        personal_tasks::extract_from_conversation(
-                            bg_uid,
-                            bg_gid,
-                            &bg_ai_msg,
-                            &bg_final,
-                        );
-
-                    // 人物事实自动回写：从对话中提取用户事实
-                    crate::person_info::extract_facts_from_conversation(
-                        bg_uid, &bg_ai_msg, &bg_final,
-                    );
-
-                    // 记忆提取：分析对话内容，提取值得记忆的信息
-                    crate::memory::ai_extract(bg_uid, bg_gid, &bg_ai_msg, &bg_final, &bg_history);
-
-                    // 对话摘要：当对话历史达到阈值时，自动总结并存储为记忆
-                    crate::memory::auto_summarize(bg_uid, bg_gid, &bg_history);
-                });
-            }
-            Err(e) => {
-                info!(user_id, group_id, error = %e, "replyer: 生成回复失败");
-                sender::send_msg(group_id, user_id, "睡着了...");
+            finish_group_reply(group_id, primary, utterances, &reply);
+        }
+        VoiceAction::Silent => {
+            debug!(group_id, "voice: group silent");
+            mark_silence(group_id);
+            if cfg.humanity.social_battery_enabled {
+                let mut battery = crate::social_battery::load();
+                crate::social_battery::record_passive_participation(&mut battery);
+                crate::social_battery::save(&battery);
             }
         }
     }
 }
 
-/// 群聊回复：带打字延迟，分段发送（复用 sender::send_with_typing）
-fn send_group_reply(group_id: u64, user_id: u64, reply: &str) {
-    sender::send_with_typing(group_id, user_id, reply);
+/// 群聊回复落地：发送 + 簿记
+fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance], reply: &str) {
+    // 去重：短时间内不发送相同回复
+    if crate::runtime::reply_dedup::is_duplicate(group_id, reply) {
+        info!(group_id, "dedup: 检测到重复回复，跳过发送");
+        return;
+    }
+
+    if !crate::sender::safe_send(group_id, primary, reply) {
+        return;
+    }
+    info!(
+        group_id,
+        user_id = primary,
+        reply,
+        "voice: group reply sent"
+    );
+
+    let cfg = config::get();
+    with_shared_state(|s| {
+        s.push_history(
+            group_id,
+            primary,
+            "assistant",
+            reply,
+            cfg.conversation.max_history,
+        );
+        s.push_group_history(group_id, "assistant", reply, cfg.conversation.max_history);
+        s.record_reply(group_id, primary);
+        s.record_bot_message(group_id, reply);
+    });
+
+    // 社交电量：主动回复消耗
+    if cfg.humanity.social_battery_enabled {
+        let mut battery = crate::social_battery::load();
+        crate::social_battery::record_active_reply(&mut battery);
+        crate::social_battery::save(&battery);
+    }
+
+    for u in utterances {
+        crate::person_info::relationship::record_interaction(u.user_id, true);
+        crate::working_memory::mark_replied(group_id, u.user_id);
+    }
+
+    crate::reply_effect::record_reply(group_id, primary, reply);
+    crate::runtime::reply_dedup::record(group_id, primary, reply);
+    crate::activity::check_bot_message(primary, reply);
+
+    // 后处理任务不阻塞，逐用户放入后台线程
+    let rep = reply.to_string();
+    let gid = group_id;
+    let batch: Vec<(u64, String)> = utterances
+        .iter()
+        .map(|u| {
+            let text_only = crate::vision::strip_image_cq(&u.text);
+            (
+                u.user_id,
+                if text_only.is_empty() {
+                    u.text.clone()
+                } else {
+                    text_only
+                },
+            )
+        })
+        .collect();
+
+    std::thread::spawn(move || {
+        for (uid, msg) in batch {
+            crate::personal_tasks::note_user_message(uid, gid, &msg);
+            crate::personal_tasks::extract_from_conversation(uid, gid, &msg, &rep);
+            crate::person_info::extract_facts_from_conversation(uid, &msg, &rep);
+            let history = read_shared_state(|s| s.get_history_clone(gid, uid));
+            crate::memory::ai_extract(uid, gid, &msg, &rep, &history);
+            crate::memory::auto_summarize(uid, gid, &history);
+        }
+    });
+}
+
+/// 记录群活跃时间
+fn record_group_activity(group_id: u64) {
+    with_shared_state(|s| s.record_conversation(group_id, crate::util::now_secs()));
 }

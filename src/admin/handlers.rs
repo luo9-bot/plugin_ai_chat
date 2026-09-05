@@ -2,12 +2,16 @@ use tiny_http::{Header, Method, Response};
 
 use crate::config;
 
-use super::{err, ok, parse_json};
 use super::backup;
+use super::{err, ok, parse_json};
 
 // ── Handler: 自我记忆 ──────────────────────────────────────────
 
-pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_self_thoughts(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("self_memory.json");
 
     // POST /api/self-thoughts/batch -> 批量删除
@@ -17,14 +21,20 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
             Err(e) => return err(400, &e),
         };
         let indices: Vec<usize> = match body_val.get("indices").and_then(|v| v.as_array()) {
-            Some(arr) => arr.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect(),
+            Some(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect(),
             None => return err(400, "indices required"),
         };
         backup::before_modify("self_memory");
         let mut store: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
                 .unwrap_or(serde_json::json!({}));
-        let thoughts = store.get_mut("thoughts").and_then(|v| v.as_array_mut()).unwrap();
+        let thoughts = store
+            .get_mut("thoughts")
+            .and_then(|v| v.as_array_mut())
+            .unwrap();
         let mut sorted = indices;
         sorted.sort_unstable();
         sorted.dedup();
@@ -44,8 +54,16 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
     if *method == Method::Get && segs.first() == Some(&"export") {
         let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
         return Response::from_string(data)
-            .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
-            .with_header(Header::from_bytes("Content-Disposition", "attachment; filename=\"self_memory.json\"").unwrap());
+            .with_header(
+                Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(
+                    "Content-Disposition",
+                    "attachment; filename=\"self_memory.json\"",
+                )
+                .unwrap(),
+            );
     }
 
     match method {
@@ -69,9 +87,10 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
                 .and_then(|v| v.as_str())
                 .unwrap_or("reflection");
             backup::before_modify("self_memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({}));
             let thoughts = store
                 .get_mut("thoughts")
                 .and_then(|v| v.as_array_mut())
@@ -94,9 +113,10 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("self_memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({}));
             let thoughts = store
                 .get_mut("thoughts")
                 .and_then(|v| v.as_array_mut())
@@ -119,9 +139,10 @@ pub fn handle_self_thoughts(method: &Method, segs: &[&str], body: &[u8]) -> Resp
                 None => return err(400, "index required"),
             };
             backup::before_modify("self_memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({}));
             let thoughts = store
                 .get_mut("thoughts")
                 .and_then(|v| v.as_array_mut())
@@ -164,10 +185,14 @@ pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
 /// 切换表情包封禁状态
 pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut store = crate::sticker::store::load_store();
-    let banned = store.stickers.iter_mut().find(|e| e.hash == hash).map(|entry| {
-        entry.is_banned = !entry.is_banned;
-        entry.is_banned
-    });
+    let banned = store
+        .stickers
+        .iter_mut()
+        .find(|e| e.hash == hash)
+        .map(|entry| {
+            entry.is_banned = !entry.is_banned;
+            entry.is_banned
+        });
     if let Some(is_banned) = banned {
         crate::sticker::store::save_store(&store);
         return ok(serde_json::json!({"ok": true, "is_banned": is_banned}));
@@ -239,7 +264,11 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
             Ok(d) => d,
             Err(_) => return err(500, "failed to read file"),
         };
-        let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
+        let ext = fp
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_lowercase();
         let mime = match ext.as_str() {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
@@ -262,7 +291,11 @@ pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<
         Err(e) => return super::err(400, &e),
     };
     let new_tags: Vec<String> = match val.get("tags").and_then(|v| v.as_array()) {
-        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect(),
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .collect(),
         None => return super::err(400, "tags array required"),
     };
 
@@ -321,15 +354,27 @@ pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
 
 // ── Handler: 用户记忆 ──────────────────────────────────────────
 
-pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_memory(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("memory.json");
 
     // GET /api/memory/export -> 导出全部
     if *method == Method::Get && segs.first() == Some(&"export") {
         let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
         return Response::from_string(data)
-            .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
-            .with_header(Header::from_bytes("Content-Disposition", "attachment; filename=\"memory.json\"").unwrap());
+            .with_header(
+                Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(
+                    "Content-Disposition",
+                    "attachment; filename=\"memory.json\"",
+                )
+                .unwrap(),
+            );
     }
 
     // POST /api/memory/{user_id}/batch -> 批量删除
@@ -340,16 +385,25 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
             Err(e) => return err(400, &e),
         };
         let indices: Vec<usize> = match body_val.get("indices").and_then(|v| v.as_array()) {
-            Some(arr) => arr.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect(),
+            Some(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect(),
             None => return err(400, "indices required"),
         };
         backup::before_modify("memory");
         let mut store: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
                 .unwrap_or(serde_json::json!({"users": {}}));
-        let users = store.get_mut("users").and_then(|v| v.as_object_mut()).unwrap();
+        let users = store
+            .get_mut("users")
+            .and_then(|v| v.as_object_mut())
+            .unwrap();
         if let Some(user) = users.get_mut(uid) {
-            let entries = user.get_mut("entries").and_then(|v| v.as_array_mut()).unwrap();
+            let entries = user
+                .get_mut("entries")
+                .and_then(|v| v.as_array_mut())
+                .unwrap();
             let mut sorted = indices;
             sorted.sort_unstable();
             sorted.dedup();
@@ -376,7 +430,9 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
             if let Some(uid) = segs.first() {
                 let users = store.get("users").and_then(|v| v.as_object()).unwrap();
                 match users.get(*uid) {
-                    Some(user) => ok(serde_json::json!({"user_id": uid, "entries": user["entries"]})),
+                    Some(user) => {
+                        ok(serde_json::json!({"user_id": uid, "entries": user["entries"]}))
+                    }
                     None => ok(serde_json::json!({"user_id": uid, "entries": []})),
                 }
             } else {
@@ -401,9 +457,10 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
                 .and_then(|v| v.as_str())
                 .unwrap_or("normal");
             backup::before_modify("memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"users": {}}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"users": {}}));
             let users = store
                 .get_mut("users")
                 .and_then(|v| v.as_object_mut())
@@ -439,9 +496,10 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"users": {}}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"users": {}}));
             let users = store
                 .get_mut("users")
                 .and_then(|v| v.as_object_mut())
@@ -458,7 +516,9 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
                     entries[idx]["content"] = serde_json::json!(content);
                 }
                 if let Some(importance) = body_val.get("importance").and_then(|v| v.as_str()) {
-                    entries[idx]["importance"] = serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance)).unwrap_or(serde_json::json!("Normal"));
+                    entries[idx]["importance"] =
+                        serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance))
+                            .unwrap_or(serde_json::json!("Normal"));
                 }
                 entries[idx]["last_accessed"] = serde_json::json!(crate::util::now_secs());
                 std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
@@ -477,9 +537,10 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
                 None => return err(400, "index required"),
             };
             backup::before_modify("memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"users": {}}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"users": {}}));
             let users = store
                 .get_mut("users")
                 .and_then(|v| v.as_object_mut())
@@ -505,7 +566,11 @@ pub fn handle_memory(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
 
 // ── Handler: 工作记忆 ──────────────────────────────────────────
 
-pub fn handle_working_memory(method: &Method, segs: &[&str], _body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_working_memory(
+    method: &Method,
+    segs: &[&str],
+    _body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("working_memory.json");
     match method {
         Method::Get => {
@@ -515,7 +580,9 @@ pub fn handle_working_memory(method: &Method, segs: &[&str], _body: &[u8]) -> Re
             if let Some(gid) = segs.first() {
                 let groups = store.get("groups").and_then(|v| v.as_object()).unwrap();
                 match groups.get(*gid) {
-                    Some(group) => ok(serde_json::json!({"group_id": gid, "entries": group["entries"]})),
+                    Some(group) => {
+                        ok(serde_json::json!({"group_id": gid, "entries": group["entries"]}))
+                    }
                     None => ok(serde_json::json!({"group_id": gid, "entries": []})),
                 }
             } else {
@@ -532,9 +599,10 @@ pub fn handle_working_memory(method: &Method, segs: &[&str], _body: &[u8]) -> Re
                 None => return err(400, "index required"),
             };
             backup::before_modify("working_memory");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"groups": {}}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"groups": {}}));
             let groups = store
                 .get_mut("groups")
                 .and_then(|v| v.as_object_mut())
@@ -558,11 +626,13 @@ pub fn handle_working_memory(method: &Method, segs: &[&str], _body: &[u8]) -> Re
     }
 }
 
-
-
 // ── Handler: 情绪 ──────────────────────────────────────────────
 
-pub fn handle_emotion(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_emotion(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("emotion.json");
     match method {
         Method::Get => {
@@ -588,9 +658,10 @@ pub fn handle_emotion(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("emotion");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({}));
             store[uid] = body_val;
             std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
             ok(serde_json::json!({"ok": true}))
@@ -601,13 +672,17 @@ pub fn handle_emotion(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
 
 // ── Handler: 心理状态 ──────────────────────────────────────────
 
-pub fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_mental_state(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("mental_state.json");
     match method {
         Method::Get => {
             let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let store: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
+            let store: serde_json::Value = serde_json::from_str(&data)
+                .unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
             ok(store)
         }
         Method::Post => {
@@ -620,9 +695,10 @@ pub fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Respo
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("mental_state");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
             match sub {
                 "concerns" => {
                     let content = match body_val.get("content").and_then(|v| v.as_str()) {
@@ -691,18 +767,16 @@ pub fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Respo
                 None => return err(400, "index required"),
             };
             backup::before_modify("mental_state");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({"concerns": [], "deliberations": []}));
             let key = match sub {
                 "concerns" => "concerns",
                 "deliberations" => "deliberations",
                 _ => return err(400, "use concerns or deliberations"),
             };
-            let arr = store
-                .get_mut(key)
-                .and_then(|v| v.as_array_mut())
-                .unwrap();
+            let arr = store.get_mut(key).and_then(|v| v.as_array_mut()).unwrap();
             if idx >= arr.len() {
                 return err(404, "index out of range");
             }
@@ -716,19 +790,28 @@ pub fn handle_mental_state(method: &Method, segs: &[&str], body: &[u8]) -> Respo
 
 // ── Handler: 黑名单 ──────────────────────────────────────────
 
-pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_blocklist(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("blocklist.json");
     match method {
         Method::Get => {
             // 合并 blocklist.json 和 config.yaml 中的 blacklist
-            let file_list: Vec<u64> =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()))
-                    .unwrap_or_default();
+            let file_list: Vec<u64> = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
+            )
+            .unwrap_or_default();
             let mut all: Vec<u64> = file_list.clone();
             for uid in &config::get().blacklist {
-                if !all.contains(uid) { all.push(*uid); }
+                if !all.contains(uid) {
+                    all.push(*uid);
+                }
             }
-            ok(serde_json::json!({"blocked": all, "from_file": file_list, "from_config": &config::get().blacklist}))
+            ok(
+                serde_json::json!({"blocked": all, "from_file": file_list, "from_config": &config::get().blacklist}),
+            )
         }
         Method::Post => {
             let body_val: serde_json::Value = match parse_json(body) {
@@ -740,15 +823,18 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
                 None => return err(400, "user_id required"),
             };
             backup::before_modify("blocklist");
-            let mut list: Vec<u64> =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()))
-                    .unwrap_or_default();
+            let mut list: Vec<u64> = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
+            )
+            .unwrap_or_default();
             if !list.contains(&uid) {
                 list.push(uid);
             }
             std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
             // 同步运行时状态
-            crate::with_state(|s| { s.add_blacklist(uid); });
+            crate::with_state(|s| {
+                s.add_blacklist(uid);
+            });
             ok(serde_json::json!({"ok": true}))
         }
         Method::Delete => {
@@ -757,13 +843,16 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
                 None => return err(400, "user_id required"),
             };
             backup::before_modify("blocklist");
-            let mut list: Vec<u64> =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()))
-                    .unwrap_or_default();
+            let mut list: Vec<u64> = serde_json::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
+            )
+            .unwrap_or_default();
             list.retain(|&x| x != uid);
             std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
             // 同步运行时状态
-            crate::with_state(|s| { s.remove_blacklist(uid); });
+            crate::with_state(|s| {
+                s.remove_blacklist(uid);
+            });
             ok(serde_json::json!({"ok": true}))
         }
         _ => err(405, "method not allowed"),
@@ -772,7 +861,11 @@ pub fn handle_blocklist(method: &Method, segs: &[&str], body: &[u8]) -> Response
 
 // ── Handler: 主动对话 ──────────────────────────────────────────
 
-pub fn handle_proactive(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_proactive(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let state_path = config::data_dir().join("proactive.json");
     let config_path = config::data_dir().join("proactive_config.json");
     match method {
@@ -802,7 +895,11 @@ pub fn handle_proactive(method: &Method, segs: &[&str], body: &[u8]) -> Response
                     Err(e) => return err(400, &e),
                 };
                 backup::before_modify("proactive_config");
-                std::fs::write(&config_path, serde_json::to_string_pretty(&body_val).unwrap()).ok();
+                std::fs::write(
+                    &config_path,
+                    serde_json::to_string_pretty(&body_val).unwrap(),
+                )
+                .ok();
                 return ok(serde_json::json!({"ok": true}));
             }
             let uid = match segs.first() {
@@ -814,9 +911,10 @@ pub fn handle_proactive(method: &Method, segs: &[&str], body: &[u8]) -> Response
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("proactive");
-            let mut store: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap_or_else(|_| "{}".into()))
-                    .unwrap_or(serde_json::json!({}));
+            let mut store: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&state_path).unwrap_or_else(|_| "{}".into()),
+            )
+            .unwrap_or(serde_json::json!({}));
             store[uid] = body_val;
             std::fs::write(&state_path, serde_json::to_string_pretty(&store).unwrap()).ok();
             ok(serde_json::json!({"ok": true}))
@@ -830,14 +928,18 @@ pub fn handle_proactive(method: &Method, segs: &[&str], body: &[u8]) -> Response
 pub fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("archive.json");
     let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-    let store: serde_json::Value =
-        serde_json::from_str(&data).unwrap_or(serde_json::json!({"working_memory": [], "long_term": []}));
+    let store: serde_json::Value = serde_json::from_str(&data)
+        .unwrap_or(serde_json::json!({"working_memory": [], "long_term": []}));
     ok(store)
 }
 
 // ── Handler: 备份 ──────────────────────────────────────────────
 
-pub fn handle_backups(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_backups(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             if let Some(data_type) = segs.first() {
@@ -851,8 +953,14 @@ pub fn handle_backups(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
                 Ok(v) => v,
                 Err(e) => return err(400, &e),
             };
-            let action = body_val.get("action").and_then(|v| v.as_str()).unwrap_or("");
-            let data_type = body_val.get("type").and_then(|v| v.as_str()).unwrap_or("self_memory");
+            let action = body_val
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let data_type = body_val
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("self_memory");
             match action {
                 "create" => {
                     backup::before_modify(data_type);
@@ -873,7 +981,10 @@ pub fn handle_backups(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
                         Some(f) => f,
                         None => return err(400, "filename required"),
                     };
-                    let backup_path = config::data_dir().join("backups").join(data_type).join(filename);
+                    let backup_path = config::data_dir()
+                        .join("backups")
+                        .join(data_type)
+                        .join(filename);
                     if backup_path.exists() {
                         std::fs::remove_file(&backup_path).ok();
                     }
@@ -888,7 +999,11 @@ pub fn handle_backups(method: &Method, segs: &[&str], body: &[u8]) -> Response<s
 
 // ── Handler: 同步 ──────────────────────────────────────────────
 
-pub fn handle_sync(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_sync(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let action = match segs.first() {
         Some(a) => *a,
         None => return err(400, "action required: push, pull, or status"),
@@ -957,8 +1072,14 @@ pub fn handle_sync(method: &Method, segs: &[&str], body: &[u8]) -> Response<std:
                     match mode {
                         "replace" => {
                             let new_store = serde_json::json!({"thoughts": remote_thoughts});
-                            std::fs::write(&path, serde_json::to_string_pretty(&new_store).unwrap()).ok();
-                            ok(serde_json::json!({"pulled": remote_thoughts.len(), "mode": "replace"}))
+                            std::fs::write(
+                                &path,
+                                serde_json::to_string_pretty(&new_store).unwrap(),
+                            )
+                            .ok();
+                            ok(
+                                serde_json::json!({"pulled": remote_thoughts.len(), "mode": "replace"}),
+                            )
                         }
                         _ => {
                             // merge: 按 content+created 去重
@@ -966,10 +1087,7 @@ pub fn handle_sync(method: &Method, segs: &[&str], body: &[u8]) -> Response<std:
                                 &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
                             )
                             .unwrap_or(serde_json::json!({"thoughts": []}));
-                            let local = store
-                                .get("thoughts")
-                                .and_then(|v| v.as_array())
-                                .unwrap();
+                            let local = store.get("thoughts").and_then(|v| v.as_array()).unwrap();
                             let existing: std::collections::HashSet<String> = local
                                 .iter()
                                 .map(|t| {
@@ -996,7 +1114,8 @@ pub fn handle_sync(method: &Method, segs: &[&str], body: &[u8]) -> Response<std:
                                     added += 1;
                                 }
                             }
-                            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
+                            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap())
+                                .ok();
                             ok(serde_json::json!({"pulled": added, "mode": "merge"}))
                         }
                     }
@@ -1069,13 +1188,19 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
     match segs.first() {
         Some(&"interest") => {
             let interest = crate::quota::get_all_interest();
-            let map: serde_json::Map<String, serde_json::Value> = interest.iter()
-                .map(|(uid, i)| (uid.to_string(), serde_json::json!({
-                    "score": i.score,
-                    "marked_count": i.marked_count,
-                    "last_reviewed": i.last_reviewed,
-                    "last_message": i.last_message,
-                })))
+            let map: serde_json::Map<String, serde_json::Value> = interest
+                .iter()
+                .map(|(uid, i)| {
+                    (
+                        uid.to_string(),
+                        serde_json::json!({
+                            "score": i.score,
+                            "marked_count": i.marked_count,
+                            "last_reviewed": i.last_reviewed,
+                            "last_message": i.last_message,
+                        }),
+                    )
+                })
                 .collect();
             ok(serde_json::json!({"users": map}))
         }
@@ -1096,19 +1221,25 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
             // API quota 配置
             let cfg = &config::get().quota;
             let interest = crate::quota::get_all_interest();
-            let users: serde_json::Map<String, serde_json::Value> = interest.iter()
-                .map(|(uid, i)| (uid.to_string(), serde_json::json!({
-                    "score": i.score,
-                    "marked_count": i.marked_count,
-                    "last_reviewed": i.last_reviewed,
-                })))
+            let users: serde_json::Map<String, serde_json::Value> = interest
+                .iter()
+                .map(|(uid, i)| {
+                    (
+                        uid.to_string(),
+                        serde_json::json!({
+                            "score": i.score,
+                            "marked_count": i.marked_count,
+                            "last_reviewed": i.last_reviewed,
+                        }),
+                    )
+                })
                 .collect();
             ok(serde_json::json!({
-                 "enabled": cfg.enabled,
-                 "segment_minutes": cfg.segment_minutes,
-                 "segments": cfg.segments,
-                 "users": users,
-             }))
+                "enabled": cfg.enabled,
+                "segment_minutes": cfg.segment_minutes,
+                "segments": cfg.segments,
+                "users": users,
+            }))
         }
     }
 }
@@ -1129,24 +1260,25 @@ pub fn handle_anti_injection(
             }
             // GET /api/anti-injection/:user_id - 获取特定用户状态
             if let Some(&user_id_str) = segs.first()
-                && let Ok(user_id) = user_id_str.parse::<u64>() {
-                    let status = crate::anti_injection::get_user_status(user_id);
-                    let reputation = crate::anti_injection::get_reputation(user_id);
-                    let violation_count = crate::anti_injection::get_violation_count(user_id);
-                    let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
-                    let silent_banned = crate::anti_injection::is_silent_banned(user_id);
-                    let penalty = crate::anti_injection::get_penalty_multiplier(user_id);
+                && let Ok(user_id) = user_id_str.parse::<u64>()
+            {
+                let status = crate::anti_injection::get_user_status(user_id);
+                let reputation = crate::anti_injection::get_reputation(user_id);
+                let violation_count = crate::anti_injection::get_violation_count(user_id);
+                let vision_disabled = crate::anti_injection::is_vision_disabled(user_id);
+                let silent_banned = crate::anti_injection::is_silent_banned(user_id);
+                let penalty = crate::anti_injection::get_penalty_multiplier(user_id);
 
-                    return ok(serde_json::json!({
-                        "user_id": user_id,
-                        "status": status,
-                        "reputation": reputation,
-                        "violation_count": violation_count,
-                        "vision_disabled": vision_disabled,
-                        "silent_banned": silent_banned,
-                        "penalty_multiplier": penalty,
-                    }));
-                }
+                return ok(serde_json::json!({
+                    "user_id": user_id,
+                    "status": status,
+                    "reputation": reputation,
+                    "violation_count": violation_count,
+                    "vision_disabled": vision_disabled,
+                    "silent_banned": silent_banned,
+                    "penalty_multiplier": penalty,
+                }));
+            }
 
             // 返回配置信息
             let cfg = &config::get().anti_injection;
@@ -1200,23 +1332,33 @@ pub fn handle_anti_injection(
             match action {
                 "unban" => {
                     crate::anti_injection::unban_user(user_id);
-                    ok(serde_json::json!({"success": true, "message": format!("用户{}已解封", user_id)}))
+                    ok(
+                        serde_json::json!({"success": true, "message": format!("用户{}已解封", user_id)}),
+                    )
                 }
                 "enable-vision" => {
                     crate::anti_injection::enable_vision(user_id);
-                    ok(serde_json::json!({"success": true, "message": format!("用户{}识图已启用", user_id)}))
+                    ok(
+                        serde_json::json!({"success": true, "message": format!("用户{}识图已启用", user_id)}),
+                    )
                 }
                 "reset-reputation" => {
                     crate::anti_injection::reset_reputation(user_id);
-                    ok(serde_json::json!({"success": true, "message": format!("用户{}信誉已重置", user_id)}))
+                    ok(
+                        serde_json::json!({"success": true, "message": format!("用户{}信誉已重置", user_id)}),
+                    )
                 }
                 "silent-ban" => {
                     crate::anti_injection::silent_ban_user(user_id);
-                    ok(serde_json::json!({"success": true, "message": format!("用户{}已静默封禁", user_id)}))
+                    ok(
+                        serde_json::json!({"success": true, "message": format!("用户{}已静默封禁", user_id)}),
+                    )
                 }
                 "ban" => {
                     crate::anti_injection::ban_user(user_id);
-                    ok(serde_json::json!({"success": true, "message": format!("用户{}已完全封禁", user_id)}))
+                    ok(
+                        serde_json::json!({"success": true, "message": format!("用户{}已完全封禁", user_id)}),
+                    )
                 }
                 _ => err(404, "unknown action"),
             }
@@ -1227,7 +1369,11 @@ pub fn handle_anti_injection(
 
 // ── 配置管理 ──────────────────────────────────────────────────
 
-pub fn handle_config(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_config(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     // GET /api/config/status — 配置解析状态
     if *method == Method::Get && segs.first() == Some(&"status") {
         let err = config::error_message();
@@ -1266,7 +1412,9 @@ pub fn handle_config(method: &Method, segs: &[&str], body: &[u8]) -> Response<st
         if let Err(e) = std::fs::write(&config_path, content) {
             return err(500, &format!("写入失败: {}", e));
         }
-        return ok(serde_json::json!({"ok": true, "message": "配置已保存，点击「重新载入配置」生效"}));
+        return ok(
+            serde_json::json!({"ok": true, "message": "配置已保存，点击「重新载入配置」生效"}),
+        );
     }
     // 原有的 config GET/PUT 逻辑
     handle_config_main(method, body)
@@ -1288,15 +1436,17 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
             if let Some(obj) = cfg.as_object_mut() {
                 if let Some(key) = obj.get_mut("api_key")
                     && let Some(s) = key.as_str()
-                        && s.len() > 8 {
-                            *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
-                        }
+                    && s.len() > 8
+                {
+                    *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len() - 4..]));
+                }
                 if let Some(v) = obj.get_mut("vision").and_then(|v| v.as_object_mut())
                     && let Some(key) = v.get_mut("api_key")
-                        && let Some(s) = key.as_str()
-                            && s.len() > 8 {
-                                *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len()-4..]));
-                            }
+                    && let Some(s) = key.as_str()
+                    && s.len() > 8
+                {
+                    *key = serde_json::json!(format!("{}...{}", &s[..4], &s[s.len() - 4..]));
+                }
             }
             ok(cfg)
         }
@@ -1307,29 +1457,33 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
             };
             // 读取现有配置以保留未发送的字段
             let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-            let existing_cfg: serde_json::Value = serde_yaml::from_str(&existing).unwrap_or(serde_json::json!({}));
+            let existing_cfg: serde_json::Value =
+                serde_yaml::from_str(&existing).unwrap_or(serde_json::json!({}));
 
             // 深合并：新配置中未发送的嵌套字段保留原值
             let mut merged = deep_merge(&existing_cfg, &new_cfg);
 
             // 脱敏字段还原：包含 "..." 的 api_key 保留原值
-            if let (Some(new_obj), Some(old_obj)) = (merged.as_object_mut(), existing_cfg.as_object()) {
+            if let (Some(new_obj), Some(old_obj)) =
+                (merged.as_object_mut(), existing_cfg.as_object())
+            {
                 // api_key
                 if let Some(key) = new_obj.get("api_key").and_then(|v| v.as_str())
                     && key.contains("...")
-                        && let Some(old_key) = old_obj.get("api_key") {
-                            new_obj.insert("api_key".to_string(), old_key.clone());
-                        }
+                    && let Some(old_key) = old_obj.get("api_key")
+                {
+                    new_obj.insert("api_key".to_string(), old_key.clone());
+                }
                 // vision.api_key
                 if let (Some(new_vis), Some(old_vis)) = (
                     new_obj.get_mut("vision").and_then(|v| v.as_object_mut()),
-                    old_obj.get("vision").and_then(|v| v.as_object())
-                )
-                    && let Some(key) = new_vis.get("api_key").and_then(|v| v.as_str())
-                        && key.contains("...")
-                            && let Some(old_key) = old_vis.get("api_key") {
-                                new_vis.insert("api_key".to_string(), old_key.clone());
-                            }
+                    old_obj.get("vision").and_then(|v| v.as_object()),
+                ) && let Some(key) = new_vis.get("api_key").and_then(|v| v.as_str())
+                    && key.contains("...")
+                    && let Some(old_key) = old_vis.get("api_key")
+                {
+                    new_vis.insert("api_key".to_string(), old_key.clone());
+                }
             }
 
             // 使用模板保存：保留注释和格式，只替换值
@@ -1362,7 +1516,10 @@ pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor
             Err(e) => return err(400, &format!("invalid json: {}", e)),
         };
 
-        let action = body_val.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let action = body_val
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let kind = body_val.get("kind").and_then(|v| v.as_str()).unwrap_or("");
         let index = body_val.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
@@ -1471,7 +1628,10 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
             // POST /api/conversations/private/{id}/enable
             // POST /api/conversations/private/{id}/disable
             if segs.len() < 3 {
-                return err(400, "path: /api/conversations/{group|private}/{id}/{enable|disable}");
+                return err(
+                    400,
+                    "path: /api/conversations/{group|private}/{id}/{enable|disable}",
+                );
             }
             let kind = segs[0];
             let id: u64 = match segs[1].parse() {
@@ -1491,7 +1651,11 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
             };
 
             let action = if enable { "开启" } else { "关闭" };
-            let target = if kind == "group" { format!("群{}", id) } else { format!("用户{}", id) };
+            let target = if kind == "group" {
+                format!("群{}", id)
+            } else {
+                format!("用户{}", id)
+            };
             ok(serde_json::json!({
                 "ok": true,
                 "changed": changed,
@@ -1517,7 +1681,9 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
             "is_passive_mode": b.is_passive_mode,
             "active_minutes": b.active_minutes,
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     let circadian = if cfg.humanity.circadian_enabled {
         let c = crate::circadian::calculate();
@@ -1530,7 +1696,9 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
             "current_hour": c.current_hour,
             "is_quiet_hours": crate::circadian::is_quiet_hours(),
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     let attention = if cfg.humanity.attention_enabled {
         let a = crate::conversation::attention::load_attention();
@@ -1540,7 +1708,9 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
             "focused_topic": a.focused_topic,
             "flow_recovering": a.flow_recovery_until > crate::util::now_secs(),
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     let biases = if cfg.humanity.cognitive_biases_enabled {
         let b = crate::memory::cognitive_biases::load_biases();
@@ -1551,7 +1721,9 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
             "anchoring_strength": b.anchoring_strength,
             "availability_heuristic": b.availability_heuristic,
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     let motivation = crate::proactive::motivation::get_dominant_motivation()
         .map(|(name, strength)| serde_json::json!({"type": name, "strength": strength}));
@@ -1560,20 +1732,33 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
     let rel_count = std::fs::read_to_string(&rel_path)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("relationships").and_then(|r| r.as_object()).map(|o| o.len()))
+        .and_then(|v| {
+            v.get("relationships")
+                .and_then(|r| r.as_object())
+                .map(|o| o.len())
+        })
         .unwrap_or(0);
 
     let inner_thoughts = if cfg.humanity.inner_thought_enabled {
         let thoughts = crate::self_memory::inner_thought::get_active_thoughts(10);
-        Some(thoughts.iter().map(|t| serde_json::json!({
-            "content": t.content,
-            "timestamp": t.timestamp,
-            "emotional_impact": t.emotional_impact,
-            "action_potential": t.action_potential,
-            "faded": t.faded,
-            "recall_count": t.recall_count,
-        })).collect::<Vec<_>>())
-    } else { None };
+        Some(
+            thoughts
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "content": t.content,
+                        "timestamp": t.timestamp,
+                        "emotional_impact": t.emotional_impact,
+                        "action_potential": t.action_potential,
+                        "faded": t.faded,
+                        "recall_count": t.recall_count,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
 
     let narrative = crate::narrative_self::get_narrative_summary();
 
@@ -1591,7 +1776,6 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
             "circadian": cfg.humanity.circadian_enabled,
             "attention": cfg.humanity.attention_enabled,
             "cognitive_biases": cfg.humanity.cognitive_biases_enabled,
-            "satisficing": cfg.humanity.satisficing_enabled,
             "response_timing": cfg.humanity.response_timing_enabled,
             "unpredictability": cfg.humanity.unpredictability_enabled,
             "inner_thought": cfg.humanity.inner_thought_enabled,
@@ -1614,13 +1798,18 @@ pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io:
     }
     let rel_path = config::data_dir().join("relationships.json");
     let data = std::fs::read_to_string(&rel_path).unwrap_or_else(|_| "{}".into());
-    let store: serde_json::Value = serde_json::from_str(&data).unwrap_or(serde_json::json!({"relationships": {}}));
+    let store: serde_json::Value =
+        serde_json::from_str(&data).unwrap_or(serde_json::json!({"relationships": {}}));
     ok(store)
 }
 
 // ── Handler: 叙事自我 ──────────────────────────────────────────
 
-pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_narrative_self(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             let summary = crate::narrative_self::get_narrative_summary();
@@ -1629,7 +1818,12 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
         Method::Post => {
             let action = match segs.first() {
                 Some(a) => *a,
-                None => return err(400, "action required: event, value, concern, identity, narrative"),
+                None => {
+                    return err(
+                        400,
+                        "action required: event, value, concern, identity, narrative",
+                    );
+                }
             };
             let body_val: serde_json::Value = match parse_json(body) {
                 Ok(v) => v,
@@ -1641,8 +1835,14 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
                         Some(c) if !c.is_empty() => c,
                         _ => return err(400, "content required"),
                     };
-                    let significance = body_val.get("significance").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
-                    let event_type_str = body_val.get("event_type").and_then(|v| v.as_str()).unwrap_or("Daily");
+                    let significance = body_val
+                        .get("significance")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5) as f32;
+                    let event_type_str = body_val
+                        .get("event_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Daily");
                     let event_type = match event_type_str {
                         "Conversation" => crate::narrative_self::TimelineEventType::Conversation,
                         "Emotional" => crate::narrative_self::TimelineEventType::Emotional,
@@ -1652,7 +1852,12 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
                         _ => crate::narrative_self::TimelineEventType::Daily,
                     };
                     let related_user = body_val.get("related_user").and_then(|v| v.as_u64());
-                    crate::narrative_self::add_timeline_event(content, event_type, significance, related_user);
+                    crate::narrative_self::add_timeline_event(
+                        content,
+                        event_type,
+                        significance,
+                        related_user,
+                    );
                     ok(serde_json::json!({"ok": true}))
                 }
                 "value" => {
@@ -1660,7 +1865,10 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
                         Some(c) if !c.is_empty() => c,
                         _ => return err(400, "content required"),
                     };
-                    let strength = body_val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                    let strength = body_val
+                        .get("strength")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5) as f32;
                     crate::narrative_self::add_value(content, strength, Some("manual"));
                     ok(serde_json::json!({"ok": true}))
                 }
@@ -1669,14 +1877,20 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
                         Some(c) if !c.is_empty() => c,
                         _ => return err(400, "content required"),
                     };
-                    let type_str = body_val.get("type").and_then(|v| v.as_str()).unwrap_or("Topic");
+                    let type_str = body_val
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Topic");
                     let concern_type = match type_str {
                         "Person" => crate::narrative_self::ConcernType::Person,
                         "Event" => crate::narrative_self::ConcernType::Event,
                         "SelfState" => crate::narrative_self::ConcernType::SelfState,
                         _ => crate::narrative_self::ConcernType::Topic,
                     };
-                    let strength = body_val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+                    let strength = body_val
+                        .get("strength")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5) as f32;
                     crate::narrative_self::add_ongoing_concern(content, concern_type, strength);
                     ok(serde_json::json!({"ok": true}))
                 }
@@ -1696,7 +1910,10 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
                     crate::narrative_self::update_current_narrative(content);
                     ok(serde_json::json!({"ok": true}))
                 }
-                _ => err(400, "unknown action: use event, value, concern, identity, or narrative"),
+                _ => err(
+                    400,
+                    "unknown action: use event, value, concern, identity, or narrative",
+                ),
             }
         }
         _ => err(405, "method not allowed"),
@@ -1708,7 +1925,8 @@ pub fn handle_narrative_self(method: &Method, segs: &[&str], body: &[u8]) -> Res
 pub fn handle_memory_ops_log(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
-            let limit = segs.first()
+            let limit = segs
+                .first()
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(500);
             let logs = crate::memory::ops_log::get_logs(Some(limit));
@@ -1735,6 +1953,7 @@ pub fn handle_info() -> Response<std::io::Cursor<Vec<u8>>> {
 /// 深合并两个 JSON 对象
 /// - 对于两个都是 Object 的 key：递归合并
 /// - 对于其他情况：新值覆盖旧值
+///
 /// 这样前端发送部分嵌套字段时，不会丢失未发送的字段
 fn deep_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json::Value {
     match (base, patch) {

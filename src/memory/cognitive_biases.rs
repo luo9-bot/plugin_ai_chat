@@ -69,8 +69,7 @@ pub fn load_biases() -> CognitiveBiases {
     let path = state_path();
     match fs::read_to_string(&path) {
         Ok(content) => {
-            let store: CognitiveStateStore =
-                serde_json::from_str(&content).unwrap_or_default();
+            let store: CognitiveStateStore = serde_json::from_str(&content).unwrap_or_default();
             store.biases.unwrap_or_default()
         }
         Err(_) => CognitiveBiases::default(),
@@ -109,10 +108,14 @@ fn emotion_valence(emotion_type: &crate::emotion::EmotionType) -> f32 {
 
 /// 简单的情感极性估算（基于关键词）
 fn estimate_content_valence(content: &str) -> f32 {
-    let positive: &[&str] = &["开心", "高兴", "喜欢", "好", "棒", "爱", "成功", "有趣",
-        "温暖", "感动", "幸福", "美好", "惊喜", "期待"];
-    let negative: &[&str] = &["难过", "伤心", "生气", "讨厌", "烦", "累", "无聊",
-        "失败", "痛苦", "焦虑", "害怕", "失望", "后悔", "孤独"];
+    let positive: &[&str] = &[
+        "开心", "高兴", "喜欢", "好", "棒", "爱", "成功", "有趣", "温暖", "感动", "幸福", "美好",
+        "惊喜", "期待",
+    ];
+    let negative: &[&str] = &[
+        "难过", "伤心", "生气", "讨厌", "烦", "累", "无聊", "失败", "痛苦", "焦虑", "害怕", "失望",
+        "后悔", "孤独",
+    ];
 
     let pos_count = positive.iter().filter(|w| content.contains(*w)).count() as f32;
     let neg_count = negative.iter().filter(|w| content.contains(*w)).count() as f32;
@@ -220,7 +223,11 @@ pub fn apply_cognitive_biases(
         .collect();
 
     // 按调整后的分数重新排序
-    adjusted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    adjusted.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // 定期清理访问频率（超过1000条时削减）
     if biases.access_frequency.len() > 1000 {
@@ -236,7 +243,9 @@ pub fn apply_cognitive_biases(
 /// 记录锚定记忆（首次强印象）
 pub fn record_anchor(topic: &str, memory_id: &str, biases: &mut CognitiveBiases) {
     if !biases.anchors.contains_key(topic) {
-        biases.anchors.insert(topic.to_string(), memory_id.to_string());
+        biases
+            .anchors
+            .insert(topic.to_string(), memory_id.to_string());
         save_biases(biases);
         debug!(topic, memory_id, "cognitive_biases: anchor recorded");
     }

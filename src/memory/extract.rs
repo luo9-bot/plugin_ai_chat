@@ -45,8 +45,13 @@ fn mark_keyword_extracted(user_id: u64, keyword: &str) {
 
 fn looks_ephemeral(message: &str) -> bool {
     let trimmed = message.trim();
-    if trimmed.is_empty() { return true; }
-    let ephemeral_markers = ["哈哈", "好的", "收到", "嗯嗯", "晚安", "早安", "拜拜", "谢谢", "在吗", "？", "ok", "OK", "好", "嗯", "?", "？"];
+    if trimmed.is_empty() {
+        return true;
+    }
+    let ephemeral_markers = [
+        "哈哈", "好的", "收到", "嗯嗯", "晚安", "早安", "拜拜", "谢谢", "在吗", "？", "ok", "OK",
+        "好", "嗯", "?", "？",
+    ];
     if trimmed.chars().count() <= 8 && ephemeral_markers.iter().any(|m| trimmed.contains(m)) {
         return true;
     }
@@ -54,16 +59,38 @@ fn looks_ephemeral(message: &str) -> bool {
 }
 
 fn is_contradictory(user_id: u64, content: &str) -> bool {
-    let prefixes = ["我叫", "我是", "我的名字", "我住", "我在", "我喜欢", "我不喜欢", "我讨厌"];
+    let prefixes = [
+        "我叫",
+        "我是",
+        "我的名字",
+        "我住",
+        "我在",
+        "我喜欢",
+        "我不喜欢",
+        "我讨厌",
+    ];
     let has_prefix = prefixes.iter().any(|p| content.contains(p));
-    if !has_prefix { return false; }
+    if !has_prefix {
+        return false;
+    }
     let user_mem = super::store::load_user_memory(user_id);
-    let new_info_type = prefixes.iter().find(|p| content.contains(*p)).copied().unwrap_or("");
-    if new_info_type.is_empty() { return false; }
+    let new_info_type = prefixes
+        .iter()
+        .find(|p| content.contains(*p))
+        .copied()
+        .unwrap_or("");
+    if new_info_type.is_empty() {
+        return false;
+    }
     let new_value = content.split(new_info_type).nth(1).unwrap_or("").trim();
     for entry in &user_mem.entries {
         if entry.content.contains(new_info_type) && !entry.content.contains(new_value) {
-            let existing_value = entry.content.split(new_info_type).nth(1).unwrap_or("").trim();
+            let existing_value = entry
+                .content
+                .split(new_info_type)
+                .nth(1)
+                .unwrap_or("")
+                .trim();
             debug!(user_id, existing = %existing_value, new = %new_value, "memory: contradictory info detected, skipping");
             return true;
         }
@@ -72,7 +99,13 @@ fn is_contradictory(user_id: u64, content: &str) -> bool {
 }
 
 /// AI 驱动的记忆提取（MaiBot 风格）
-pub fn ai_extract(user_id: u64, group_id: u64, user_message: &str, ai_reply: &str, history: &[(String, String)]) {
+pub fn ai_extract(
+    user_id: u64,
+    group_id: u64,
+    user_message: &str,
+    ai_reply: &str,
+    history: &[(String, String)],
+) {
     if looks_ephemeral(user_message) {
         debug!(user_id, "memory: ephemeral message, skipping extraction");
         return;
@@ -87,30 +120,55 @@ pub fn ai_extract(user_id: u64, group_id: u64, user_message: &str, ai_reply: &st
     context_parts.push(format!("[assistant] {}", ai_reply));
     let content = context_parts.join("\n");
 
-    let result = crate::ai::analyze(crate::prompt::PromptManager::get().raw("memory_extract"), &content);
+    let result = crate::ai::analyze(
+        crate::prompt::PromptManager::get().raw("memory_extract"),
+        &content,
+    );
     match result {
         Ok(raw) => {
             let json_str = if let Some(start) = raw.find('[') {
-                if let Some(end) = raw[start..].rfind(']') { &raw[start..start + end + 1] } else { "[]" }
-            } else { "[]" };
+                if let Some(end) = raw[start..].rfind(']') {
+                    &raw[start..start + end + 1]
+                } else {
+                    "[]"
+                }
+            } else {
+                "[]"
+            };
 
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
-                && let Some(arr) = parsed.as_array() {
-                    for item in arr {
-                        let c = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let importance_str = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
-                        if c.is_empty() { continue; }
-                        let importance = match importance_str {
-                            "permanent" => Importance::Permanent,
-                            "important" => Importance::Important,
-                            _ => Importance::Normal,
-                        };
-                        super::ops_log::record("ai_extract", user_id, group_id, c, importance_str, "AI extracted from conversation");
-                        add(user_id, group_id, c, importance);
+                && let Some(arr) = parsed.as_array()
+            {
+                for item in arr {
+                    let c = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let importance_str = item
+                        .get("importance")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("normal");
+                    if c.is_empty() {
+                        continue;
                     }
-                } else {
-                    debug!(user_id, "memory: LLM returned no valid facts, skipping extraction");
+                    let importance = match importance_str {
+                        "permanent" => Importance::Permanent,
+                        "important" => Importance::Important,
+                        _ => Importance::Normal,
+                    };
+                    super::ops_log::record(
+                        "ai_extract",
+                        user_id,
+                        group_id,
+                        c,
+                        importance_str,
+                        "AI extracted from conversation",
+                    );
+                    add(user_id, group_id, c, importance);
                 }
+            } else {
+                debug!(
+                    user_id,
+                    "memory: LLM returned no valid facts, skipping extraction"
+                );
+            }
         }
         Err(e) => {
             debug!(user_id, error = %e, "memory: AI extraction failed, falling back to keyword");
@@ -122,8 +180,18 @@ pub fn ai_extract(user_id: u64, group_id: u64, user_message: &str, ai_reply: &st
 fn fallback_keyword(user_id: u64, group_id: u64, message: &str) {
     if let Some(pos) = message.find("记住") {
         let after = &message[pos + 2..].trim();
-        if !after.is_empty() && !is_keyword_on_cooldown(user_id, "记住") && !is_contradictory(user_id, after) {
-            super::ops_log::record("keyword_extract", user_id, group_id, after, "normal", "keyword '记住' fallback");
+        if !after.is_empty()
+            && !is_keyword_on_cooldown(user_id, "记住")
+            && !is_contradictory(user_id, after)
+        {
+            super::ops_log::record(
+                "keyword_extract",
+                user_id,
+                group_id,
+                after,
+                "normal",
+                "keyword '记住' fallback",
+            );
             add(user_id, group_id, after, Importance::Normal);
             mark_keyword_extracted(user_id, "记住");
         }
@@ -131,11 +199,23 @@ fn fallback_keyword(user_id: u64, group_id: u64, message: &str) {
 }
 
 pub fn extract_memory_from_message(user_id: u64, message: &str) {
-    if looks_ephemeral(message) { return; }
+    if looks_ephemeral(message) {
+        return;
+    }
     if let Some(pos) = message.find("记住") {
         let after = &message[pos + 2..].trim();
-        if !after.is_empty() && !is_keyword_on_cooldown(user_id, "记住") && !is_contradictory(user_id, after) {
-            super::ops_log::record("keyword_extract", user_id, 0, after, "normal", "keyword '记住' from message");
+        if !after.is_empty()
+            && !is_keyword_on_cooldown(user_id, "记住")
+            && !is_contradictory(user_id, after)
+        {
+            super::ops_log::record(
+                "keyword_extract",
+                user_id,
+                0,
+                after,
+                "normal",
+                "keyword '记住' from message",
+            );
             add(user_id, 0, after, Importance::Normal);
             mark_keyword_extracted(user_id, "记住");
         }

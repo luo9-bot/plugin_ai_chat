@@ -5,8 +5,7 @@ use tracing::debug;
 use crate::config;
 
 /// 每日计划 (持久化)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DailyPlan {
     /// 日期 (YYYY-MM-DD)
     pub date: String,
@@ -19,7 +18,6 @@ pub struct DailyPlan {
     /// 生成时间
     pub created_at: u64,
 }
-
 
 fn plan_path() -> std::path::PathBuf {
     config::data_dir().join("daily_plan.json")
@@ -69,7 +67,9 @@ pub fn check_and_generate_plan() -> bool {
 
 /// 获取计划生成的 prompt
 pub fn get_plan_generation_prompt() -> String {
-    crate::prompt::PromptManager::get().raw("daily_plan").to_string()
+    crate::prompt::PromptManager::get()
+        .raw("daily_plan")
+        .to_string()
 }
 
 /// 标记任务完成
@@ -89,13 +89,7 @@ pub fn add_task(task: &str) {
     if !plan.goals.contains(&task.to_string()) {
         plan.goals.push(task.to_string());
         save_plan(&plan);
-        crate::personal_tasks::add_or_reinforce(
-            task,
-            "daily_plan",
-            "安排一个合适的时间开始",
-            0,
-            0,
-        );
+        crate::personal_tasks::add_or_reinforce(task, "daily_plan", "安排一个合适的时间开始", 0, 0);
         debug!(task, "schedule: task added");
     }
 }

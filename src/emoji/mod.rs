@@ -65,5 +65,4 @@ mod tests {
         assert!(!is_emoji_only("hello😍"));
         assert!(!is_emoji_only("好吃😋"));
     }
-
 }

@@ -23,7 +23,7 @@ pub enum EmotionType {
     Worried,
     Tired,
     Excited,
-    Like,    // 喜欢/心动
+    Like, // 喜欢/心动
 }
 
 impl EmotionType {
@@ -117,9 +117,15 @@ pub struct EmotionState {
     pub last_crisis_detected: u64,
 }
 
-fn default_emotional_inertia() -> f32 { 0.5 }
-fn default_resilience() -> f32 { 0.4 }
-fn default_empathy_resonance() -> f32 { 0.3 }
+fn default_emotional_inertia() -> f32 {
+    0.5
+}
+fn default_resilience() -> f32 {
+    0.4
+}
+fn default_empathy_resonance() -> f32 {
+    0.3
+}
 
 /// 情绪触发事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,9 +198,7 @@ impl EmotionState {
                     self.intensity = stim_intensity.clamp(0.1, 1.0);
                 } else {
                     // 不足以改变主情绪，但可能产生混合情绪
-                    if self.secondary.is_none()
-                        || self.secondary.as_ref() == Some(emotion)
-                    {
+                    if self.secondary.is_none() || self.secondary.as_ref() == Some(emotion) {
                         self.secondary = Some(*emotion);
                     }
                     // 微调强度
@@ -219,7 +223,10 @@ impl EmotionState {
         let baseline_pull = self.baseline * delta_secs / 86400.0; // 每天
         if self.baseline > 0.0 {
             // 乐观基线，倾向积极情绪
-            if matches!(self.current, EmotionType::Sad | EmotionType::Angry | EmotionType::Worried) {
+            if matches!(
+                self.current,
+                EmotionType::Sad | EmotionType::Angry | EmotionType::Worried
+            ) {
                 // 从负面情绪恢复，受resilience影响
                 let recovery = baseline_pull.abs() * (1.0 + self.resilience);
                 self.intensity -= recovery;
@@ -237,7 +244,8 @@ impl EmotionState {
 
         // 4. 清理过期触发链（保留2小时）
         let now = crate::util::now_secs();
-        self.trigger_chain.retain(|t| now.saturating_sub(t.timestamp) < 7200);
+        self.trigger_chain
+            .retain(|t| now.saturating_sub(t.timestamp) < 7200);
 
         self.last_update = crate::util::now_secs();
     }
@@ -247,7 +255,12 @@ impl EmotionState {
         let resonance = self.empathy_resonance * other_intensity * 0.3;
         if resonance > 0.1 {
             self.update_emotional_dynamics(
-                Some((other_emotion, resonance, "情绪感染", TriggerType::EmotionalContagion)),
+                Some((
+                    other_emotion,
+                    resonance,
+                    "情绪感染",
+                    TriggerType::EmotionalContagion,
+                )),
                 0.0,
             );
         }
@@ -338,7 +351,10 @@ pub fn user_count() -> usize {
 
 pub fn get_state(user_id: u64) -> EmotionState {
     let states = load_states();
-    let mut state = states.get(&user_id.to_string()).cloned().unwrap_or_default();
+    let mut state = states
+        .get(&user_id.to_string())
+        .cloned()
+        .unwrap_or_default();
     // 迁移修复：last_crisis_detected == 0 说明是旧数据，crisis_level 不可信
     if state.crisis_level != CrisisLevel::None && state.last_crisis_detected == 0 {
         info!(user_id, from = ?state.crisis_level, "crisis migration: resetting stale crisis_level to None");

@@ -18,7 +18,10 @@ pub fn content_overlap(a: &str, b: &str) -> f32 {
     let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
     let shorter_chars: Vec<char> = shorter.chars().collect();
     let longer_set: HashSet<char> = longer.chars().collect();
-    let overlap = shorter_chars.iter().filter(|c| longer_set.contains(c)).count();
+    let overlap = shorter_chars
+        .iter()
+        .filter(|c| longer_set.contains(c))
+        .count();
     overlap as f32 / shorter_chars.len() as f32
 }
 

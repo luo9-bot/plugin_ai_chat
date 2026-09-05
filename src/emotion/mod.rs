@@ -1,19 +1,19 @@
-mod state;
-mod detect;
 mod context;
+mod detect;
+mod state;
 
 // ── re-exports ────────────────────────────────────────────────
 
 // state.rs
 pub use state::{
-    CrisisLevel, EmotionType, EmotionState, EmotionTrigger, TriggerType,
-    user_count, get_state, update_state, decay, describe,
+    CrisisLevel, EmotionState, EmotionTrigger, EmotionType, TriggerType, decay, describe,
+    get_state, update_state, user_count,
 };
 
 // detect.rs
 pub use detect::{
-    detect_crisis, detect_crisis_ai, update_crisis, get_crisis_context,
-    analyze_user_message, ai_analyze, update_from_analysis, parse_from_reply,
+    ai_analyze, analyze_user_message, detect_crisis, detect_crisis_ai, get_crisis_context,
+    update_crisis, update_from_analysis,
 };
 
 // context.rs

@@ -67,18 +67,27 @@ pub fn add_concern(content: &str, category: &str, trigger_user: u64, trigger_gro
     // 容量检查：超过上限时替换最弱的
     let max = config::get().mental_state.concerns_max;
     if store.concerns.len() >= max
-        && let Some(weakest_idx) = store.concerns.iter()
+        && let Some(weakest_idx) = store
+            .concerns
+            .iter()
             .enumerate()
-            .min_by(|a, b| a.1.strength.partial_cmp(&b.1.strength).unwrap_or(std::cmp::Ordering::Equal))
+            .min_by(|a, b| {
+                a.1.strength
+                    .partial_cmp(&b.1.strength)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
-        {
-            if store.concerns[weakest_idx].strength < 0.3 {
-                store.concerns.remove(weakest_idx);
-            } else {
-                debug!(content, "mental_state: concerns full, skipping weak concern");
-                return;
-            }
+    {
+        if store.concerns[weakest_idx].strength < 0.3 {
+            store.concerns.remove(weakest_idx);
+        } else {
+            debug!(
+                content,
+                "mental_state: concerns full, skipping weak concern"
+            );
+            return;
         }
+    }
 
     debug!(content, ?cat, "mental_state: added concern");
     store.concerns.push(Concern {

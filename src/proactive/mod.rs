@@ -1,18 +1,17 @@
-mod runtime;
 mod generate;
-mod trigger;
 pub mod motivation;
+mod runtime;
+mod trigger;
 
 // ── re-exports ────────────────────────────────────────────────
 
 // runtime.rs
 pub use runtime::{
-    ProactiveState, DateReminder, RuntimeConfig, load_state,
-    user_count, record_user_reply, record_private_user_reply, record_sent, add_date_reminder,
-    set_enabled, set_quiet_hours, set_interval,
-    get_group_last_sent, private_contact_interval, can_send_hurt_check_in,
-    record_hurt_check_in,
+    DateReminder, ProactiveState, RuntimeConfig, add_date_reminder, can_send_hurt_check_in,
+    get_group_last_sent, load_state, private_contact_interval, record_hurt_check_in,
+    record_private_user_reply, record_sent, record_user_reply, set_enabled, set_interval,
+    set_quiet_hours, user_count,
 };
 
 // trigger.rs
-pub use trigger::{check_proactive_messages, check_group_atmosphere};
+pub use trigger::{check_group_atmosphere, check_proactive_messages};

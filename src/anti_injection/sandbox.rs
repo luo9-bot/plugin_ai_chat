@@ -1,5 +1,5 @@
-use super::scorer::RiskScore;
 use super::decision::Action;
+use super::scorer::RiskScore;
 
 /// 灰区下限
 const GRAY_ZONE_LOW: f32 = 0.35;
@@ -54,13 +54,27 @@ pub fn evaluate(score: &RiskScore, sensitive_action: &str) -> SandboxDecision {
 /// 构建灰区解释
 fn build_gray_zone_explanation(score: &RiskScore) -> String {
     let mut reasons = Vec::new();
-    if score.sexual > 0.3 { reasons.push("可能包含不当内容"); }
-    if score.violence > 0.3 { reasons.push("可能包含暴力内容"); }
-    if score.illegal > 0.3 { reasons.push("可能包含违法内容"); }
-    if score.jailbreak > 0.3 { reasons.push("可能包含指令注入"); }
-    if score.structured > 0.3 { reasons.push("可能包含结构化攻击"); }
-    if score.prompt_leak > 0.3 { reasons.push("可能尝试获取系统信息"); }
-    if score.emotional > 0.3 { reasons.push("可能包含情感操控"); }
+    if score.sexual > 0.3 {
+        reasons.push("可能包含不当内容");
+    }
+    if score.violence > 0.3 {
+        reasons.push("可能包含暴力内容");
+    }
+    if score.illegal > 0.3 {
+        reasons.push("可能包含违法内容");
+    }
+    if score.jailbreak > 0.3 {
+        reasons.push("可能包含指令注入");
+    }
+    if score.structured > 0.3 {
+        reasons.push("可能包含结构化攻击");
+    }
+    if score.prompt_leak > 0.3 {
+        reasons.push("可能尝试获取系统信息");
+    }
+    if score.emotional > 0.3 {
+        reasons.push("可能包含情感操控");
+    }
 
     if reasons.is_empty() {
         "消息内容需要进一步审查".to_string()
@@ -71,8 +85,8 @@ fn build_gray_zone_explanation(score: &RiskScore) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::scorer::RiskScore;
+    use super::*;
 
     #[test]
     fn test_low_risk_allow() {

@@ -157,7 +157,11 @@ pub fn get_circadian_context(rhythm: &CircadianRhythm) -> String {
         descriptors.push("今天很有耐心，可以听别人慢慢说");
     }
 
-    lines.push(format!("# 时间与状态\n{}。{}", time_desc, descriptors.join("。")));
+    lines.push(format!(
+        "# 时间与状态\n{}。{}",
+        time_desc,
+        descriptors.join("。")
+    ));
 
     lines.join("\n")
 }
@@ -165,7 +169,7 @@ pub fn get_circadian_context(rhythm: &CircadianRhythm) -> String {
 /// 检查当前是否在免打扰时段（结合 proactive 配置）
 pub fn is_quiet_hours() -> bool {
     let cfg = config::get();
-    let hour = crate::util::current_hour_cst() as u32;
+    let hour = crate::util::current_hour_cst();
     let quiet_start = cfg.proactive.quiet_start;
     let quiet_end = cfg.proactive.quiet_end;
 

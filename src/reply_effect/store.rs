@@ -4,10 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum EffectStatus { Pending, Finalized }
+pub enum EffectStatus {
+    Pending,
+    Finalized,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FollowupMessage { pub user_id: u64, pub content: String, pub timestamp: u64 }
+pub struct FollowupMessage {
+    pub user_id: u64,
+    pub content: String,
+    pub timestamp: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplyEffectRecord {
@@ -21,7 +28,9 @@ pub struct ReplyEffectRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EffectStore { pub records: Vec<ReplyEffectRecord> }
+pub struct EffectStore {
+    pub records: Vec<ReplyEffectRecord>,
+}
 
 pub(crate) static STORE: Mutex<Option<EffectStore>> = Mutex::new(None);
 
@@ -31,7 +40,9 @@ pub(crate) fn store_path() -> std::path::PathBuf {
 
 pub(crate) fn load_store() -> EffectStore {
     let mut guard = STORE.lock().unwrap();
-    if guard.is_none() { *guard = Some(crate::util::load_json(&store_path())); }
+    if guard.is_none() {
+        *guard = Some(crate::util::load_json(&store_path()));
+    }
     guard.clone().unwrap_or_default()
 }
 

@@ -1,4 +1,7 @@
 //! 消息发送：底层发送、打字延迟、安全检查
+//!
+//! 分段由她自己的输出决定（|^| 和换行），发送端只负责节奏：
+//! 打字速度受电量/节律/注意力影响，首条消息前有思考延迟。
 
 use luo9_sdk::Bot;
 use std::ffi::CString;
@@ -6,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
 
-use super::segments::{normalize_segment_sep, split_segments, clean_reply};
+use super::segments::{clean_reply, normalize_segment_sep, split_segments};
 use super::timing::ResponseTiming;
 use crate::anti_injection;
 use crate::config;
@@ -52,29 +55,7 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
         timing.update_modifiers(battery_level, circadian_energy, attention_level);
     }
 
-    // 检查是否应该拆分回复（"先发简短反应，再发完整内容"）
-    let reply_text = if cfg.humanity.response_timing_enabled && timing.should_split_reply(reply) {
-        if let Some((first, second)) = ResponseTiming::split_reply(reply) {
-            // 先发第一部分
-            let delay = timing.calculate_delay(&first);
-            if delay > 0 {
-                thread::sleep(Duration::from_millis(delay));
-            }
-            raw_send_msg(group_id, user_id, &first);
-
-            // 短暂停顿后发第二部分
-            thread::sleep(Duration::from_millis(800 + fastrand::u64(200..1500)));
-
-            // 第二部分作为主要回复内容
-            second
-        } else {
-            reply.to_string()
-        }
-    } else {
-        reply.to_string()
-    };
-
-    let normalized = normalize_segment_sep(&reply_text);
+    let normalized = normalize_segment_sep(reply);
     let parts = split_segments(&normalized);
 
     for (i, text) in parts.iter().enumerate() {
@@ -96,7 +77,6 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
             }
         }
     }
-
 }
 
 /// 发送消息 (无延迟)，自动处理 |^| 和换行分割

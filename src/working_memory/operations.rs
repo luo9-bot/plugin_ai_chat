@@ -28,7 +28,11 @@ pub fn record(group_id: u64, user_id: u64, content: &str, bot_replied: bool) -> 
 pub fn mark_replied(group_id: u64, user_id: u64) {
     let mut store = WorkingMemoryStore::load();
     if let Some(group) = store.groups.get_mut(&group_id.to_string())
-        && let Some(entry) = group.entries.iter_mut().rev().find(|e| e.user_id == user_id && !e.bot_replied)
+        && let Some(entry) = group
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|e| e.user_id == user_id && !e.bot_replied)
     {
         entry.bot_replied = true;
     }
@@ -38,7 +42,9 @@ pub fn mark_replied(group_id: u64, user_id: u64) {
 /// 记录机器人自己的回复到工作记忆（让 AI 知道之前说过什么）
 pub fn record_bot_reply(group_id: u64, content: &str) {
     let self_qq = crate::config::get().self_qq;
-    if self_qq == 0 { return; }
+    if self_qq == 0 {
+        return;
+    }
     let mut store = WorkingMemoryStore::load();
     let ts = crate::util::now_secs();
     let group = store.groups.entry(group_id.to_string()).or_default();
@@ -61,10 +67,13 @@ pub fn record_bot_reply(group_id: u64, content: &str) {
 pub fn get_latest_user_message_ts(group_id: u64) -> u64 {
     let store = WorkingMemoryStore::load();
     let self_qq = crate::config::get().self_qq;
-    store.groups
+    store
+        .groups
         .get(&group_id.to_string())
         .map(|group| {
-            group.entries.iter()
+            group
+                .entries
+                .iter()
                 .rev()
                 .filter(|e| self_qq == 0 || e.user_id != self_qq)
                 .map(|e| e.timestamp)
@@ -78,10 +87,13 @@ pub fn get_latest_user_message_ts(group_id: u64) -> u64 {
 pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Entry> {
     let store = WorkingMemoryStore::load();
     let now = crate::util::now_secs();
-    store.groups
+    store
+        .groups
         .get(&group_id.to_string())
         .map(|group| {
-            group.entries.iter()
+            group
+                .entries
+                .iter()
                 .rev()
                 .filter(|e| now.saturating_sub(e.timestamp) < max_age_secs)
                 .take(max_count)
@@ -97,10 +109,13 @@ pub fn get_recent(group_id: u64, max_age_secs: u64, max_count: usize) -> Vec<Ent
 /// 获取指定时间戳之后的群聊消息
 pub fn get_since(group_id: u64, since_timestamp: u64, max_count: usize) -> Vec<Entry> {
     let store = WorkingMemoryStore::load();
-    store.groups
+    store
+        .groups
         .get(&group_id.to_string())
         .map(|group| {
-            group.entries.iter()
+            group
+                .entries
+                .iter()
                 .filter(|e| e.timestamp > since_timestamp)
                 .take(max_count)
                 .cloned()
@@ -130,7 +145,12 @@ pub fn get_context_no_self(group_id: u64, max_age_secs: u64) -> String {
     get_context_filtered(group_id, max_age_secs, 15, true)
 }
 
-fn get_context_filtered(group_id: u64, max_age_secs: u64, base_count: usize, exclude_self: bool) -> String {
+fn get_context_filtered(
+    group_id: u64,
+    max_age_secs: u64,
+    base_count: usize,
+    exclude_self: bool,
+) -> String {
     let expanded_count = base_count * 2;
     let entries = get_recent(group_id, max_age_secs, expanded_count);
     if entries.is_empty() {
@@ -158,7 +178,9 @@ fn get_context_filtered(group_id: u64, max_age_secs: u64, base_count: usize, exc
     while let Some((idx, first)) = iter.next() {
         let is_new = idx >= new_start;
         let is_self = self_qq > 0 && first.user_id == self_qq;
-        let who = if is_self { "bot".to_string() } else {
+        let who = if is_self {
+            "bot".to_string()
+        } else {
             crate::person_info::get_display_name(first.user_id, group_id)
                 .unwrap_or_else(|| "群友".to_string())
         };
@@ -225,8 +247,15 @@ pub fn cleanup(max_age_secs: u64) {
 
 /// 用精确时间戳更新工作记忆中的 [图片] 为实际图片描述
 /// record_timestamps: handle_group_msg 阶段写入工作记忆时的时间戳
-pub fn update_image_content(group_id: u64, user_id: u64, image_descriptions: &[String], record_timestamps: &[u64]) {
-    if group_id == 0 || image_descriptions.is_empty() || record_timestamps.is_empty() { return; }
+pub fn update_image_content(
+    group_id: u64,
+    user_id: u64,
+    image_descriptions: &[String],
+    record_timestamps: &[u64],
+) {
+    if group_id == 0 || image_descriptions.is_empty() || record_timestamps.is_empty() {
+        return;
+    }
     let mut store = WorkingMemoryStore::load();
     let group = match store.groups.get_mut(&group_id.to_string()) {
         Some(g) => g,
@@ -236,10 +265,20 @@ pub fn update_image_content(group_id: u64, user_id: u64, image_descriptions: &[S
     // 用时间戳精确匹配每条工作记忆条目，替换其中的 [图片]
     let mut desc_idx = 0usize;
     for &ts in record_timestamps {
-        if desc_idx >= image_descriptions.len() { break; }
-        if let Some(entry) = group.entries.iter_mut().find(|e| e.user_id == user_id && e.timestamp == ts) {
+        if desc_idx >= image_descriptions.len() {
+            break;
+        }
+        if let Some(entry) = group
+            .entries
+            .iter_mut()
+            .find(|e| e.user_id == user_id && e.timestamp == ts)
+        {
             while entry.content.contains("[图片]") && desc_idx < image_descriptions.len() {
-                entry.content = entry.content.replacen("[图片]", &format!("[图片: {}]", image_descriptions[desc_idx]), 1);
+                entry.content = entry.content.replacen(
+                    "[图片]",
+                    &format!("[图片: {}]", image_descriptions[desc_idx]),
+                    1,
+                );
                 desc_idx += 1;
             }
         }
@@ -258,10 +297,13 @@ pub fn get_participants(group_id: u64) -> Vec<u64> {
     let store = WorkingMemoryStore::load();
     let now = crate::util::now_secs();
     let self_qq = crate::config::get().self_qq;
-    store.groups
+    store
+        .groups
         .get(&group_id.to_string())
         .map(|group| {
-            let mut users: Vec<u64> = group.entries.iter()
+            let mut users: Vec<u64> = group
+                .entries
+                .iter()
                 .filter(|e| now.saturating_sub(e.timestamp) < 7200) // 最近2小时
                 .filter(|e| self_qq == 0 || e.user_id != self_qq) // 排除 bot 自身
                 .map(|e| e.user_id)

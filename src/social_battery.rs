@@ -108,8 +108,8 @@ pub fn update(battery: &mut SocialBattery) {
 
     // 被动模式几乎不消耗
     if battery.is_passive_mode {
-        battery.level = (battery.level + effective_recharge * elapsed_minutes)
-            .min(battery.capacity);
+        battery.level =
+            (battery.level + effective_recharge * elapsed_minutes).min(battery.capacity);
         battery.active_minutes = 0;
     } else {
         // 活跃状态：恢复 - 自然消耗
@@ -158,7 +158,10 @@ pub fn record_active_reply(battery: &mut SocialBattery) {
     battery.active_minutes += 1;
     battery.last_active_reply = crate::util::now_secs();
 
-    debug!(level = battery.level, drain, "social_battery: active reply recorded");
+    debug!(
+        level = battery.level,
+        drain, "social_battery: active reply recorded"
+    );
 }
 
 /// 记录被动参与（听消息但不回复，消耗极少）
@@ -167,7 +170,10 @@ pub fn record_passive_participation(battery: &mut SocialBattery) {
 }
 
 /// 设置情绪消耗修正（焦虑/负面情绪加速消耗）
-pub fn set_emotion_modifier(battery: &mut SocialBattery, emotion_type: &crate::emotion::EmotionType) {
+pub fn set_emotion_modifier(
+    battery: &mut SocialBattery,
+    emotion_type: &crate::emotion::EmotionType,
+) {
     battery.emotion_drain_modifier = match emotion_type {
         crate::emotion::EmotionType::Worried => 1.4,
         crate::emotion::EmotionType::Sad => 1.3,

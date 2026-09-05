@@ -9,9 +9,10 @@ use std::collections::HashMap;
 use tracing::debug;
 
 /// 关系类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum RelationshipType {
     /// 陌生人
+    #[default]
     Stranger,
     /// 认识的人
     Acquaintance,
@@ -27,10 +28,6 @@ pub enum RelationshipType {
     Admiring,
 }
 
-impl Default for RelationshipType {
-    fn default() -> Self { Self::Stranger }
-}
-
 impl RelationshipType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -43,24 +40,13 @@ impl RelationshipType {
             Self::Admiring => "admiring",
         }
     }
-
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "acquaintance" => Self::Acquaintance,
-            "regular" => Self::Regular,
-            "close" => Self::Close,
-            "confidant" => Self::Confidant,
-            "antagonistic" => Self::Antagonistic,
-            "admiring" => Self::Admiring,
-            _ => Self::Stranger,
-        }
-    }
 }
 
 /// 用户交流风格偏好
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum CommStyle {
     /// 默认
+    #[default]
     Default,
     /// 喜欢直来直去
     Direct,
@@ -72,10 +58,6 @@ pub enum CommStyle {
     Brief,
     /// 喜欢深入讨论
     Deep,
-}
-
-impl Default for CommStyle {
-    fn default() -> Self { Self::Default }
 }
 
 /// 共享记忆 / inside joke
@@ -243,14 +225,16 @@ fn save_rel_store(store: &RelationshipStore) {
 /// 获取或初始化关系
 pub fn get_relationship(user_id: u64) -> Relationship {
     let store = load_rel_store();
-    store.relationships.get(&user_id).cloned().unwrap_or_else(|| {
-        let mut rel = Relationship::default();
-        rel.user_id = user_id;
-        let now = crate::util::now_secs();
-        rel.created_at = now;
-        rel.updated_at = now;
-        rel
-    })
+    if let Some(rel) = store.relationships.get(&user_id) {
+        return rel.clone();
+    }
+    let now = crate::util::now_secs();
+    Relationship {
+        user_id,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    }
 }
 
 /// 保存关系
@@ -463,9 +447,7 @@ pub fn record_shared_memory(
     let now = crate::util::now_secs();
 
     // 检查是否已存在类似记忆（去重）
-    let exists = rel.shared_memories.iter().any(|m| {
-        m.summary == summary
-    });
+    let exists = rel.shared_memories.iter().any(|m| m.summary == summary);
 
     if !exists {
         rel.shared_memories.push(SharedMemory {
@@ -490,7 +472,9 @@ pub fn callback_shared_memory(user_id: u64, memory_summary: &str) {
     let mut rel = get_relationship(user_id);
     let mut found = false;
     let mut new_count = 0u32;
-    if let Some(mem) = rel.shared_memories.iter_mut()
+    if let Some(mem) = rel
+        .shared_memories
+        .iter_mut()
         .find(|m| m.summary.contains(memory_summary) || memory_summary.contains(&m.summary))
     {
         mem.callback_count += 1;
@@ -518,14 +502,21 @@ pub fn get_shared_memories_context(user_id: u64, max_count: usize) -> String {
         b_score.partial_cmp(&a_score).unwrap()
     });
 
-    let lines: Vec<String> = sorted.iter().take(max_count).map(|m| {
-        let joke = if let Some(ref joke) = m.inside_joke {
-            format!(" (内部梗: {})", joke)
-        } else {
-            String::new()
-        };
-        format!("- {}{} [重要性:{:.1}]", m.summary, joke, m.emotional_significance)
-    }).collect();
+    let lines: Vec<String> = sorted
+        .iter()
+        .take(max_count)
+        .map(|m| {
+            let joke = if let Some(ref joke) = m.inside_joke {
+                format!(" (内部梗: {})", joke)
+            } else {
+                String::new()
+            };
+            format!(
+                "- {}{} [重要性:{:.1}]",
+                m.summary, joke, m.emotional_significance
+            )
+        })
+        .collect();
 
     format!("# 你和这个人的共同回忆\n{}", lines.join("\n"))
 }
@@ -533,7 +524,9 @@ pub fn get_shared_memories_context(user_id: u64, max_count: usize) -> String {
 /// 获取亲密度足够的共享记忆中的 inside jokes
 pub fn get_inside_jokes_context(user_id: u64) -> String {
     let rel = get_relationship(user_id);
-    let jokes: Vec<&str> = rel.shared_memories.iter()
+    let jokes: Vec<&str> = rel
+        .shared_memories
+        .iter()
         .filter_map(|m| m.inside_joke.as_deref())
         .collect();
 
@@ -541,8 +534,14 @@ pub fn get_inside_jokes_context(user_id: u64) -> String {
         return String::new();
     }
 
-    format!("# 你和这个人之间的内部梗\n{}",
-        jokes.iter().map(|j| format!("- {}", j)).collect::<Vec<_>>().join("\n"))
+    format!(
+        "# 你和这个人之间的内部梗\n{}",
+        jokes
+            .iter()
+            .map(|j| format!("- {}", j))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 /// 获取关系自然语言上下文（用于 prompt 注入）

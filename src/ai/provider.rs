@@ -1,29 +1,33 @@
-use tracing::debug;
-use crate::config;
-use super::types::{ChatMessage, ChatRequest, ChatResponse, Tool, MemoryCorrection, PostAnalysis};
 use super::tools::post_analyze_tool;
+use super::types::{ChatMessage, ChatRequest, ChatResponse, MemoryCorrection, PostAnalysis, Tool};
+use crate::config;
+use tracing::debug;
 
 /// 记录 token 用量
-fn track_usage(body: &ChatResponse, prompt_name: &str, model: &str) {
+pub(crate) fn track_usage(body: &ChatResponse, prompt_name: &str, model: &str) {
     if let Some(ref u) = body.usage {
         crate::tracking::UsageStore::record_call(
-            prompt_name, model,
-            u.prompt_tokens, u.completion_tokens, u.total_tokens,
-            u.prompt_cache_hit_tokens, u.prompt_cache_miss_tokens,
+            prompt_name,
+            model,
+            u.prompt_tokens,
+            u.completion_tokens,
+            u.total_tokens,
+            u.prompt_cache_hit_tokens,
+            u.prompt_cache_miss_tokens,
         );
     }
 }
 
 /// 创建不把 HTTP 错误状态码当作 ureq Error 的 Agent
 /// 这样 4xx/5xx 响应体可以被正常读取，用于排查 API 错误原因
-fn no_error_agent() -> ureq::Agent {
+pub(crate) fn no_error_agent() -> ureq::Agent {
     let config = ureq::config::Config::builder()
         .http_status_as_error(false)
         .build();
     ureq::Agent::new_with_config(config)
 }
 
-/// 创建带自定义超时的 Agent（用于 timing_gate 等快速决策场景）
+/// 创建带自定义超时的 Agent（用于语音循环等快速决策场景）
 fn agent_with_timeout(secs: u64) -> ureq::Agent {
     use std::time::Duration;
     let config = ureq::config::Config::builder()
@@ -43,9 +47,10 @@ pub fn extract_json(raw: &str) -> Option<String> {
 
     // 尝试直接提取 { ... }
     if let Some(start) = cleaned.find('{')
-        && let Some(end) = cleaned[start..].rfind('}') {
-            return Some(cleaned[start..start + end + 1].to_string());
-        }
+        && let Some(end) = cleaned[start..].rfind('}')
+    {
+        return Some(cleaned[start..start + end + 1].to_string());
+    }
 
     // 尝试从 markdown 代码块提取
     if let Some(start) = cleaned.find("```json") {
@@ -66,9 +71,10 @@ pub fn extract_json(raw: &str) -> Option<String> {
 
     // 尝试提取 [ ... ] 数组
     if let Some(start) = cleaned.find('[')
-        && let Some(end) = cleaned[start..].rfind(']') {
-            return Some(cleaned[start..start + end + 1].to_string());
-        }
+        && let Some(end) = cleaned[start..].rfind(']')
+    {
+        return Some(cleaned[start..start + end + 1].to_string());
+    }
 
     None
 }
@@ -251,7 +257,8 @@ pub fn chat(
     let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
     let agent = no_error_agent();
-    let mut resp = agent.post(&url)
+    let mut resp = agent
+        .post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
@@ -267,8 +274,8 @@ pub fn chat(
         return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
     }
 
-    let body: ChatResponse = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("API parse failed: {}", e))?;
+    let body: ChatResponse =
+        serde_json::from_str(&resp_str).map_err(|e| format!("API parse failed: {}", e))?;
     track_usage(&body, "chat", &cfg.model);
 
     let choice = body
@@ -326,7 +333,8 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
 
     // debug!(model = %cfg.model, "analyze: sending API request");
     let agent = no_error_agent();
-    let mut resp = agent.post(&url)
+    let mut resp = agent
+        .post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
@@ -342,8 +350,8 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
         return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
     }
 
-    let body: ChatResponse = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("API parse failed: {}", e))?;
+    let body: ChatResponse =
+        serde_json::from_str(&resp_str).map_err(|e| format!("API parse failed: {}", e))?;
     track_usage(&body, "analyze", &cfg.model);
 
     let choice = body
@@ -441,8 +449,8 @@ pub fn analyze_with_tools_cfg(
             thinking: Some(serde_json::json!({"type": "disabled"})),
         };
 
-        let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
-
+        let json_body =
+            serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
         // 打印tools 和 tool_choice 用于调试
         debug!(
@@ -462,7 +470,8 @@ pub fn analyze_with_tools_cfg(
             debug!(attempt, "analyze_with_tools: retrying (no tool_calls)");
         }
 
-        let mut resp = agent.post(&url)
+        let mut resp = agent
+            .post(&url)
             .header("Authorization", &format!("Bearer {}", cfg.api_key))
             .header("Content-Type", "application/json")
             .send(json_body.as_bytes())
@@ -480,8 +489,8 @@ pub fn analyze_with_tools_cfg(
 
         debug!("analyze_with_tools: raw response:\n{}", resp_str);
 
-        let body: ChatResponse = serde_json::from_str(&resp_str)
-            .map_err(|e| format!("API parse failed: {}", e))?;
+        let body: ChatResponse =
+            serde_json::from_str(&resp_str).map_err(|e| format!("API parse failed: {}", e))?;
         let prompt_name = tools_summary.first().copied().unwrap_or("analysis");
         track_usage(&body, prompt_name, &cfg.model);
 
@@ -492,33 +501,48 @@ pub fn analyze_with_tools_cfg(
             .ok_or("API returned empty choices")?;
 
         // 优先从 message.tool_calls 中提取结果
-        let has_tool_calls = choice.message.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
-        let has_content = choice.message.content.as_ref().is_some_and(|c| !c.is_empty());
-        debug!(has_tool_calls, has_content, "analyze_with_tools: response analysis");
+        let has_tool_calls = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tc| !tc.is_empty());
+        let has_content = choice
+            .message
+            .content
+            .as_ref()
+            .is_some_and(|c| !c.is_empty());
+        debug!(
+            has_tool_calls,
+            has_content, "analyze_with_tools: response analysis"
+        );
 
         if let Some(tool_calls) = &choice.message.tool_calls
-            && let Some(first_call) = tool_calls.first() {
-                debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
+            && let Some(first_call) = tool_calls.first()
+        {
+            debug!(name = %first_call.function.name, args_len = first_call.function.arguments.len(),
                     "analyze_with_tools: got tool call");
-                let args_str = &first_call.function.arguments;
-                // 先尝试正常解析
-                match serde_json::from_str::<serde_json::Value>(args_str) {
-                    Ok(args) => return Ok(args),
-                    Err(e) => {
-                        // 尝试修复被截断的 JSON（finish_reason="length" 时常见）
-                        debug!(error = %e, "analyze_with_tools: JSON parse failed, attempting repair");
-                        if let Some(repaired) = repair_truncated_json(args_str) {
-                            debug!("analyze_with_tools: JSON repaired successfully");
-                            return Ok(repaired);
-                        }
-                        return Err(format!("Tool call arguments parse failed: {}", e));
+            let args_str = &first_call.function.arguments;
+            // 先尝试正常解析
+            match serde_json::from_str::<serde_json::Value>(args_str) {
+                Ok(args) => return Ok(args),
+                Err(e) => {
+                    // 尝试修复被截断的 JSON（finish_reason="length" 时常见）
+                    debug!(error = %e, "analyze_with_tools: JSON parse failed, attempting repair");
+                    if let Some(repaired) = repair_truncated_json(args_str) {
+                        debug!("analyze_with_tools: JSON repaired successfully");
+                        return Ok(repaired);
                     }
+                    return Err(format!("Tool call arguments parse failed: {}", e));
                 }
             }
+        }
 
         // Fallback: 从文本内容中提取 JSON (兼容旧行为)
         let mut reply = choice.message.content.unwrap_or_default();
-        debug!(reply_len = reply.len(), "analyze_with_tools: falling back to text extraction");
+        debug!(
+            reply_len = reply.len(),
+            "analyze_with_tools: falling back to text extraction"
+        );
 
         if let Some(pos) = reply.find("</think>") {
             reply = reply[pos + 8..].trim().to_string();
@@ -537,10 +561,10 @@ pub fn analyze_with_tools_cfg(
         // 两次重试后仍无 tool_calls → 尝试按工具格式包裹纯文本
         if has_content {
             let reply_trimmed = reply.trim();
-            if !reply_trimmed.is_empty() {
-                if let Ok(wrapped) = try_wrap_text_for_tools(reply_trimmed, tools) {
-                    return Ok(wrapped);
-                }
+            if !reply_trimmed.is_empty()
+                && let Ok(wrapped) = try_wrap_text_for_tools(reply_trimmed, tools)
+            {
+                return Ok(wrapped);
             }
         }
 
@@ -566,13 +590,13 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
         // 情况 1: 只有一个 required 参数且为 string → { param_name: text }
         if required.len() == 1 {
             let key = required[0].as_str().unwrap_or("");
-            if let Some(schema) = props.get(key) {
-                if schema.get("type").and_then(|t| t.as_str()) == Some("string") {
-                    let mut map = serde_json::Map::new();
-                    map.insert(key.to_string(), serde_json::Value::String(text.to_string()));
-                    debug!(tool = %tool.function.name, key, "try_wrap_text_for_tools: wrapped as single param");
-                    return Ok(serde_json::Value::Object(map));
-                }
+            if let Some(schema) = props.get(key)
+                && schema.get("type").and_then(|t| t.as_str()) == Some("string")
+            {
+                let mut map = serde_json::Map::new();
+                map.insert(key.to_string(), serde_json::Value::String(text.to_string()));
+                debug!(tool = %tool.function.name, key, "try_wrap_text_for_tools: wrapped as single param");
+                return Ok(serde_json::Value::Object(map));
             }
         }
 
@@ -580,12 +604,34 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
         if tool.function.name == "mental_state_generate" {
             let trimmed = text.trim();
             // 过滤掉对话回复（短文本、口语化回应），这些不是内心想法
-            let conversational = ["嗯", "嗯嗯", "好的", "去吧", "好", "哦", "好吧", "知道了",
-                "嗯 去吧", "嗯 好", "好的呢", "行", "行吧", "可以", "没问题",
-                "嗯嗯 好的", "收到", "了解", "嗯呐", "对", "是的",
-                "你说是就是吧", "那真好", "下午好呀"];
-            let is_short_response = trimmed.chars().count() <= 15
-                && conversational.iter().any(|c| trimmed.contains(c));
+            let conversational = [
+                "嗯",
+                "嗯嗯",
+                "好的",
+                "去吧",
+                "好",
+                "哦",
+                "好吧",
+                "知道了",
+                "嗯 去吧",
+                "嗯 好",
+                "好的呢",
+                "行",
+                "行吧",
+                "可以",
+                "没问题",
+                "嗯嗯 好的",
+                "收到",
+                "了解",
+                "嗯呐",
+                "对",
+                "是的",
+                "你说是就是吧",
+                "那真好",
+                "下午好呀",
+            ];
+            let is_short_response =
+                trimmed.chars().count() <= 15 && conversational.iter().any(|c| trimmed.contains(c));
             // 过滤掉包含括号描述的内容（AI 格式违规，不是真正的内心想法）
             let has_parenthetical = trimmed.contains('（') || trimmed.contains('(');
             // 过滤掉看起来像对话回复的内容（包含换行+短句的模式）
@@ -594,13 +640,18 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
                 let l = line.trim();
                 l.chars().count() <= 10 && conversational.iter().any(|c| l.contains(c))
             });
-            if is_short_response || has_parenthetical || (has_conversational_line && trimmed.chars().count() < 60) {
+            if is_short_response
+                || has_parenthetical
+                || (has_conversational_line && trimmed.chars().count() < 60)
+            {
                 // 短对话回复或格式违规，跳过不记录为内心想法
                 let wrapped = serde_json::json!({
                     "concerns": [],
                     "deliberations": []
                 });
-                debug!("try_wrap_text_for_tools: wrapped as mental_state_generate (skip conversational)");
+                debug!(
+                    "try_wrap_text_for_tools: wrapped as mental_state_generate (skip conversational)"
+                );
                 return Ok(wrapped);
             }
             let wrapped = serde_json::json!({
@@ -645,7 +696,20 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
         if tool.function.name == "decide_reply" {
             let trimmed = text.trim();
             // 检测 AI 是否在表达"不想回复"的意图
-            let silent_keywords = ["不回复", "不想回", "不应该回", "不接了", "不参与", "没必要回", "不需要回", "就不回", "我就不回", "不插嘴", "不凑热闹", "不搭话"];
+            let silent_keywords = [
+                "不回复",
+                "不想回",
+                "不应该回",
+                "不接了",
+                "不参与",
+                "没必要回",
+                "不需要回",
+                "就不回",
+                "我就不回",
+                "不插嘴",
+                "不凑热闹",
+                "不搭话",
+            ];
             let should_not_reply = silent_keywords.iter().any(|k| trimmed.contains(k));
             if should_not_reply {
                 let wrapped = serde_json::json!({"reply": false, "reason": format!("fallback: AI表达不想回复 - {}", &trimmed[..trimmed.len().min(80)])});
@@ -661,7 +725,21 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
         // 情况 7: proactive_message
         if tool.function.name == "proactive_message" {
             let trimmed = text.trim();
-            let meaningless = ["没什么要说的", "没有想说的", "没什么想说的", "安静待着", "该安静", "没什么好说的", "不想说话", "先不说了", "先不说话", "下次再说", "不用说话", "不说了", "就不说了"];
+            let meaningless = [
+                "没什么要说的",
+                "没有想说的",
+                "没什么想说的",
+                "安静待着",
+                "该安静",
+                "没什么好说的",
+                "不想说话",
+                "先不说了",
+                "先不说话",
+                "下次再说",
+                "不用说话",
+                "不说了",
+                "就不说了",
+            ];
             if trimmed.is_empty() || meaningless.iter().any(|p| trimmed.contains(p)) {
                 let wrapped = serde_json::json!({"skip": true, "distinct_from_recent": "ai判断没什么好说的，选择沉默", "message": ""});
                 debug!("try_wrap_text_for_tools: wrapped as proactive_message (skip)");
@@ -717,9 +795,11 @@ pub fn analyze_with_tools_named(
             thinking: Some(serde_json::json!({"type": "disabled"})),
         };
 
-        let json_body = serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
+        let json_body =
+            serde_json::to_string(&req).map_err(|e| format!("Serialize failed: {}", e))?;
 
-        let mut resp = agent.post(&url)
+        let mut resp = agent
+            .post(&url)
             .header("Authorization", &format!("Bearer {}", cfg.api_key))
             .header("Content-Type", "application/json")
             .send(json_body.as_bytes())
@@ -735,9 +815,12 @@ pub fn analyze_with_tools_named(
             return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
         }
 
-        let body: ChatResponse = serde_json::from_str(&resp_str)
-            .map_err(|e| format!("API parse failed: {}", e))?;
-        let pn = tools.first().map(|t| t.function.name.as_str()).unwrap_or("named");
+        let body: ChatResponse =
+            serde_json::from_str(&resp_str).map_err(|e| format!("API parse failed: {}", e))?;
+        let pn = tools
+            .first()
+            .map(|t| t.function.name.as_str())
+            .unwrap_or("named");
         track_usage(&body, pn, &cfg.model);
 
         let choice = body
@@ -746,17 +829,26 @@ pub fn analyze_with_tools_named(
             .next()
             .ok_or("API returned empty choices")?;
 
-        let _has_tool_calls = choice.message.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
-        let has_content = choice.message.content.as_ref().is_some_and(|c| !c.is_empty());
+        let _has_tool_calls = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tc| !tc.is_empty());
+        let has_content = choice
+            .message
+            .content
+            .as_ref()
+            .is_some_and(|c| !c.is_empty());
 
         if let Some(tool_calls) = &choice.message.tool_calls
-            && let Some(first_call) = tool_calls.first() {
-                let name = first_call.function.name.clone();
-                let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
-                    .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
-                debug!(name = %name, "analyze_with_tools_named: got tool call");
-                return Ok((name, args));
-            }
+            && let Some(first_call) = tool_calls.first()
+        {
+            let name = first_call.function.name.clone();
+            let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
+                .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
+            debug!(name = %name, "analyze_with_tools_named: got tool call");
+            return Ok((name, args));
+        }
 
         // Fallback: 从文本中提取
         let mut reply = choice.message.content.unwrap_or_default();
@@ -789,7 +881,7 @@ pub fn analyze_with_tools_named(
     unreachable!()
 }
 
-/// 快速版 analyze_with_tools_named（用于 timing_gate 等需要快速响应的场景）
+/// 快速版 analyze_with_tools_named（用于需要快速响应的场景）
 ///
 /// 使用更短的超时（20秒），避免长时间阻塞
 pub fn analyze_with_tools_named_fast(
@@ -842,7 +934,8 @@ pub fn analyze_with_tools_named_fast(
         "analyze_with_tools_named_fast: request"
     );
 
-    let mut resp = agent.post(&url)
+    let mut resp = agent
+        .post(&url)
         .header("Authorization", &format!("Bearer {}", cfg.api_key))
         .header("Content-Type", "application/json")
         .send(json_body.as_bytes())
@@ -858,9 +951,12 @@ pub fn analyze_with_tools_named_fast(
         return Err(format!("API returned {}: {}", status.as_u16(), resp_str));
     }
 
-    let body: ChatResponse = serde_json::from_str(&resp_str)
-        .map_err(|e| format!("API parse failed: {}", e))?;
-    let pn = tools.first().map(|t| t.function.name.as_str()).unwrap_or("named");
+    let body: ChatResponse =
+        serde_json::from_str(&resp_str).map_err(|e| format!("API parse failed: {}", e))?;
+    let pn = tools
+        .first()
+        .map(|t| t.function.name.as_str())
+        .unwrap_or("named");
     track_usage(&body, pn, &cfg.model);
 
     let choice = body
@@ -870,13 +966,14 @@ pub fn analyze_with_tools_named_fast(
         .ok_or("API returned empty choices")?;
 
     if let Some(tool_calls) = &choice.message.tool_calls
-        && let Some(first_call) = tool_calls.first() {
-            let name = first_call.function.name.clone();
-            let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
-                .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
-            debug!(name = %name, "analyze_with_tools_named_fast: got tool call");
-            return Ok((name, args));
-        }
+        && let Some(first_call) = tool_calls.first()
+    {
+        let name = first_call.function.name.clone();
+        let args: serde_json::Value = serde_json::from_str(&first_call.function.arguments)
+            .map_err(|e| format!("Tool call arguments parse failed: {}", e))?;
+        debug!(name = %name, "analyze_with_tools_named_fast: got tool call");
+        return Ok((name, args));
+    }
 
     // Fallback: 从文本中提取
     let mut reply = choice.message.content.unwrap_or_default();
@@ -902,7 +999,12 @@ pub fn analyze_with_tools_named_fast(
 /// 合并的后处理分析 (记忆提取 + 情绪分析 + 记忆纠错，单次 API 调用)
 ///
 /// extra_context: 现有记忆和自我记忆的文本，供 AI 识别需要修正的内容
-pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, String)], extra_context: &str) -> PostAnalysis {
+pub fn post_analyze(
+    user_message: &str,
+    ai_reply: &str,
+    history: &[(String, String)],
+    extra_context: &str,
+) -> PostAnalysis {
     // 构建上下文
     let mut context_parts = Vec::new();
     if !extra_context.is_empty() {
@@ -943,18 +1045,23 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
             if let Some(memories) = parsed.get("memories").and_then(|v| v.as_array()) {
                 for item in memories {
                     let c = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let i = item.get("importance").and_then(|v| v.as_str()).unwrap_or("normal");
+                    let i = item
+                        .get("importance")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("normal");
                     if !c.is_empty() {
                         analysis.memories.push((c.to_string(), i.to_string()));
                     }
                 }
             }
             // 解析情绪
-            analysis.emotion = parsed.get("emotion")
+            analysis.emotion = parsed
+                .get("emotion")
                 .and_then(|v| v.as_str())
                 .unwrap_or("neutral")
                 .to_string();
-            analysis.intensity = parsed.get("intensity")
+            analysis.intensity = parsed
+                .get("intensity")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.3) as f32;
             // 解析纠错
@@ -962,7 +1069,10 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
                 for item in corrections {
                     let old = item.get("old").and_then(|v| v.as_str()).unwrap_or("");
                     let new = item.get("new").and_then(|v| v.as_str()).unwrap_or("");
-                    let target = item.get("target").and_then(|v| v.as_str()).unwrap_or("user");
+                    let target = item
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("user");
                     if !old.is_empty() {
                         analysis.corrections.push(MemoryCorrection {
                             old: old.to_string(),
@@ -976,7 +1086,10 @@ pub fn post_analyze(user_message: &str, ai_reply: &str, history: &[(String, Stri
             if let Some(concerns) = parsed.get("concerns").and_then(|v| v.as_array()) {
                 for item in concerns {
                     let c = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let cat = item.get("category").and_then(|v| v.as_str()).unwrap_or("social");
+                    let cat = item
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("social");
                     if !c.is_empty() {
                         analysis.concerns.push((c.to_string(), cat.to_string()));
                     }

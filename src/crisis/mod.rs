@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 /// 危机等级
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd, Default)]
 pub enum CrisisLevel {
     #[default]
     None,
@@ -41,9 +40,20 @@ const MILD_CLEAN_MSG: u32 = 3;
 /// 返回的等级表示"疑似"，`update_crisis` 中会结合 AI 评估做最终决定。
 pub fn detect_crisis(message: &str) -> CrisisLevel {
     let severe: &[&str] = &[
-        "自杀", "自残", "想死", "不想活", "活不下去",
-        "去死", "死掉算了", "跳楼", "割腕", "上吊", "遗书",
-        "结束自己", "一了百了", "死了算了",
+        "自杀",
+        "自残",
+        "想死",
+        "不想活",
+        "活不下去",
+        "去死",
+        "死掉算了",
+        "跳楼",
+        "割腕",
+        "上吊",
+        "遗书",
+        "结束自己",
+        "一了百了",
+        "死了算了",
     ];
 
     for kw in severe {
@@ -53,10 +63,20 @@ pub fn detect_crisis(message: &str) -> CrisisLevel {
     }
 
     let mild: &[&str] = &[
-        "活着好累", "活着好痛苦", "崩溃了", "撑不下去",
-        "没有人在乎", "没有人在意", "没有意义",
-        "我是多余的", "我很没用", "好绝望", "绝望了",
-        "看不到希望", "没有希望", "太痛苦了",
+        "活着好累",
+        "活着好痛苦",
+        "崩溃了",
+        "撑不下去",
+        "没有人在乎",
+        "没有人在意",
+        "没有意义",
+        "我是多余的",
+        "我很没用",
+        "好绝望",
+        "绝望了",
+        "看不到希望",
+        "没有希望",
+        "太痛苦了",
     ];
 
     for kw in mild {
@@ -82,10 +102,19 @@ pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
                 Ok(v) => v,
                 Err(_) => return None,
             };
-            let level_str = parsed.get("crisis").and_then(|v| v.as_str()).unwrap_or("none");
-            let confidence = parsed.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let level_str = parsed
+                .get("crisis")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let confidence = parsed
+                .get("confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
 
-            debug!("crisis AI result: level={}, confidence={}", level_str, confidence);
+            debug!(
+                "crisis AI result: level={}, confidence={}",
+                level_str, confidence
+            );
 
             // 置信度门槛：低于 0.6 不触发
             if confidence < 0.6 {
@@ -93,7 +122,7 @@ pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
             }
 
             match level_str {
-                "severe" if confidence >= 0.8 => Some(CrisisLevel::Severe),  // Severe 需要更高置信度
+                "severe" if confidence >= 0.8 => Some(CrisisLevel::Severe), // Severe 需要更高置信度
                 "mild" => Some(CrisisLevel::Mild),
                 _ => None,
             }
@@ -120,7 +149,10 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
 
     if level != CrisisLevel::None {
         // 关键词命中 → 调用 AI 二次判定
-        let ai_result = detect_crisis_ai(&format!("用户 {} 的消息触发了危机关键词，需要判断", user_id));
+        let ai_result = detect_crisis_ai(&format!(
+            "用户 {} 的消息触发了危机关键词，需要判断",
+            user_id
+        ));
 
         // 如果 AI 判定可用，使用 AI 结果
         let final_level = if let Some(ai_level) = ai_result {
@@ -142,7 +174,9 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
         };
 
         // ── 升级 ──
-        if final_level > state.crisis_level || (final_level == state.crisis_level && final_level != CrisisLevel::None) {
+        if final_level > state.crisis_level
+            || (final_level == state.crisis_level && final_level != CrisisLevel::None)
+        {
             state.crisis_level = final_level;
             state.last_crisis_detected = now;
             state.crisis_clean_count = 0;
@@ -154,7 +188,9 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
                     true
                 }
                 CrisisLevel::Mild => {
-                    if now.saturating_sub(state.last_crisis_intervention) >= MILD_INTERVENTION_COOLDOWN {
+                    if now.saturating_sub(state.last_crisis_intervention)
+                        >= MILD_INTERVENTION_COOLDOWN
+                    {
                         info!(user_id, "crisis: Mild 干预 (AI confirmed)");
                         state.last_crisis_intervention = now;
                         true
@@ -183,7 +219,9 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
 
     match state.crisis_level {
         CrisisLevel::Severe => {
-            if time_since_detected >= SEVERE_COOLDOWN && state.crisis_clean_count >= SEVERE_CLEAN_MSG {
+            if time_since_detected >= SEVERE_COOLDOWN
+                && state.crisis_clean_count >= SEVERE_CLEAN_MSG
+            {
                 info!(user_id, "crisis: Severe -> Mild");
                 state.crisis_level = CrisisLevel::Mild;
                 state.crisis_clean_count = 0;
@@ -209,7 +247,11 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
 pub fn get_crisis_context(crisis: CrisisLevel) -> String {
     match crisis {
         CrisisLevel::None => String::new(),
-        CrisisLevel::Mild => crate::prompt::PromptManager::get().raw("crisis_mild").to_string(),
-        CrisisLevel::Severe => crate::prompt::PromptManager::get().raw("crisis_severe").to_string(),
+        CrisisLevel::Mild => crate::prompt::PromptManager::get()
+            .raw("crisis_mild")
+            .to_string(),
+        CrisisLevel::Severe => crate::prompt::PromptManager::get()
+            .raw("crisis_severe")
+            .to_string(),
     }
 }

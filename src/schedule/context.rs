@@ -1,5 +1,5 @@
 use super::config::load_config;
-use super::plan::{load_today_plan, DailyPlan};
+use super::plan::{DailyPlan, load_today_plan};
 
 /// 获取当前时间段和状态描述
 pub fn get_current_context() -> String {
@@ -15,8 +15,7 @@ pub fn get_current_context() -> String {
     if hour >= daily.sleep || hour < daily.wake_up {
         return format!(
             "# 当前状态\n现在是{}点，你在休息。\n{}",
-            hour,
-            "深夜/凌晨时段，不应该主动发消息，除非有紧急事情"
+            hour, "深夜/凌晨时段，不应该主动发消息，除非有紧急事情"
         );
     }
 
@@ -50,7 +49,9 @@ pub fn get_current_context() -> String {
     let plan_str = if plan.goals.is_empty() {
         String::new()
     } else {
-        let goals_str = plan.goals.iter()
+        let goals_str = plan
+            .goals
+            .iter()
             .enumerate()
             .map(|(i, g)| {
                 if plan.completed.contains(g) {

@@ -1,7 +1,7 @@
-mod structs;
-mod init;
 mod access;
+mod init;
+mod structs;
 
-pub use structs::*;
-pub use init::init;
 pub use access::*;
+pub use init::init;
+pub use structs::*;

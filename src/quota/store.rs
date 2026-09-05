@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use tracing::debug;
 
 use crate::config;
-use crate::util::{now_secs, current_hour_cst};
+use crate::util::{current_hour_cst, now_secs};
 
 // ── 段日志 & 用户兴趣 ────────────────────────────────────────
 
@@ -86,7 +86,11 @@ pub fn init() {
         logs.retain(|e| e.segment_start >= cutoff);
     }
     let count: usize = store.counts.values().map(|v| v.len()).sum();
-    debug!(groups = store.counts.len(), segments = count, "quota: loaded");
+    debug!(
+        groups = store.counts.len(),
+        segments = count,
+        "quota: loaded"
+    );
     *STORE.lock().unwrap() = Some(store);
 }
 
@@ -121,7 +125,8 @@ pub(super) fn current_max_replies() -> u32 {
 }
 
 pub(super) fn get_segment_count(store: &QuotaStore, group_id: u64, seg_start: u64) -> u32 {
-    store.counts
+    store
+        .counts
         .get(&group_id)
         .and_then(|counts| counts.iter().find(|s| s.segment_start == seg_start))
         .map(|s| s.count)

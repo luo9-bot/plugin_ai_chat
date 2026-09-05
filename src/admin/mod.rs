@@ -1,6 +1,6 @@
-mod ui;
 mod backup;
 mod handlers;
+mod ui;
 
 use tiny_http::{Header, Method, Request, Response, Server};
 use tracing::{info, warn};
@@ -13,17 +13,21 @@ fn json_response(status: u16, body: serde_json::Value) -> Response<std::io::Curs
     let body_str = body.to_string();
     Response::from_string(body_str)
         .with_status_code(status)
-        .with_header(
-            Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
-        )
+        .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
         .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
         .with_header(
-            Header::from_bytes("Access-Control-Allow-Headers", "Authorization, Content-Type")
-                .unwrap(),
+            Header::from_bytes(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type",
+            )
+            .unwrap(),
         )
         .with_header(
-            Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-                .unwrap(),
+            Header::from_bytes(
+                "Access-Control-Allow-Methods",
+                "GET, POST, PUT, DELETE, OPTIONS",
+            )
+            .unwrap(),
         )
 }
 
@@ -168,29 +172,29 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handlers::handle_config(&method, &api_segs[1..], &body),
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
-        Some(&"sticker") => {
-            match api_segs.get(1).copied() {
-                Some(hash) if api_segs.get(2).copied() == Some("image") => {
-                    handlers::handle_sticker_image(hash)
-                }
-                Some("image") => {
-                    if let Some(hash) = api_segs.get(2).copied() {
-                        handlers::handle_sticker_image(hash)
-                    } else {
-                        err(400, "hash required")
-                    }
-                }
-                Some(hash) if api_segs.get(2).copied() == Some("tags") && method == Method::Put => {
-                    handlers::handle_sticker_tags(hash, &body)
-                }
-                Some(hash) if api_segs.get(2).copied() == Some("description") && method == Method::Put => {
-                    handlers::handle_sticker_description(hash, &body)
-                }
-                Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
-                Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
-                _ => handlers::handle_sticker(),
+        Some(&"sticker") => match api_segs.get(1).copied() {
+            Some(hash) if api_segs.get(2).copied() == Some("image") => {
+                handlers::handle_sticker_image(hash)
             }
-        }
+            Some("image") => {
+                if let Some(hash) = api_segs.get(2).copied() {
+                    handlers::handle_sticker_image(hash)
+                } else {
+                    err(400, "hash required")
+                }
+            }
+            Some(hash) if api_segs.get(2).copied() == Some("tags") && method == Method::Put => {
+                handlers::handle_sticker_tags(hash, &body)
+            }
+            Some(hash)
+                if api_segs.get(2).copied() == Some("description") && method == Method::Put =>
+            {
+                handlers::handle_sticker_description(hash, &body)
+            }
+            Some(hash) if method == Method::Post => handlers::handle_sticker_toggle(hash),
+            Some(hash) if method == Method::Delete => handlers::handle_sticker_delete(hash),
+            _ => handlers::handle_sticker(),
+        },
         Some(&"dashboard") => handlers::handle_dashboard(),
         Some(&"humanity") => handlers::handle_humanity(),
         Some(&"memory-ops-log") => handlers::handle_memory_ops_log(&method, &api_segs[1..]),

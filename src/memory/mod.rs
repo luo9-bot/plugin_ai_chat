@@ -1,23 +1,23 @@
-pub mod store;
-mod operations;
-mod extract;
-mod review;
-pub mod retrieval;
-pub mod graph;
-pub mod embedding;
-pub mod vector_store;
 pub mod cognitive_biases;
-pub mod unpredictability;
+pub mod embedding;
+mod extract;
+pub mod graph;
+mod operations;
 pub mod ops_log;
+pub mod retrieval;
+mod review;
+pub mod store;
+pub mod unpredictability;
+pub mod vector_store;
 
 use std::collections::HashMap;
 
 use crate::config;
 
-pub use store::*;
-pub use operations::*;
 pub use extract::*;
+pub use operations::*;
 pub use review::*;
+pub use store::*;
 
 /// 初始化记忆系统
 pub fn init() {
@@ -30,7 +30,12 @@ pub fn init() {
 /// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
 ///
 /// 同时检索全局记忆和群特定记忆
-pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: usize) -> Vec<retrieval::RetrievalResult> {
+pub fn search_memories(
+    user_id: u64,
+    current_group_id: u64,
+    query: &str,
+    top_k: usize,
+) -> Vec<retrieval::RetrievalResult> {
     let mut documents: Vec<(String, String)> = Vec::new();
 
     // 全局记忆
@@ -43,7 +48,10 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
     if current_group_id > 0 {
         let group_user = store::load_group_user_memory(current_group_id, user_id);
         for (i, entry) in group_user.entries.iter().enumerate() {
-            documents.push((format!("group_{}_{}_{}", current_group_id, user_id, i), entry.content.clone()));
+            documents.push((
+                format!("group_{}_{}_{}", current_group_id, user_id, i),
+                entry.content.clone(),
+            ));
         }
     }
 
@@ -65,7 +73,8 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
 
     // 缺失的文档 embedding 在后台补充，不阻塞当前检索
     if !missing_indices.is_empty() && crate::config::get().embedding.enabled() {
-        let missing_texts: Vec<String> = missing_indices.iter()
+        let missing_texts: Vec<String> = missing_indices
+            .iter()
             .map(|&i| documents[i].1.clone())
             .collect();
         std::thread::spawn(move || {
@@ -80,7 +89,8 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
 
     // 查询向量：如果缓存中没有，在后台生成（不阻塞当前检索）
     if retrieval::vector::get_cached_query_embedding(query).is_none()
-        && crate::config::get().embedding.enabled() {
+        && crate::config::get().embedding.enabled()
+    {
         let query_owned = query.to_string();
         std::thread::spawn(move || {
             retrieval::vector::generate_query_embedding(&query_owned);
@@ -115,28 +125,31 @@ pub fn search_memories(user_id: u64, current_group_id: u64, query: &str, top_k: 
     if config::get().humanity.cognitive_biases_enabled {
         let emotion = crate::emotion::get_state(user_id);
         let mut biases = cognitive_biases::load_biases();
-        results = cognitive_biases::apply_cognitive_biases(
-            results,
-            &emotion.current,
-            &mut biases,
-        );
+        results = cognitive_biases::apply_cognitive_biases(results, &emotion.current, &mut biases);
         cognitive_biases::save_biases(&biases);
     }
 
     results
 }
 
-fn dual_path_bm25_only(query: &str, documents: &[(String, String)], top_k: usize) -> Vec<retrieval::RetrievalResult> {
+fn dual_path_bm25_only(
+    query: &str,
+    documents: &[(String, String)],
+    top_k: usize,
+) -> Vec<retrieval::RetrievalResult> {
     let results = retrieval::bm25::search(query, documents, top_k * 2);
-    results.into_iter().take(top_k).map(|r| {
-        retrieval::RetrievalResult {
+    results
+        .into_iter()
+        .take(top_k)
+        .map(|r| retrieval::RetrievalResult {
             id: r.id.clone(),
-            content: documents.iter()
+            content: documents
+                .iter()
                 .find(|(id, _)| id == &r.id)
                 .map(|(_, c)| c.clone())
                 .unwrap_or_default(),
             score: r.score,
             source: "bm25",
-        }
-    }).collect()
+        })
+        .collect()
 }

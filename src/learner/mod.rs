@@ -1,10 +1,10 @@
 //! 表达学习系统
 
-mod store;
 mod extract;
+mod store;
 
-pub use store::*;
 pub use extract::*;
+pub use store::*;
 
 use tracing::debug;
 
@@ -17,7 +17,9 @@ const MIN_CANDIDATES_FOR_LLM: usize = 10;
 /// 否则直接取 top-N。
 pub fn get_expression_context(group_id: u64, max_count: usize, chat_context: &str) -> String {
     let s = load_store();
-    let candidates: Vec<&ExpressionHabit> = s.expressions.iter()
+    let candidates: Vec<&ExpressionHabit> = s
+        .expressions
+        .iter()
         .filter(|e| e.source_group == group_id || e.source_group == 0)
         .collect();
 
@@ -44,7 +46,8 @@ fn select_expressions_with_llm(
     max_count: usize,
 ) -> String {
     // 构建候选列表
-    let candidate_list: Vec<String> = candidates.iter()
+    let candidate_list: Vec<String> = candidates
+        .iter()
         .enumerate()
         .map(|(i, e)| format!("{}. 当{}时，可以{}", i + 1, e.situation, e.style))
         .collect();
