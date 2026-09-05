@@ -4,8 +4,35 @@ pub mod attention;
 pub mod batch;
 pub mod handler;
 
-use crate::{config, is_admin, read_shared_state, with_shared_state, with_state};
+use crate::{config, is_admin, mind, read_shared_state, with_shared_state, with_state};
 use tracing::{debug, info, warn};
+
+/// 零容忍（方案书 §7.3）：确认注入一次 = 永久拉黑 + 残留清洗。
+/// Block/Ban/SilentBan 均视为确认；Warn 灰区走"玻璃瓶"由她自己产生厌恶。
+fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, issues: &[String]) {
+    if !matches!(
+        action,
+        crate::anti_injection::Action::Block
+            | crate::anti_injection::Action::Ban
+            | crate::anti_injection::Action::SilentBan
+    ) {
+        return;
+    }
+    // 永久拉黑（运行时 + 持久）
+    with_state(|s| s.add_blacklist(user_id));
+    crate::anti_injection::ban_user(user_id);
+    // 残留清洗：他不能再留在她的世界里
+    mind::persons::purge_user_want_to_say(user_id);
+    mind::diary::purge_about(user_id);
+    mind::wake::purge_loops_about(user_id);
+    mind::security::log_event(
+        user_id,
+        "perception",
+        "zero_tolerance_blacklist",
+        &issues.join(";"),
+    );
+    warn!(user_id, "零容忍：确认注入，永久拉黑并清洗残留");
+}
 
 pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
@@ -43,6 +70,12 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     if !is_admin(user_id) {
         let check_result =
             crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
+        let issue_names: Vec<String> = check_result
+            .issues
+            .iter()
+            .map(|i| format!("{i:?}"))
+            .collect();
+        enforce_zero_tolerance(user_id, &check_result.action, &issue_names);
         match check_result.action {
             crate::anti_injection::Action::Block | crate::anti_injection::Action::Ban => {
                 warn!(
@@ -232,6 +265,12 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
     if !is_admin(user_id) {
         let check_result =
             crate::anti_injection::check_input(user_id, trimmed, &config::get().anti_injection);
+        let issue_names: Vec<String> = check_result
+            .issues
+            .iter()
+            .map(|i| format!("{i:?}"))
+            .collect();
+        enforce_zero_tolerance(user_id, &check_result.action, &issue_names);
         match check_result.action {
             crate::anti_injection::Action::Block | crate::anti_injection::Action::Ban => {
                 warn!(

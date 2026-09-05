@@ -146,6 +146,10 @@ conversation:
   # 她刚决定不说话后，在此时间内不再重新权衡（省 API，也更像"刚看过一眼群里"）
   silence_cooldown_secs: 90
 
+  # 滤壳分级（方案书 §7）
+  # off = 只保留既有防注入；standard = 记忆与内心入流前校验；strict = 同 standard 且更严
+  filter_shell_level: standard
+
   # 是否允许括号内的动作/表情描述
   # true = AI 可以用"（笑了笑）"、"（叹气）"等描述动作和表情
   # false = AI 只输出纯对话，不带括号描述

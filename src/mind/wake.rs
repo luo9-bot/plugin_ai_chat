@@ -170,6 +170,22 @@ pub fn pending_reasons_for(user_id: u64) -> Vec<String> {
         .collect()
 }
 
+/// 零容忍清洗：清除与该用户相关的一切心事与待办
+pub fn purge_loops_about(uid: u64) {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut plans = load_plans();
+    let before = plans.len();
+    plans.retain(|p| p.about_user != Some(uid) && p.target_user != Some(uid));
+    if plans.len() != before {
+        save_plans(&plans);
+        info!(
+            uid,
+            removed = before - plans.len(),
+            "wake: 零容忍清洗相关心事"
+        );
+    }
+}
+
 // ── 夜间门控：她真的睡了 ────────────────────────────────────────
 
 /// 免打扰时段 = 她的睡眠时间（沿用 proactive 配置的免打扰时段）

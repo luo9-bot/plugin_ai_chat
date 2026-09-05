@@ -12,6 +12,7 @@
 pub mod behavior;
 pub mod context;
 pub mod decision;
+pub mod memory_guard;
 pub mod normalize;
 pub mod patterns;
 pub mod sandbox;
@@ -31,6 +32,7 @@ pub use behavior::{
     record_ai_review_failure, reset_reputation, silent_ban_user, unban_user,
 };
 pub use decision::{Action, DetectionResult, SecurityIssue};
+pub use memory_guard::{check_inner_output, check_memory_entry};
 
 // ── Public API ──
 

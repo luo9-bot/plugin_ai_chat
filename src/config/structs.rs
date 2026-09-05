@@ -128,6 +128,10 @@ pub struct ConversationConfig {
     /// 群聊沉默冷却 (秒)：她刚决定不说话后的重新评估间隔，默认 90
     #[serde(default = "default_silence_cooldown_secs")]
     pub silence_cooldown_secs: u64,
+    /// 滤壳分级：off（仅保留既有防注入）/ standard（记忆与内心入流前校验）/
+    /// strict（同 standard，且任何命中一律拒收并隔离），默认 standard
+    #[serde(default = "default_filter_shell_level")]
+    pub filter_shell_level: String,
 }
 
 impl Default for ConversationConfig {
@@ -142,6 +146,7 @@ impl Default for ConversationConfig {
             reply_cooldown_secs: default_reply_cooldown_secs(),
             voice_max_rounds: default_voice_max_rounds(),
             silence_cooldown_secs: default_silence_cooldown_secs(),
+            filter_shell_level: default_filter_shell_level(),
         }
     }
 }
@@ -794,6 +799,9 @@ fn default_voice_max_rounds() -> u32 {
 }
 fn default_silence_cooldown_secs() -> u64 {
     90
+}
+fn default_filter_shell_level() -> String {
+    "standard".into()
 }
 fn default_segment_minutes() -> u32 {
     5

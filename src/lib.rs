@@ -430,8 +430,14 @@ fn check_periodic() {
         for (plan, product) in mind::wake_tick() {
             match product {
                 mind::wake::WakeProduct::Idle(turn) => {
+                    let cfg = config::get();
+                    let filter_on = cfg.conversation.filter_shell_level != "off";
                     for thought in &turn.inner {
-                        mind::push_inner(thought.clone());
+                        if !filter_on || anti_injection::check_inner_output(thought).passed {
+                            mind::push_inner(thought.clone());
+                        } else {
+                            mind::security::log_event(0, "inner_dialog", "rejected", thought);
+                        }
                     }
                     if let voice::WakeAction::Speak { text, reply_to } = &turn.action {
                         let payload = match reply_to {
@@ -459,15 +465,26 @@ fn check_periodic() {
                     }
                 }
                 mind::wake::WakeProduct::Digest(outcome) => {
-                    // 内心活动入流
+                    let cfg = config::get();
+                    let filter_on = cfg.conversation.filter_shell_level != "off";
+                    let shell_check = |content: &str, gate: &str| {
+                        !filter_on || anti_injection::check_memory_entry(content).passed || {
+                            mind::security::log_event(0, gate, "rejected", content);
+                            false
+                        }
+                    };
+                    // 内心活动入流（内对话滤壳）
                     for thought in &outcome.inner {
-                        mind::push_inner(thought.clone());
+                        if shell_check(thought, "inner_dialog") {
+                            mind::push_inner(thought.clone());
+                        }
                     }
-                    // 日记落库
+                    // 日记落库（沉淀滤壳）
                     let date = util::ts_to_date_str(util::now_secs());
                     let entries: Vec<mind::diary::DiaryEntry> = outcome
                         .diary
                         .iter()
+                        .filter(|d| shell_check(&d.content, "consolidation"))
                         .map(|d| mind::diary::DiaryEntry {
                             id: String::new(),
                             date: date.clone(),
@@ -477,29 +494,33 @@ fn check_periodic() {
                         })
                         .collect();
                     mind::diary::add(entries);
-                    // 档案修订（她亲笔，只带新内容）
+                    // 档案修订（她亲笔，只带新内容；逐字段过沉淀滤壳）
                     for upd in &outcome.persons {
                         let mut file = mind::persons::get(upd.user_id);
-                        if let Some(v) = &upd.impression {
-                            file.impression = v.clone();
-                        }
-                        if let Some(v) = &upd.my_feeling {
-                            file.my_feeling = v.clone();
-                        }
-                        if let Some(v) = &upd.mode {
-                            file.mode = v.clone();
-                        }
-                        if let Some(v) = &upd.address {
-                            file.address = v.clone();
-                        }
-                        if let Some(v) = &upd.want_to_say_add {
+                        let apply = |slot: &mut String, value: &Option<String>| {
+                            if let Some(v) = value
+                                && shell_check(v, "consolidation")
+                            {
+                                *slot = v.clone();
+                            }
+                        };
+                        apply(&mut file.impression, &upd.impression);
+                        apply(&mut file.my_feeling, &upd.my_feeling);
+                        apply(&mut file.mode, &upd.mode);
+                        apply(&mut file.address, &upd.address);
+                        if let Some(v) = &upd.want_to_say_add
+                            && shell_check(v, "consolidation")
+                        {
                             file.want_to_say.push(v.clone());
                         }
                         file.updated_at = util::now_secs();
                         mind::persons::save(upd.user_id, &file);
                     }
-                    // 心事 → 意图堆
+                    // 心事 → 意图堆（滤壳）
                     for loop_ in &outcome.loops {
+                        if !shell_check(&loop_.content, "consolidation") {
+                            continue;
+                        }
                         let due_at =
                             util::now_secs() + loop_.in_secs.unwrap_or(24 * 3600).max(3600);
                         let mut p =
@@ -509,8 +530,10 @@ fn check_periodic() {
                         }
                         mind::add_wake_plan(p);
                     }
-                    // 给明天的她的小结
-                    if let Some(summary) = &outcome.compress {
+                    // 给明天的她的小结（滤壳）
+                    if let Some(summary) = &outcome.compress
+                        && shell_check(summary, "consolidation")
+                    {
                         mind::push_digested(summary.clone());
                     }
                 }
