@@ -117,6 +117,12 @@ pub fn ts_to_date_str(secs: u64) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
+/// 时间戳 → "HH:MM"（东八区）
+pub fn hh_mm(secs: u64) -> String {
+    let rem = (secs + 8 * 3600) % 86400;
+    format!("{:02}:{:02}", rem / 3600, (rem % 3600) / 60)
+}
+
 /// 时间戳 → 月份字符串 "YYYY-MM"
 pub fn ts_to_month_str(secs: u64) -> String {
     let local_secs = secs as i64 + 8 * 3600;

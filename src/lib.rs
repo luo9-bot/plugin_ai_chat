@@ -17,6 +17,7 @@ pub mod emotion;
 pub mod learner;
 pub mod memory;
 pub mod mental_state;
+pub mod mind;
 pub mod narrative_self;
 pub mod person_info;
 pub mod personal_tasks;

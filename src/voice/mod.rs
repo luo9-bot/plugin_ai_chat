@@ -180,13 +180,6 @@ fn display_name(user_id: u64, group_id: u64) -> String {
     crate::person_info::get_display_name(user_id, group_id).unwrap_or_else(|| "群友".to_string())
 }
 
-/// 把 unix 时间戳转成 HH:MM（东八区）
-fn hh_mm(secs: u64) -> String {
-    let cst = secs + 8 * 3600;
-    let rem = cst % 86400;
-    format!("{:02}:{:02}", rem / 3600, (rem % 3600) / 60)
-}
-
 /// 群聊场景记录：最近的消息流（旧在上）+ 本轮新消息（明确标出）
 fn build_group_transcript(group_id: u64, utterances: &[GroupUtterance]) -> (String, Vec<String>) {
     let mut lines: Vec<String> = Vec::new();
@@ -197,7 +190,7 @@ fn build_group_transcript(group_id: u64, utterances: &[GroupUtterance]) -> (Stri
         lines.push(format!(
             "[{} {}] {}",
             name,
-            hh_mm(entry.timestamp),
+            crate::util::hh_mm(entry.timestamp),
             entry.content
         ));
     }
@@ -386,11 +379,5 @@ mod tests {
             clean_voice_reply("他说“好”就“好”吧", "洛玖"),
             "他说“好”就“好”吧"
         );
-    }
-
-    #[test]
-    fn hh_mm_formats_cst() {
-        // 2024-01-01 00:00:00 UTC -> 08:00 CST
-        assert_eq!(hh_mm(1704067200), "08:00");
     }
 }
