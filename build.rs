@@ -65,7 +65,10 @@ fn main() {
                 println!("cargo:warning=Frontend build succeeded");
             }
             Ok(s) => {
-                println!("cargo:warning=Frontend build failed (exit code: {:?}), using existing dist", s.code());
+                println!(
+                    "cargo:warning=Frontend build failed (exit code: {:?}), using existing dist",
+                    s.code()
+                );
             }
             Err(e) => {
                 println!("cargo:warning=Failed to run npm build: {e}, using existing dist");
@@ -91,7 +94,10 @@ fn main() {
         let rs = format!("pub const HTML: &str = r##\"{}\"##;\n", html);
         let size = rs.len();
         std::fs::write(out, &rs).expect("failed to write src/admin_ui.rs");
-        println!("cargo:warning=admin_ui.rs regenerated from dist ({:.1} KB)", size as f64 / 1024.0);
+        println!(
+            "cargo:warning=admin_ui.rs regenerated from dist ({:.1} KB)",
+            size as f64 / 1024.0
+        );
     }
 
     // 如果 admin/ui.rs 不存在且 dist 也不存在，创建占位

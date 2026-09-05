@@ -24,3 +24,7 @@ tests/
 test_*.rs
 *_test.rs
 
+.mimocode/
+
+luo9*.txt
+*.md
