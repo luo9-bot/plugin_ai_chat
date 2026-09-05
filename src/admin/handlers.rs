@@ -1435,6 +1435,20 @@ pub fn handle_mind(
         (Method::Get, "security") => {
             ok(serde_json::json!({"events": crate::mind::security::tail(300)}))
         }
+        (Method::Get, "kernel") => match crate::mind::self_model::kernel() {
+            Some(k) => ok(serde_json::json!({"kernel": k})),
+            None => err(404, "kernel.json 不存在——先在 data/self/kernel.json 创建"),
+        },
+        (Method::Put, "kernel") => {
+            let parsed: Result<crate::mind::self_model::Kernel, _> = serde_json::from_slice(body);
+            match parsed {
+                Ok(kernel) => match crate::mind::self_model::save_kernel(&kernel) {
+                    Ok(()) => ok(serde_json::json!({"saved": true})),
+                    Err(e) => err(500, &e),
+                },
+                Err(e) => err(400, &format!("bad kernel: {e}")),
+            }
+        }
         _ => err(404, "not found"),
     }
 }

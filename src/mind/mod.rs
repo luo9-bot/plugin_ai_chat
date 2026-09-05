@@ -11,6 +11,7 @@ pub mod diary;
 pub mod persons;
 pub mod recall;
 pub mod security;
+pub mod self_model;
 pub mod sensation;
 pub mod stream;
 pub mod wake;

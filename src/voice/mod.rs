@@ -263,6 +263,18 @@ fn build_system(scene_line: &str, identity: &str) -> String {
     if !rules.is_empty() {
         parts.push(rules);
     }
+    // 她最近的自我认识（L2 信念：她自己写的，带日记证据）
+    let beliefs = crate::mind::self_model::recent_beliefs_for_prompt();
+    if !beliefs.is_empty() {
+        parts.push(format!(
+            "# 最近你对自己的认识\n{}",
+            beliefs
+                .iter()
+                .map(|b| format!("- {b}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
     if !scene_line.is_empty() {
         parts.push(scene_line.to_string());
     }
@@ -350,7 +362,7 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
         .collect();
 
     let cfg = config::get();
-    let identity = config::prompt();
+    let identity = crate::mind::self_model::identity_text();
     let system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
     let user_content = stream_user_content(&new_lines.join("\n"));
 
@@ -397,7 +409,7 @@ pub fn speak_private(
 ) -> VoiceAction {
     let cfg = config::get();
     let involved = [user_id];
-    let identity = config::prompt();
+    let identity = crate::mind::self_model::identity_text();
     let mut system = build_system(&scene_line(0, &involved, false), &identity);
     if let Some(extra) = extra_system {
         system.push_str("\n\n");
@@ -457,7 +469,7 @@ pub fn speak_private(
 ///
 /// `allow_speak` 为 false（睡前整理）时只写内心，不安排 say 工具。
 pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
-    let identity = config::prompt();
+    let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 
     // 阶段一：内心活动
@@ -596,6 +608,8 @@ pub struct DigestOutcome {
     pub diary: Vec<DiaryDraft>,
     pub persons: Vec<PersonUpdate>,
     pub loops: Vec<LoopDraft>,
+    /// 自我认识草稿（她亲笔，滤壳后落库）
+    pub beliefs: Vec<String>,
     /// 给明天的她的小结（入流 Digested）
     pub compress: Option<String>,
 }
@@ -668,6 +682,22 @@ fn digest_tools() -> Vec<Tool> {
         Tool {
             tool_type: "function".to_string(),
             function: crate::ai::FunctionDef {
+                name: "add_belief".to_string(),
+                description:
+                    "登记一条对自己的新认识（今天确实发生了让你这样想的事才写；没有就不写）。"
+                        .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "belief": {"type": "string", "description": "第一人称，比如「我发现自己在意一个人的事，比在意自己的事记得还牢」"}
+                    },
+                    "required": ["belief"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
                 name: "compress".to_string(),
                 description: "把今天压缩成一段给明天的你的小结（之前的我）。".to_string(),
                 parameters: serde_json::json!({
@@ -685,7 +715,7 @@ fn digest_tools() -> Vec<Tool> {
 
 /// 睡前整理：两阶段——先写内心，再用工具整理今天
 pub fn digest_think(input: &str) -> DigestOutcome {
-    let identity = config::prompt();
+    let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 
     // 阶段一：内心活动
@@ -809,6 +839,19 @@ pub fn digest_think(input: &str) -> DigestOutcome {
                     });
                     ToolOutcome::Continue("心事已记下。".into())
                 }
+                "add_belief" => {
+                    let belief = args
+                        .get("belief")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if belief.is_empty() {
+                        return ToolOutcome::Continue("add_belief 需要 belief。".into());
+                    }
+                    out.beliefs.push(belief);
+                    ToolOutcome::Continue("这个认识已经记下了。".into())
+                }
                 "compress" => {
                     let summary = args
                         .get("summary")
@@ -823,7 +866,7 @@ pub fn digest_think(input: &str) -> DigestOutcome {
                 }
                 "finish" => ToolOutcome::Abort,
                 _ => ToolOutcome::Continue(
-                    "未知工具，可用：write_diary、update_person、add_loop、compress、finish。"
+                    "未知工具，可用：write_diary、update_person、add_loop、add_belief、compress、finish。"
                         .into(),
                 ),
             }

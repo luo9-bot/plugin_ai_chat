@@ -480,6 +480,16 @@ fn check_periodic() {
                         })
                         .collect();
                     mind::diary::add(entries);
+                    // 自我认识（她亲笔；沉淀滤壳 + 证据自动引用今日日记）
+                    for belief in &outcome.beliefs {
+                        if shell_check(belief, "persona") {
+                            mind::self_model::add_belief(mind::self_model::Belief {
+                                belief: belief.clone(),
+                                since: util::now_secs(),
+                                evidence: Some(format!("diary:{date}")),
+                            });
+                        }
+                    }
                     // 档案修订（她亲笔，只带新内容；逐字段过沉淀滤壳）
                     for upd in &outcome.persons {
                         let mut file = mind::persons::get(upd.user_id);
