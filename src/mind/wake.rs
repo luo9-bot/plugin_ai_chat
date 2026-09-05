@@ -226,11 +226,18 @@ pub fn ensure_daily_digest(now: u64) {
 
 static LAST_CLEANUP_DAY: AtomicU64 = AtomicU64::new(0);
 
+/// 一次回神的产物：走神（可发言）或睡前整理（日记/档案/心事/小结）
+#[derive(Debug)]
+pub enum WakeProduct {
+    Idle(WakeTurn),
+    Digest(crate::voice::DigestOutcome),
+}
+
 /// 心跳：兑现到期的想起。
 ///
-/// 返回 (原计划, 回神产物)。夜间返回空——她的想起会留到早上。
-/// 发言与登记由调用方执行（发送通道在插件层）。
-pub fn tick() -> Vec<(WakePlan, WakeTurn)> {
+/// 夜间（免打扰时段）Idle 想起静默留到早上；睡前整理（Digest）是就寝
+/// 动作，允许在夜间执行。发言与登记由调用方执行（发送通道在插件层）。
+pub fn tick() -> Vec<(WakePlan, WakeProduct)> {
     let now = util::now_secs();
 
     // 意识流过期清理：每天一次
@@ -240,25 +247,39 @@ pub fn tick() -> Vec<(WakePlan, WakeTurn)> {
         LAST_CLEANUP_DAY.store(today, Ordering::Relaxed);
     }
 
-    if is_night() {
-        return Vec::new();
-    }
     ensure_daily_digest(now);
 
-    let mut results: Vec<(WakePlan, WakeTurn)> = Vec::new();
+    let night = is_night();
+    let mut results: Vec<(WakePlan, WakeProduct)> = Vec::new();
     for plan in due(now) {
-        let allow_speak = plan.kind == WakeKind::Idle
-            && (plan.target_group.is_some() || plan.target_user.unwrap_or(0) > 0);
+        if night && plan.kind != WakeKind::Digest {
+            continue;
+        }
         let input = build_wake_input(&plan);
-        let turn = crate::voice::wake_think(&input, allow_speak);
-        info!(plan_id = plan.id, kind = ?plan.kind, action = ?turn.action, "wake: 回神完成");
+        let product = match plan.kind {
+            WakeKind::Digest => {
+                // 睡前整理：今天几乎没有经历就跳过（明天再整理）
+                let today_events = super::stream::recent(24 * 3600, 5).len();
+                if today_events < 3 {
+                    debug!("wake: 今天经历太少，跳过睡前整理");
+                    WakeProduct::Digest(crate::voice::DigestOutcome::default())
+                } else {
+                    WakeProduct::Digest(crate::voice::digest_think(&build_digest_input()))
+                }
+            }
+            WakeKind::Idle => {
+                let allow_speak = plan.target_group.is_some() || plan.target_user.unwrap_or(0) > 0;
+                WakeProduct::Idle(crate::voice::wake_think(&input, allow_speak))
+            }
+        };
+        info!(plan_id = plan.id, kind = ?plan.kind, "wake: 回神完成");
         {
             let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let mut plans = load_plans();
             remove_by_id(&mut plans, plan.id);
             save_plans(&plans);
         }
-        results.push((plan, turn));
+        results.push((plan, product));
     }
     results
 }
@@ -289,6 +310,54 @@ fn build_wake_input(plan: &WakePlan) -> String {
     }
 
     sections.push(format!("你留了话：{}", plan.reason));
+    sections.join("\n\n")
+}
+
+/// 睡前整理的输入：一整天的经历 + 互动过的人的现有档案
+fn build_digest_input() -> String {
+    let now = util::now_secs();
+    let mut sections: Vec<String> = Vec::new();
+
+    let today = super::stream::recent_text(24 * 3600, 300);
+    if !today.is_empty() {
+        sections.push(format!(
+            "# 你今天（{date}）的经历\n{today}",
+            date = util::ts_to_date_str(now)
+        ));
+    }
+
+    // 今天互动过的人 → 现有档案摘要
+    let mut involved: Vec<u64> = Vec::new();
+    for event in super::stream::recent(24 * 3600, 300) {
+        if let Some(uid) = event.about
+            && uid > 0
+            && !involved.contains(&uid)
+        {
+            involved.push(uid);
+        }
+    }
+    let person_lines: Vec<String> = involved
+        .iter()
+        .map(|&uid| super::persons::get(uid).summary_for_prompt())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !person_lines.is_empty() {
+        sections.push(format!(
+            "# 你对今天互动过的人的现有印象\n{}",
+            person_lines.join("\n\n")
+        ));
+    }
+
+    let signals = super::sensation::body_signals();
+    if !signals.is_empty() {
+        let rendered = signals
+            .iter()
+            .map(|s| format!("{} {:.1}", s.name, s.level))
+            .collect::<Vec<_>>()
+            .join("、");
+        sections.push(format!("身体：{rendered}"));
+    }
+
     sections.join("\n\n")
 }
 

@@ -425,40 +425,95 @@ fn check_periodic() {
     // 主动消息动机更新
     proactive::motivation::update_motivations();
 
-    // 回神：兑现她自己留下的想起（后台线程；夜间她睡着，tick 返回空）
+    // 回神：兑现她自己留下的想起 + 睡前整理（后台线程）
     std::thread::spawn(|| {
-        for (plan, turn) in mind::wake_tick() {
-            for thought in &turn.inner {
-                mind::push_inner(thought.clone());
-            }
-            if let voice::WakeAction::Speak { text, reply_to } = &turn.action {
-                let payload = match reply_to {
-                    Some(mid) => format!("[CQ:reply,id={mid}]{text}"),
-                    None => text.clone(),
-                };
-                let sent = match (plan.target_group, plan.target_user) {
-                    (Some(gid), _) => {
-                        sender::safe_send_quiet(gid, 0, &payload);
-                        mind::push_acted(text.clone());
-                        true
+        for (plan, product) in mind::wake_tick() {
+            match product {
+                mind::wake::WakeProduct::Idle(turn) => {
+                    for thought in &turn.inner {
+                        mind::push_inner(thought.clone());
                     }
-                    (_, Some(uid)) => {
-                        sender::safe_send_quiet(0, uid, &payload);
-                        mind::push_acted(text.clone());
-                        true
+                    if let voice::WakeAction::Speak { text, reply_to } = &turn.action {
+                        let payload = match reply_to {
+                            Some(mid) => format!("[CQ:reply,id={mid}]{text}"),
+                            None => text.clone(),
+                        };
+                        match (plan.target_group, plan.target_user) {
+                            (Some(gid), _) => {
+                                sender::safe_send_quiet(gid, 0, &payload);
+                                mind::push_acted(text.clone());
+                            }
+                            (_, Some(uid)) => {
+                                sender::safe_send_quiet(0, uid, &payload);
+                                mind::push_acted(text.clone());
+                            }
+                            _ => debug!("wake: 回神想说但无目标，只留在心里"),
+                        }
                     }
-                    _ => false,
-                };
-                if !sent {
-                    debug!("wake: 回神想说但无目标，只留在心里");
+                    if let Some((in_secs, reason)) = turn.wake {
+                        let due_at = util::now_secs() + in_secs.max(60);
+                        let mut follow = mind::WakePlan::new(plan.kind, due_at, reason);
+                        follow.target_group = plan.target_group;
+                        follow.target_user = plan.target_user;
+                        mind::add_wake_plan(follow);
+                    }
                 }
-            }
-            if let Some((in_secs, reason)) = turn.wake {
-                let due_at = util::now_secs() + in_secs.max(60);
-                let mut follow = mind::WakePlan::new(plan.kind, due_at, reason);
-                follow.target_group = plan.target_group;
-                follow.target_user = plan.target_user;
-                mind::add_wake_plan(follow);
+                mind::wake::WakeProduct::Digest(outcome) => {
+                    // 内心活动入流
+                    for thought in &outcome.inner {
+                        mind::push_inner(thought.clone());
+                    }
+                    // 日记落库
+                    let date = util::ts_to_date_str(util::now_secs());
+                    let entries: Vec<mind::diary::DiaryEntry> = outcome
+                        .diary
+                        .iter()
+                        .map(|d| mind::diary::DiaryEntry {
+                            id: String::new(),
+                            date: date.clone(),
+                            content: d.content.clone(),
+                            feeling: d.feeling.clone(),
+                            about: d.about,
+                        })
+                        .collect();
+                    mind::diary::add(entries);
+                    // 档案修订（她亲笔，只带新内容）
+                    for upd in &outcome.persons {
+                        let mut file = mind::persons::get(upd.user_id);
+                        if let Some(v) = &upd.impression {
+                            file.impression = v.clone();
+                        }
+                        if let Some(v) = &upd.my_feeling {
+                            file.my_feeling = v.clone();
+                        }
+                        if let Some(v) = &upd.mode {
+                            file.mode = v.clone();
+                        }
+                        if let Some(v) = &upd.address {
+                            file.address = v.clone();
+                        }
+                        if let Some(v) = &upd.want_to_say_add {
+                            file.want_to_say.push(v.clone());
+                        }
+                        file.updated_at = util::now_secs();
+                        mind::persons::save(upd.user_id, &file);
+                    }
+                    // 心事 → 意图堆
+                    for loop_ in &outcome.loops {
+                        let due_at =
+                            util::now_secs() + loop_.in_secs.unwrap_or(24 * 3600).max(3600);
+                        let mut p =
+                            mind::WakePlan::new(mind::WakeKind::Idle, due_at, &loop_.content);
+                        if let Some(uid) = loop_.about_user {
+                            p = p.with_about(uid);
+                        }
+                        mind::add_wake_plan(p);
+                    }
+                    // 给明天的她的小结
+                    if let Some(summary) = &outcome.compress {
+                        mind::push_digested(summary.clone());
+                    }
+                }
             }
         }
     });

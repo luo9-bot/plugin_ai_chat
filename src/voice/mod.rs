@@ -527,6 +527,279 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     }
 }
 
+// ── 睡前整理（digest）──────────────────────────────────────────
+
+/// 日记草稿（她亲笔）
+#[derive(Debug, Clone)]
+pub struct DiaryDraft {
+    pub content: String,
+    pub feeling: Option<String>,
+    pub about: Option<u64>,
+}
+
+/// 人物档案修订（她亲笔，只带新内容）
+#[derive(Debug, Clone)]
+pub struct PersonUpdate {
+    pub user_id: u64,
+    pub impression: Option<String>,
+    pub my_feeling: Option<String>,
+    pub mode: Option<String>,
+    pub address: Option<String>,
+    pub want_to_say_add: Option<String>,
+}
+
+/// 心事草稿（她亲笔）
+#[derive(Debug, Clone)]
+pub struct LoopDraft {
+    pub content: String,
+    pub about_user: Option<u64>,
+    pub in_secs: Option<u64>,
+}
+
+/// 睡前整理的完整产物
+#[derive(Debug, Default)]
+pub struct DigestOutcome {
+    pub inner: Vec<String>,
+    pub diary: Vec<DiaryDraft>,
+    pub persons: Vec<PersonUpdate>,
+    pub loops: Vec<LoopDraft>,
+    /// 给明天的她的小结（入流 Digested）
+    pub compress: Option<String>,
+}
+
+fn digest_tools() -> Vec<Tool> {
+    vec![
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "write_diary".to_string(),
+                description: "写日记（3~8 条，记给自己看的，不是汇报）。每条带情绪词和涉及的人。"
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "entries": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string", "description": "日记内容，第一人称"},
+                                    "feeling": {"type": "string", "description": "情绪词"},
+                                    "about": {"type": "integer", "description": "（可选）主要涉及的人的 QQ 号"}
+                                },
+                                "required": ["content"]
+                            }
+                        }
+                    },
+                    "required": ["entries"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "update_person".to_string(),
+                description: "修订对某个人的档案。只写今天有新内容的字段；没有新认识的人就不用调。"
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "integer"},
+                        "impression": {"type": "string", "description": "（可选）更新主观印象"},
+                        "my_feeling": {"type": "string", "description": "（可选）更新你的感觉"},
+                        "mode": {"type": "string", "description": "（可选）更新相处模式"},
+                        "address": {"type": "string", "description": "（可选）更新称呼"},
+                        "want_to_say_add": {"type": "string", "description": "（可选）新增一件想对他说的事"}
+                    },
+                    "required": ["user_id"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "add_loop".to_string(),
+                description: "登记心事：没说完的话、答应的事、好奇的问题、放不下的情绪。"
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "用你自己的话说惦记什么"},
+                        "about_user": {"type": "integer", "description": "（可选）关于谁"},
+                        "in_secs": {"type": "integer", "description": "（可选）多久后提醒自己，默认一天"}
+                    },
+                    "required": ["content"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "compress".to_string(),
+                description: "把今天压缩成一段给明天的你的小结（之前的我）。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string"}
+                    },
+                    "required": ["summary"]
+                }),
+            },
+        },
+        finish_tool(),
+    ]
+}
+
+/// 睡前整理：两阶段——先写内心，再用工具整理今天
+pub fn digest_think(input: &str) -> DigestOutcome {
+    let identity = config::prompt();
+    let system = build_system("", &identity);
+
+    // 阶段一：内心活动
+    let phase1 = format!("{input}\n\n先把此刻心里真实的活动写下来（1~3 条，每行一条，第一人称）。");
+    let inner_text = match crate::ai::chat(&system, "", &[], &phase1) {
+        Ok((text, _)) => text,
+        Err(e) => {
+            info!(error = %e, "voice: digest phase1 failed");
+            return DigestOutcome::default();
+        }
+    };
+    let inner: Vec<String> = inner_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(3)
+        .map(str::to_string)
+        .collect();
+
+    // 阶段二：整理工具循环
+    let outcome: RefCell<DigestOutcome> = RefCell::new(DigestOutcome {
+        inner: inner.clone(),
+        ..Default::default()
+    });
+
+    let decision_content = format!(
+        "{input}\n\n（刚才你心里想的是：{}）\n\n现在睡前整理：写日记、修订今天互动过的人的档案、登记心事、给明天的自己留一段小结。都做完后 finish。",
+        if inner.is_empty() {
+            "没什么特别的".to_string()
+        } else {
+            inner.join(" / ")
+        }
+    );
+    let history = vec![("user".to_string(), input.to_string())];
+
+    let _ = run_tool_loop(
+        &system,
+        &history,
+        &decision_content,
+        &digest_tools(),
+        6,
+        |name, args| {
+            let mut out = outcome.borrow_mut();
+            match name {
+                "write_diary" => {
+                    if let Some(entries) = args.get("entries").and_then(|v| v.as_array()) {
+                        for entry in entries {
+                            let content = entry
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
+                            if content.is_empty() {
+                                continue;
+                            }
+                            out.diary.push(DiaryDraft {
+                                content,
+                                feeling: entry
+                                    .get("feeling")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string),
+                                about: entry.get("about").and_then(|v| v.as_u64()),
+                            });
+                        }
+                    }
+                    ToolOutcome::Continue("日记已收下。".into())
+                }
+                "update_person" => {
+                    let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if uid == 0 {
+                        return ToolOutcome::Continue("update_person 需要 user_id。".into());
+                    }
+                    let has_any = [
+                        "impression",
+                        "my_feeling",
+                        "mode",
+                        "address",
+                        "want_to_say_add",
+                    ]
+                    .iter()
+                    .any(|k| {
+                        args.get(k)
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| !s.trim().is_empty())
+                    });
+                    if !has_any {
+                        return ToolOutcome::Continue("没有要更新的内容。".into());
+                    }
+                    let get = |k: &str| {
+                        args.get(k)
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    };
+                    out.persons.push(PersonUpdate {
+                        user_id: uid,
+                        impression: get("impression"),
+                        my_feeling: get("my_feeling"),
+                        mode: get("mode"),
+                        address: get("address"),
+                        want_to_say_add: get("want_to_say_add"),
+                    });
+                    ToolOutcome::Continue("档案修订已收下。".into())
+                }
+                "add_loop" => {
+                    let content = args
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if content.is_empty() {
+                        return ToolOutcome::Continue("add_loop 需要 content。".into());
+                    }
+                    out.loops.push(LoopDraft {
+                        content,
+                        about_user: args.get("about_user").and_then(|v| v.as_u64()),
+                        in_secs: args.get("in_secs").and_then(|v| v.as_u64()),
+                    });
+                    ToolOutcome::Continue("心事已记下。".into())
+                }
+                "compress" => {
+                    let summary = args
+                        .get("summary")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if !summary.is_empty() {
+                        out.compress = Some(summary);
+                    }
+                    ToolOutcome::Abort
+                }
+                "finish" => ToolOutcome::Abort,
+                _ => ToolOutcome::Continue(
+                    "未知工具，可用：write_diary、update_person、add_loop、compress、finish。"
+                        .into(),
+                ),
+            }
+        },
+    );
+
+    outcome.into_inner()
+}
+
 // ── 回复清理 ────────────────────────────────────────────────────
 
 /// 最小化清理：去掉包裹引号和"名字："前缀
