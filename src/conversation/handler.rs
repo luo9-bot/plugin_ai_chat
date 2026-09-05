@@ -159,6 +159,14 @@ pub fn process_message(user_id: u64, message: &str) {
         return;
     }
 
+    // 联想：她能想起什么（转述入流，成为她的经历）
+    for line in crate::mind::recall::recall_for(&ai_message, user_id, 0) {
+        crate::mind::stream::push(
+            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
+                .with_about(user_id),
+        );
+    }
+
     // 注意力模型
     if cfg.humanity.attention_enabled {
         let mut attn = crate::conversation::attention::load_attention();
@@ -193,6 +201,7 @@ pub fn process_message(user_id: u64, message: &str) {
                 crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
                     .with_about(user_id),
             );
+            capture_last_plan(0, user_id, user_id);
             finish_private_reply(user_id, &ai_message, &reply);
         }
         VoiceAction::Silent => {
@@ -416,8 +425,21 @@ fn speak_and_deliver_group(
         });
     }
 
-    // 注意力模型（以主要发言人计）
+    // 联想：她能想起什么（以在场话题为线索，转述入流）
     let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
+    let joined_text: String = utterances
+        .iter()
+        .map(|u| u.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for line in crate::mind::recall::recall_for(&joined_text, primary, group_id) {
+        crate::mind::stream::push(
+            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
+                .with_about(primary),
+        );
+    }
+
+    // 注意力模型（以主要发言人计）
     if primary > 0 && cfg.humanity.attention_enabled {
         let joined: String = utterances
             .iter()
@@ -441,6 +463,7 @@ fn speak_and_deliver_group(
                 crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
                     .with_about(primary),
             );
+            capture_last_plan(group_id, primary, primary);
             if consume_quota_on_reply {
                 crate::quota::check_and_consume(group_id);
             }
@@ -540,4 +563,20 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
 /// 记录群活跃时间
 fn record_group_activity(group_id: u64) {
     with_shared_state(|s| s.record_conversation(group_id, crate::util::now_secs()));
+}
+
+/// 把她在表达里留下的"想起"（plan_next）写进意图堆
+fn capture_last_plan(group_id: u64, target_user: u64, about_user: u64) {
+    let Some((in_secs, reason)) = voice::take_last_plan() else {
+        return;
+    };
+    let due_at = crate::util::now_secs() + in_secs.max(60);
+    let mut plan = crate::mind::WakePlan::new(crate::mind::WakeKind::Idle, due_at, reason)
+        .with_about(about_user);
+    if group_id > 0 {
+        plan.target_group = Some(group_id);
+    } else {
+        plan.target_user = Some(target_user);
+    }
+    crate::mind::add_wake_plan(plan);
 }

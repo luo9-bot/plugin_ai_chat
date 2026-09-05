@@ -105,7 +105,22 @@ fn finish_tool() -> Tool {
 }
 
 fn voice_tools() -> Vec<Tool> {
-    vec![query_memory_tool(), send_sticker_tool(), finish_tool()]
+    vec![
+        query_memory_tool(),
+        send_sticker_tool(),
+        finish_tool(),
+        plan_next_tool(),
+    ]
+}
+
+thread_local! {
+    /// 她在本轮表达中留下的"想起"（plan_next），由调用方取走写入意图堆
+    static LAST_PLAN: RefCell<Option<(u64, String)>> = const { RefCell::new(None) };
+}
+
+/// 取走她在本轮表达里留下的想起（若有）
+pub fn take_last_plan() -> Option<(u64, String)> {
+    LAST_PLAN.with(|cell| cell.borrow_mut().take())
 }
 
 fn say_tool(allow_reply: bool) -> Tool {
@@ -210,9 +225,27 @@ fn execute_tool(
             );
             ToolOutcome::Abort
         }
-        _ => {
-            ToolOutcome::Continue("未知工具，可用工具：query_memory、send_sticker、finish。".into())
+        "plan_next" => {
+            let secs = args
+                .get("in_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60)
+                .clamp(60, 48 * 3600);
+            let reason = args
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if reason.is_empty() {
+                return ToolOutcome::Continue("plan_next 需要 reason。".into());
+            }
+            LAST_PLAN.with(|cell| *cell.borrow_mut() = Some((secs, reason)));
+            ToolOutcome::Continue("已记下这个安排。你可以继续说话，或调用 finish。".into())
         }
+        _ => ToolOutcome::Continue(
+            "未知工具，可用工具：query_memory、send_sticker、finish、plan_next。".into(),
+        ),
     }
 }
 

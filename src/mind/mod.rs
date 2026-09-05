@@ -9,6 +9,7 @@
 
 pub mod diary;
 pub mod persons;
+pub mod recall;
 pub mod sensation;
 pub mod stream;
 pub mod wake;

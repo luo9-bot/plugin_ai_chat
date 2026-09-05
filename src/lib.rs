@@ -521,57 +521,27 @@ fn check_periodic() {
     // 推进到期事项：等待超时不会被虚构为完成，只转为需要决定下一步。
     personal_tasks::review_due_tasks();
 
-    // 情绪衰减 + 主动消息检查 (分步获取锁，释放后再调用 proactive/emotion)
-    let mut all_users: Vec<(u64, u64)> = Vec::new();
-
-    // 私聊活跃用户 (thread_local State)
+    // 情绪衰减（轻量，主循环执行）。
+    // 主动消息不再由规则触发器驱动：她主动不主动，由她自己的想起（意图堆）决定。
+    let mut known_users: Vec<u64> = Vec::new();
     with_state(|s| {
         for &uid in &s.active {
-            all_users.push((uid, 0u64));
+            known_users.push(uid);
         }
     });
-
-    // 群聊按群而不是按成员决策。把每个成员都当成主动触发对象，会让同一群轮流
-    // 使用不同成员的冷却状态，表现成定时轮番喊话。
-    let active_groups: std::collections::HashSet<u64> = with_state(|s| s.active_groups.clone());
-    let mut proactive_groups: std::collections::HashSet<u64> = std::collections::HashSet::new();
     read_shared_state(|s| {
-        for (&(gid, _uid), ctx) in &s.contexts {
-            if gid > 0 && active_groups.contains(&gid) && !ctx.history.is_empty() {
-                proactive_groups.insert(gid);
+        for (&(gid, uid), ctx) in &s.contexts {
+            if gid > 0 && uid == config::get().self_qq {
+                continue;
+            }
+            if !ctx.history.is_empty() && !known_users.contains(&uid) {
+                known_users.push(uid);
             }
         }
     });
-
-    // 也包含当前有活跃批次的群。
-    with_state(|s| {
-        for &(gid, _uid) in s.batches.keys() {
-            if gid > 0 {
-                proactive_groups.insert(gid);
-            }
-        }
-    });
-
-    let self_qq = config::get().self_qq;
-    for group_id in proactive_groups {
-        all_users.push((self_qq, group_id));
+    for uid in &known_users {
+        emotion::decay(*uid);
     }
-
-    all_users.sort_unstable();
-    all_users.dedup();
-    debug!(count = all_users.len(), "proactive: checking users");
-
-    // 锁已释放，安全调用 proactive/emotion
-    // 情绪衰减是轻量操作，在主循环执行
-    for (user_id, _) in &all_users {
-        emotion::decay(*user_id);
-    }
-    // 主动消息检查移到后台线程，避免阻塞主循环
-    std::thread::spawn(move || {
-        for (user_id, group_id) in &all_users {
-            proactive::check_proactive_messages(*user_id, *group_id);
-        }
-    });
 
     // 定期记忆审查 (每小时一次，移到后台线程避免阻塞主循环)
     let last_review = LAST_MEMORY_REVIEW.load(Ordering::Relaxed);
