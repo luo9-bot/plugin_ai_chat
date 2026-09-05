@@ -338,9 +338,13 @@ pub extern "C" fn plugin_main() {
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
     let ver_sub = Bus::topic("luo9_version").subscribe().unwrap();
+    let sent_sub = Bus::topic(runtime::sent_registry::TOPIC_SENT)
+        .subscribe()
+        .ok();
     let msg_topic = Bus::topic("luo9_message");
     let task_topic = Bus::topic("luo9_task");
     let ver_topic = Bus::topic("luo9_version");
+    let sent_topic = Bus::topic(runtime::sent_registry::TOPIC_SENT);
 
     loop {
         if let Some(json) = msg_topic.pop(msg_sub)
@@ -385,6 +389,13 @@ pub extern "C" fn plugin_main() {
             && luo9_sdk::version::is_version_query(&json)
         {
             luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        }
+
+        // ── 发送回执：登记自己消息的 message_id（撤回/引用/表情回应的数据前提） ──
+        if let Some(sent_id) = sent_sub
+            && let Some(json) = sent_topic.pop(sent_id)
+        {
+            runtime::sent_registry::record_from_json(&json);
         }
 
         thread::sleep(Duration::from_millis(1));
