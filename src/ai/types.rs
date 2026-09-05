@@ -82,7 +82,7 @@ pub(crate) struct ChatChoice {
     pub message: ChatMessage,
 }
 
-/// 工具执行结果（语音管线的工具循环使用）
+/// 工具执行结果（表达管线的工具循环使用）
 pub enum ToolOutcome {
     /// 把执行结果回传给模型，继续本轮推理
     Continue(String),

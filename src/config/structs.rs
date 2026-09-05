@@ -122,7 +122,7 @@ pub struct ConversationConfig {
     /// 对同一用户的回复冷却时间 (秒)，防止连续回复刷屏，默认 15
     #[serde(default = "default_reply_cooldown_secs")]
     pub reply_cooldown_secs: u64,
-    /// 群聊语音循环的最大轮数（工具调用轮次），默认 3
+    /// 群聊表达循环的最大轮数（工具调用轮次），默认 3
     #[serde(default = "default_voice_max_rounds")]
     pub voice_max_rounds: u32,
     /// 群聊沉默冷却 (秒)：她刚决定不说话后的重新评估间隔，默认 90
@@ -669,7 +669,7 @@ pub struct HumanityConfig {
     pub association_jump_probability: f32,
 
     // 回复人性扰动（已移除：随机口头禅、感叹号手术、句子截断、错别字注入）
-    // 表达的自然感由语音管线本身负责
+    // 表达的自然感由表达管线本身负责
 
     // 内心独白
     #[serde(default = "default_true")]

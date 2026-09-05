@@ -1,6 +1,6 @@
-//! 消息处理：私聊语音路径 + 群聊语音调度
+//! 消息处理：私聊表达路径 + 群聊表达调度
 //!
-//! 群聊和私聊都走同一条语音管线（`voice`）：
+//! 群聊和私聊都走同一条表达管线（`voice`）：
 //! 同一个"她"读完场面后，在同一口气里决定说话、沉默或发表情包。
 //! 本模块负责感知准备（视觉、历史、注意力）、调度与回复落地簿记。
 
@@ -113,7 +113,7 @@ fn perceive_batch_message(
 
 // ── 私聊 ────────────────────────────────────────────────────────
 
-/// 私聊消息处理：感知 → 语音 → 落地
+/// 私聊消息处理：感知 → 表达 → 落地
 pub fn process_message(user_id: u64, message: &str) {
     // 标记用户为处理中，防止并发处理同一用户的消息
     {
@@ -251,7 +251,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
 
 // ── 群聊 ────────────────────────────────────────────────────────
 
-/// 群聊批次处理：危机筛选 → 配额 → 语音 → 落地
+/// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
 pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
     let cfg = config::get();
     let self_qq = cfg.self_qq;
@@ -367,7 +367,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
     }
 }
 
-/// 语音调用 + 回复落地/沉默簿记
+/// 表达调用 + 回复落地/沉默簿记
 ///
 /// `crisis` 为 true 时绕过夜间门控（真正的危机不会被"她睡着了"挡住）。
 fn speak_and_deliver_group(

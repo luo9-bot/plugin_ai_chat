@@ -27,7 +27,7 @@ pub(crate) fn no_error_agent() -> ureq::Agent {
     ureq::Agent::new_with_config(config)
 }
 
-/// 创建带自定义超时的 Agent（用于语音循环等快速决策场景）
+/// 创建带自定义超时的 Agent（用于表达循环等快速决策场景）
 fn agent_with_timeout(secs: u64) -> ureq::Agent {
     use std::time::Duration;
     let config = ureq::config::Config::builder()

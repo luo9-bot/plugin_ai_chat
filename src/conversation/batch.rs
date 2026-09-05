@@ -58,7 +58,7 @@ pub fn process_expired_batches() {
         merged.push((group_id, user_id, final_msgs, timestamps));
     }
 
-    // 按群组聚合: 同一群的所有消息一起进入语音决策
+    // 按群组聚合: 同一群的所有消息一起进入表达决策
     let mut group_msgs: HashMap<u64, Vec<(u64, String, Vec<u64>)>> = HashMap::new();
     let mut private_batches: Vec<(u64, String)> = Vec::new();
 

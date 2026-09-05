@@ -1,4 +1,4 @@
-//! 语音管线的多轮工具调用循环
+//! 表达管线的多轮工具调用循环
 //!
 //! 与 `analyze_with_tools_named` 的本质区别：
 //! - 纯文本响应直接作为输出返回（"文本即发言"），不强制包装成工具调用
@@ -14,7 +14,7 @@ use super::provider::{no_error_agent, track_usage};
 use super::types::{ChatMessage, ChatRequest, ChatResponse, Tool, ToolOutcome};
 use crate::config;
 
-/// 运行语音工具循环
+/// 运行表达工具循环
 ///
 /// - `history`: 已有的对话轮次 (role, content)，role 为 "user"/"assistant"
 /// - `user_content`: 本轮用户内容（当前消息或群聊场景记录）

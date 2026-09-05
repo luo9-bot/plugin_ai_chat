@@ -1,10 +1,13 @@
-//! 语音合一：感知、决策、表达由同一次调用完成
+//! 表达合一（voice）：感知、决策、表达由同一次调用完成
 //!
 //! v2 架构下她的输入不再是被拼装的上下文，而是：
-//! - system：语音框架 + 身份 + 精简边界 + 一句场景 + 时间
+//! - system：表达框架 + 身份 + 精简边界 + 一句场景 + 时间
 //! - user：她最近的意识流（经历）+ 此刻的身体信号 + 刚刚发生的事
 //!
 //! 回神（wake）走两阶段：先写下此刻心里的活动，再决定行动（say/finish/plan_next）。
+//!
+//! 命名说明：voice 指"她开口说话"这件事，不是音频语音；
+//! 语音消息（TTS）属于未来的独立扩展，与本模块无关。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,7 +18,7 @@ use crate::ai::{Tool, ToolOutcome, run_tool_loop};
 use crate::config;
 use crate::mind::{self, SensoryPacket};
 
-/// 语音调用的最终决策（对话路径）
+/// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
 pub enum VoiceAction {
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
@@ -298,7 +301,7 @@ fn stream_user_content(new_perceptions: &str) -> String {
 
 // ── 群聊 ────────────────────────────────────────────────────────
 
-/// 群聊语音：她读完整个群的场面，决定说什么、对谁说，或者不说
+/// 群聊开口：她读完整个群的场面，决定说什么、对谁说，或者不说
 pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bool) -> VoiceAction {
     let mut involved: Vec<u64> = Vec::new();
     for u in utterances {
@@ -349,7 +352,7 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
 
 // ── 私聊 ────────────────────────────────────────────────────────
 
-/// 私聊语音：一对一，她全神贯注
+/// 私聊开口：一对一，她全神贯注
 ///
 /// `message` 是刚刚发生的感知内容（含图片描述）；`extra_system` 允许
 /// 调用方追加特殊场景指令（如对话结束检测提示）。
