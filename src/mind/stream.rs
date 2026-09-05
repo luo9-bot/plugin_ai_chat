@@ -135,7 +135,12 @@ pub fn push(event: StreamEvent) {
 
 /// 读取某个日期的全部事件（文件缺失返回空）
 fn read_day(secs: u64) -> Vec<StreamEvent> {
-    let path = day_file(secs);
+    events_on_date(&util::ts_to_date_str(secs))
+}
+
+/// 读取指定日期（"YYYY-MM-DD"）的全部事件（admin API 用）
+pub fn events_on_date(date: &str) -> Vec<StreamEvent> {
+    let path = stream_dir().join(format!("{date}.jsonl"));
     let Ok(content) = fs::read_to_string(&path) else {
         return Vec::new();
     };
@@ -150,6 +155,23 @@ fn read_day(secs: u64) -> Vec<StreamEvent> {
             }
         })
         .collect()
+}
+
+/// 列出意识流目录下已有的日期（旧在前，admin API 用）
+pub fn known_dates() -> Vec<String> {
+    let Ok(entries) = fs::read_dir(stream_dir()) else {
+        return Vec::new();
+    };
+    let mut dates: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            name.strip_suffix(".jsonl").map(str::to_string)
+        })
+        .collect();
+    dates.sort();
+    dates
 }
 
 /// 最近一段时间窗口内的事件（自动跨午夜读取昨天与今天，旧在上）

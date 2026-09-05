@@ -151,6 +151,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
 
     match api_segs.first() {
         Some(&"memory") => handlers::handle_memory(&method, &api_segs[1..], &body),
+        Some(&"mind") => handlers::handle_mind(&method, &api_segs[1..], &body),
         Some(&"working-memory") => handlers::handle_working_memory(&method, &api_segs[1..], &body),
         Some(&"backups") => handlers::handle_backups(&method, &api_segs[1..], &body),
         Some(&"emotion") => handlers::handle_emotion(&method, &api_segs[1..], &body),

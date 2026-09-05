@@ -1315,3 +1315,126 @@ fn deep_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
         _ => patch.clone(),
     }
 }
+
+// ── Handler: 心灵（意识流/日记/档案/心事/审计） ────────────────
+
+fn mind_now() -> serde_json::Value {
+    let signals: Vec<serde_json::Value> = crate::mind::body_signals()
+        .iter()
+        .map(|s| serde_json::json!({"name": s.name, "level": s.level}))
+        .collect();
+    let loops: Vec<serde_json::Value> = crate::mind::wake::all()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id, "kind": p.kind, "due_at": p.due_at,
+                "reason": p.reason, "about_user": p.about_user,
+                "target_group": p.target_group, "target_user": p.target_user,
+            })
+        })
+        .collect();
+    let recent_stream: Vec<serde_json::Value> = crate::mind::recent(2 * 3600, 20)
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "kind": e.kind, "content": e.content, "time": e.time, "about": e.about,
+            })
+        })
+        .collect();
+    let today = crate::util::ts_to_date_str(crate::util::now_secs());
+    let diary_today = crate::mind::diary::recent(100)
+        .iter()
+        .filter(|e| e.date == today)
+        .count();
+    serde_json::json!({
+        "night": crate::mind::is_night(),
+        "body": signals,
+        "loops": loops,
+        "recent_stream": recent_stream,
+        "diary_today": diary_today,
+        "time": crate::util::now_formatted_cst(),
+    })
+}
+
+pub fn handle_mind(
+    method: &Method,
+    segs: &[&str],
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let section = segs.first().copied().unwrap_or("");
+    let rest = &segs[1.min(segs.len())..];
+    match (method, section) {
+        (Method::Get, "now") => ok(mind_now()),
+        (Method::Get, "stream") => match rest.first() {
+            Some(date) => {
+                let events: Vec<serde_json::Value> = crate::mind::stream::events_on_date(date)
+                    .iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "kind": e.kind, "content": e.content,
+                            "time": e.time, "about": e.about,
+                        })
+                    })
+                    .collect();
+                ok(serde_json::json!({"date": date, "events": events}))
+            }
+            None => ok(serde_json::json!({"dates": crate::mind::stream::known_dates()})),
+        },
+        (Method::Get, "diary") => {
+            let entries: Vec<serde_json::Value> = crate::mind::diary::recent(200)
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "id": e.id, "date": e.date, "content": e.content,
+                        "feeling": e.feeling, "about": e.about,
+                    })
+                })
+                .collect();
+            ok(serde_json::json!({"entries": entries}))
+        }
+        (Method::Get, "persons") => {
+            let persons: Vec<serde_json::Value> = crate::mind::persons::all()
+                .into_iter()
+                .map(|(uid, file)| serde_json::json!({"user_id": uid, "file": file}))
+                .collect();
+            ok(serde_json::json!({"persons": persons}))
+        }
+        (Method::Put, "persons") => {
+            let Some(uid) = rest.first().and_then(|s| s.parse::<u64>().ok()) else {
+                return err(400, "invalid user_id");
+            };
+            let parsed: Result<crate::mind::PersonFile, _> = serde_json::from_slice(body);
+            match parsed {
+                Ok(mut file) => {
+                    file.updated_at = crate::util::now_secs();
+                    crate::mind::persons::save(uid, &file);
+                    ok(serde_json::json!({"saved": uid}))
+                }
+                Err(e) => err(400, &format!("bad person file: {e}")),
+            }
+        }
+        (Method::Get, "loops") => {
+            let loops: Vec<serde_json::Value> = crate::mind::wake::all()
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "id": p.id, "kind": p.kind, "due_at": p.due_at,
+                        "reason": p.reason, "about_user": p.about_user,
+                        "target_group": p.target_group, "target_user": p.target_user,
+                    })
+                })
+                .collect();
+            ok(serde_json::json!({"loops": loops}))
+        }
+        (Method::Delete, "loops") => {
+            let Some(id) = rest.first().and_then(|s| s.parse::<u64>().ok()) else {
+                return err(400, "invalid loop id");
+            };
+            ok(serde_json::json!({"closed": crate::mind::wake::close(id)}))
+        }
+        (Method::Get, "security") => {
+            ok(serde_json::json!({"events": crate::mind::security::tail(300)}))
+        }
+        _ => err(404, "not found"),
+    }
+}

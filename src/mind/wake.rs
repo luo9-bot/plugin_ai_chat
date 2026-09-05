@@ -155,6 +155,27 @@ pub fn due(now: u64) -> Vec<WakePlan> {
     plans
 }
 
+/// 全部想起（admin API 用，按到期时间排序）
+pub fn all() -> Vec<WakePlan> {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut plans = load_plans();
+    plans.sort_by_key(|p| p.due_at);
+    plans
+}
+
+/// 关闭（移除）一个想起（admin 手动操作）
+pub fn close(id: u64) -> bool {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut plans = load_plans();
+    let before = plans.len();
+    remove_by_id(&mut plans, id);
+    let removed = plans.len() != before;
+    if removed {
+        save_plans(&plans);
+    }
+    removed
+}
+
 /// 她目前惦记的、关于某人的心事（原话列表，供感官包"你惦记的"字段）
 pub fn pending_reasons_for(user_id: u64) -> Vec<String> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
