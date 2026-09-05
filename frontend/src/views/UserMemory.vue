@@ -13,7 +13,7 @@
           <span class="sep">~</span>
           <input type="date" v-model="dateTo" class="glass-input" style="width:130px" />
           <button class="btn btn-primary btn-sm" @click="showAdd = true">＋ 添加</button>
-          <a class="btn btn-ghost btn-sm" href="/api/memory/export" target="_blank">📥 导出</a>
+          <a class="btn btn-ghost btn-sm" href="/api/memory/export" target="_blank">导出</a>
         </div>
       </div>
       <div v-if="!filtered.length" class="empty">暂无记忆</div>
@@ -109,11 +109,9 @@ tr:hover td { background: var(--surface-hover); }
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .truncate { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
-.tag-permanent { background: #fef3c7; color: #92400e; }
-.tag-important { background: #dbeafe; color: #1e40af; }
+.tag-permanent { background: var(--warning-subtle); color: var(--warning); }
+.tag-important { background: var(--info-subtle); color: var(--info); }
 .tag-normal { background: var(--surface); color: var(--text-2); }
-[data-theme="dark"] .tag-permanent { background: rgba(251,191,36,0.2); color: #fbbf24; }
-[data-theme="dark"] .tag-important { background: rgba(96,165,250,0.2); color: #60a5fa; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; }
 .modal { width: 420px; padding: 24px; }
 .modal label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-2); }

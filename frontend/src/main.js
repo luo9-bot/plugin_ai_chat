@@ -6,64 +6,72 @@ app.mount('#app')
 
 const style = document.createElement('style')
 style.textContent = `
+  /* 灵魂架构 v2 · 暖陶土色系（§15 她的房间） */
   :root {
-    --bg: #f8fafc;
-    --bg-alt: #ffffff;
-    --surface: rgba(255, 255, 255, 0.85);
-    --surface-hover: rgba(255, 255, 255, 0.95);
-    --surface-solid: #ffffff;
-    --glass: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(0, 0, 0, 0.06);
-    --glass-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
-    --glass-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.08);
-    --text: #0f172a;
-    --text-2: #64748b;
-    --text-3: #94a3b8;
-    --primary: #10b981;
-    --primary-hover: #059669;
-    --primary-subtle: rgba(16, 185, 129, 0.08);
-    --primary-glow: rgba(16, 185, 129, 0.15);
-    --accent: #6366f1;
-    --accent-subtle: rgba(99, 102, 241, 0.08);
-    --success: #10b981;
-    --success-subtle: rgba(16, 185, 129, 0.08);
-    --warning: #f59e0b;
-    --warning-subtle: rgba(245, 158, 11, 0.08);
-    --danger: #ef4444;
-    --danger-subtle: rgba(239, 68, 68, 0.08);
-    --info: #3b82f6;
-    --info-subtle: rgba(59, 130, 246, 0.08);
-    --border: #e2e8f0;
-    --border-light: #f1f5f9;
-    --radius: 12px;
-    --radius-sm: 8px;
-    --radius-xs: 6px;
+    --bg: #F7F4EF;
+    --bg-alt: #FDFCF9;
+    --surface: rgba(253, 252, 249, 0.85);
+    --surface-hover: rgba(253, 252, 249, 0.98);
+    --surface-solid: #FDFCF9;
+    --glass: rgba(253, 252, 249, 0.7);
+    --glass-border: rgba(61, 57, 41, 0.08);
+    --glass-shadow: 0 1px 3px rgba(61, 57, 41, 0.05), 0 1px 2px rgba(61, 57, 41, 0.07);
+    --glass-shadow-lg: 0 4px 12px rgba(61, 57, 41, 0.08), 0 1px 3px rgba(61, 57, 41, 0.10);
+    --text: #3D3929;
+    --text-2: #8A8375;
+    --text-3: #B0A99A;
+    --primary: #B4703F;
+    --primary-hover: #9E5E31;
+    --primary-subtle: rgba(180, 112, 63, 0.08);
+    --primary-glow: rgba(180, 112, 63, 0.18);
+    --accent: #C15F3C;
+    --accent-subtle: rgba(193, 95, 60, 0.08);
+    --success: #7D9455;
+    --success-subtle: rgba(125, 148, 85, 0.10);
+    --warning: #B8862B;
+    --warning-subtle: rgba(184, 134, 43, 0.10);
+    --danger: #A94438;
+    --danger-subtle: rgba(169, 68, 56, 0.10);
+    --info: #7189A0;
+    --info-subtle: rgba(113, 137, 160, 0.10);
+    --border: #E8E2D9;
+    --border-light: #F0EBE2;
+    --radius: 14px;
+    --radius-sm: 12px;
+    --radius-xs: 10px;
     --radius-full: 9999px;
     --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   }
   [data-theme="dark"] {
-    --bg: #0c1222;
-    --bg-alt: #111827;
-    --surface: rgba(30, 41, 59, 0.7);
-    --surface-hover: rgba(30, 41, 59, 0.9);
-    --surface-solid: #1e293b;
-    --glass: rgba(15, 23, 42, 0.6);
-    --glass-border: rgba(255, 255, 255, 0.06);
-    --glass-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3);
-    --glass-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
-    --text: #f1f5f9;
-    --text-2: #94a3b8;
-    --text-3: #64748b;
-    --primary-glow: rgba(16, 185, 129, 0.2);
-    --primary-subtle: rgba(16, 185, 129, 0.12);
-    --accent-subtle: rgba(99, 102, 241, 0.12);
-    --success-subtle: rgba(16, 185, 129, 0.12);
-    --warning-subtle: rgba(245, 158, 11, 0.12);
-    --danger-subtle: rgba(239, 68, 68, 0.12);
-    --info-subtle: rgba(59, 130, 246, 0.12);
-    --border: #1e293b;
-    --border-light: #1e293b;
+    --bg: #211C16;
+    --bg-alt: #292319;
+    --surface: rgba(41, 35, 25, 0.85);
+    --surface-hover: rgba(41, 35, 25, 0.98);
+    --surface-solid: #292319;
+    --glass: rgba(33, 28, 22, 0.7);
+    --glass-border: rgba(247, 244, 239, 0.06);
+    --glass-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.35);
+    --glass-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.45);
+    --text: #EFE9DD;
+    --text-2: #A69D8B;
+    --text-3: #7C7466;
+    --primary: #CE8A57;
+    --primary-hover: #DA9A6A;
+    --primary-subtle: rgba(206, 138, 87, 0.14);
+    --primary-glow: rgba(206, 138, 87, 0.24);
+    --accent: #D0714B;
+    --accent-subtle: rgba(208, 113, 75, 0.14);
+    --success: #97AE6E;
+    --success-subtle: rgba(151, 174, 110, 0.14);
+    --warning: #D2A754;
+    --warning-subtle: rgba(210, 167, 84, 0.14);
+    --danger: #D0684F;
+    --danger-subtle: rgba(208, 104, 79, 0.14);
+    --info: #93A6C0;
+    --info-subtle: rgba(147, 166, 192, 0.14);
+    --border: #3B342A;
+    --border-light: #332D24;
   }
   *, *::before, *::after { box-sizing: border-box; }
   body {
@@ -72,6 +80,7 @@ style.textContent = `
     color: var(--text);
     margin: 0;
     line-height: 1.5;
+    font-variant-numeric: tabular-nums;
   }
   input, select, textarea, button { font-family: inherit; }
   ::-webkit-scrollbar { width: 5px; height: 5px; }

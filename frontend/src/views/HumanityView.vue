@@ -83,9 +83,9 @@
           <div class="narrative-line"><span class="narrative-label">自我认知</span> {{ data.narrative_self.core_identity || '—' }}</div>
           <div class="narrative-line" v-if="data.narrative_self.current_narrative"><span class="narrative-label">当前叙事</span> {{ data.narrative_self.current_narrative }}</div>
           <div class="narrative-stats">
-            <span>💎 {{ data.narrative_self.stats?.values_count || 0 }} 价值观</span>
-            <span>👁️ {{ data.narrative_self.stats?.concerns_count || 0 }} 关注</span>
-            <span>📅 {{ data.narrative_self.stats?.timeline_count || 0 }} 时间线</span>
+            <span>{{ data.narrative_self.stats?.values_count || 0 }} 价值观</span>
+            <span>{{ data.narrative_self.stats?.concerns_count || 0 }} 关注</span>
+            <span>{{ data.narrative_self.stats?.timeline_count || 0 }} 时间线</span>
           </div>
         </div>
       </div>
@@ -131,21 +131,21 @@ const rhythmBars = computed(() => {
   if (!data.value?.circadian) return []
   const c = data.value.circadian
   return [
-    { label: '精力', value: c.energy_level, color: '#6366f1' },
-    { label: '思维', value: c.cognitive_clarity, color: '#8b5cf6' },
-    { label: '耐心', value: c.patience_level, color: '#34d399' },
-    { label: '社交', value: c.sociability, color: '#f59e0b' },
-    { label: '幽默', value: c.humor_sensitivity, color: '#f97316' },
+    { label: '精力', value: c.energy_level, color: 'var(--info)' },
+    { label: '思维', value: c.cognitive_clarity, color: 'var(--primary)' },
+    { label: '耐心', value: c.patience_level, color: 'var(--success)' },
+    { label: '社交', value: c.sociability, color: 'var(--warning)' },
+    { label: '幽默', value: c.humor_sensitivity, color: 'var(--accent)' },
   ]
 })
 
 const batteryColor = computed(() => {
-  if (!data.value?.social_battery) return '#34d399'
+  if (!data.value?.social_battery) return 'var(--success)'
   const p = data.value.social_battery.percentage
-  if (p < 0.15) return '#ef4444'
-  if (p < 0.3) return '#f97316'
-  if (p < 0.5) return '#fbbf24'
-  return '#34d399'
+  if (p < 0.15) return 'var(--danger)'
+  if (p < 0.3) return 'var(--accent)'
+  if (p < 0.5) return 'var(--warning)'
+  return 'var(--success)'
 })
 
 const stats = computed(() => {
@@ -157,10 +157,10 @@ const stats = computed(() => {
     thought: '<svg viewBox="0 0 20 20" fill="none" width="22" height="22"><path d="M10 2a7 7 0 00-7 7c0 1.5.5 2.9 1.3 4L3 17l4-1.3A7 7 0 1010 2z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>',
   }
   return [
-    { label: '电量', value: d?.social_battery ? (d.social_battery.percentage * 100).toFixed(0) + '%' : '—', sub: '社交电量', color: '#34d399', icon: I.battery },
-    { label: '注意力', value: d?.attention ? (d.attention.attention_level * 100).toFixed(0) + '%' : '—', sub: '注意力水平', color: '#8b5cf6', icon: I.brain },
-    { label: '关系', value: d?.relationship_count ?? '—', sub: '已记录', color: '#ec4899', icon: I.heart },
-    { label: '独白', value: d?.inner_thoughts?.length ?? '—', sub: '内心想法', color: '#f59e0b', icon: I.thought },
+    { label: '电量', value: d?.social_battery ? (d.social_battery.percentage * 100).toFixed(0) + '%' : '—', sub: '社交电量', color: 'var(--success)', icon: I.battery },
+    { label: '注意力', value: d?.attention ? (d.attention.attention_level * 100).toFixed(0) + '%' : '—', sub: '注意力水平', color: 'var(--info)', icon: I.brain },
+    { label: '关系', value: d?.relationship_count ?? '—', sub: '已记录', color: 'var(--accent)', icon: I.heart },
+    { label: '独白', value: d?.inner_thoughts?.length ?? '—', sub: '内心想法', color: 'var(--warning)', icon: I.thought },
   ]
 })
 

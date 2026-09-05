@@ -47,13 +47,13 @@ const emotions = computed(() => {
     .sort((a, b) => b.intensity - a.intensity)
 })
 const stats = computed(() => [
-  { label: '追踪用户', value: emotions.value.length, sub: '有情绪记录', color: '#6366f1' },
-  { label: '活跃情绪', value: [...new Set(emotions.value.map(e => e.current))].length, sub: '不同情绪类型', color: '#34d399' },
+  { label: '追踪用户', value: emotions.value.length, sub: '有情绪记录', color: 'var(--info)' },
+  { label: '活跃情绪', value: [...new Set(emotions.value.map(e => e.current))].length, sub: '不同情绪类型', color: 'var(--success)' },
 ])
 
 function emoColor(e) {
-  const m = { neutral: '#6b7280', happy: '#34d399', sad: '#60a5fa', thinking: '#8b5cf6', surprised: '#fbbf24', angry: '#ef4444', shy: '#f472b6', worried: '#f97316', tired: '#9ca3af', excited: '#f59e0b', like: '#ec4899' }
-  return m[e?.toLowerCase()] || '#6b7280'
+  const m = { neutral: 'var(--text-3)', happy: 'var(--success)', sad: 'var(--info)', thinking: 'var(--primary)', surprised: 'var(--warning)', angry: 'var(--danger)', shy: 'var(--accent)', worried: 'var(--warning)', tired: 'var(--text-3)', excited: 'var(--warning)', like: 'var(--accent)' }
+  return m[e?.toLowerCase()] || 'var(--text-3)'
 }
 function emoLabel(e) {
   const m = { neutral: '平静', happy: '开心', sad: '难过', thinking: '沉思', surprised: '惊讶', angry: '不悦', shy: '害羞', worried: '担忧', tired: '疲惫', excited: '兴奋', like: '心动' }

@@ -68,7 +68,7 @@
         <div class="page-header animate-fade" :key="currentTab">
           <div class="page-title-row">
             <span class="page-icon" v-html="currentTabMeta?.icon"></span>
-            <h2>{{ currentTabMeta?.name || '仪表盘' }}</h2>
+            <h2>{{ currentTabMeta?.name || '此刻' }}</h2>
           </div>
           <p class="page-desc" v-if="currentTabMeta?.desc">{{ currentTabMeta.desc }}</p>
         </div>
@@ -83,17 +83,18 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getToken, setToken, clearToken, tryLogin, api } from './api.js'
+import MindView from './views/MindView.vue'
+import StreamView from './views/StreamView.vue'
+import MindMemoryView from './views/MindMemoryView.vue'
+import SecurityView from './views/SecurityView.vue'
 import DashboardView from './views/DashboardView.vue'
 import ConfigView from './views/ConfigView.vue'
 import ConversationsView from './views/ConversationsView.vue'
 import QuotaView from './views/QuotaView.vue'
 import StickerView from './views/StickerView.vue'
-import SelfThoughts from './views/SelfThoughts.vue'
 import UserMemory from './views/UserMemory.vue'
 import WorkingMemory from './views/WorkingMemory.vue'
 import EmotionView from './views/EmotionView.vue'
-import MentalState from './views/MentalState.vue'
-import ProactiveView from './views/ProactiveView.vue'
 import BlocklistView from './views/BlocklistView.vue'
 import AntiInjectionView from './views/AntiInjectionView.vue'
 import ArchiveView from './views/ArchiveView.vue'
@@ -103,7 +104,6 @@ import MemoryOpsLog from './views/MemoryOpsLog.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import HumanityView from './views/HumanityView.vue'
-import NarrativeSelfView from './views/NarrativeSelfView.vue'
 import RelationshipsView from './views/RelationshipsView.vue'
 
 const I = {
@@ -114,12 +114,12 @@ const I = {
   conversations: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 10a7 7 0 1114 0 7 7 0 01-7 7H3l2-3a7 7 0 01-2-4z" stroke="currentColor" stroke-width="1.5"/><path d="M7 8h6M7 11h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   quota: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   sticker: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><circle cx="7.5" cy="8.5" r="1.5" fill="currentColor"/><path d="M5 15l3-4 3 4H5z" fill="currentColor" opacity="0.5"/><path d="M11 13l3-5 3 5H11z" fill="currentColor" opacity="0.5"/></svg>',
-  'self-thoughts': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a7 7 0 00-7 7c0 1.5.5 2.9 1.3 4L3 17l4-1.3A7 7 0 1010 2z" stroke="currentColor" stroke-width="1.5"/></svg>',
+  mind: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M2 10h3l2-5 3 10 2-5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   memory: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h6M7 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   'working-memory': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h6M7 10h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  stream: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M2 6c3-2 5 2 8 0s5 2 8 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2 10c3-2 5 2 8 0s5 2 8 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/><path d="M2 14c3-2 5 2 8 0s5 2 8 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/></svg>',
   emotion: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><circle cx="7.5" cy="8.5" r="1" fill="currentColor"/><circle cx="12.5" cy="8.5" r="1" fill="currentColor"/><path d="M7 12.5c.8 1 2 1.5 3 1.5s2.2-.5 3-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-  'mental-state': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a4 4 0 00-4 4c0 2 1 3 1 4s-.5 2-2 3c1.5 0 3-.5 4-1v2a4 4 0 008-2c0-2-1.5-3-2-5s0-3-2-4a4 4 0 00-3-1z" stroke="currentColor" stroke-width="1.5"/></svg>',
-  proactive: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a7 7 0 017 7v3l2 2H3l2-2v-3a7 7 0 017-7z" stroke="currentColor" stroke-width="1.5"/><path d="M8 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  diary: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M4 3h11a1 1 0 011 1v12a1 1 0 01-1 1H4V3z" stroke="currentColor" stroke-width="1.5"/><path d="M4 3v14M13 3v14" stroke="currentColor" stroke-width="1.5"/><path d="M7 7h4M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   humanity: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a7 7 0 017 7c0 2.5-1 4.5-2.5 5.5S10 17 10 17s-3.5-.5-4.5-1.5S3 12.5 3 10a7 7 0 017-7z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="9" r="1" fill="currentColor"/><circle cx="12" cy="9" r="1" fill="currentColor"/><path d="M7 12.5c.8 1 2 1.5 3 1.5s2.2-.5 3-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   blocklist: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 6l8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   'anti-injection': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V5l7-3z" stroke="currentColor" stroke-width="1.5"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -127,51 +127,53 @@ const I = {
   backups: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a5 5 0 00-4.5 2.8A4 4 0 003 10a4 4 0 004 4h1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 3a5 5 0 014.5 2.8A4 4 0 0117 10a4 4 0 01-4 4h-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 10v5M7 12.5l3-2.5 3 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   sync: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M14.5 5.5A6.5 6.5 0 104 10.5M14.5 2v3.5H11M5.5 14.5A6.5 6.5 0 0016 9.5M5.5 18V14.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   'memory-ops-log': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14v14H3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7h6M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="currentColor" opacity="0.6"/></svg>',
-  'narrative-self': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2a4 4 0 00-4 4v2a4 4 0 008 0V6a4 4 0 00-4-4z" stroke="currentColor" stroke-width="1.5"/><path d="M4 14c0-2 2.7-4 6-4s6 2 6 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   relationships: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M3 17c0-2.2 1.8-4 4-4s4 1.8 4 4M9 17c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.5"/></svg>',
+  security: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14l-5.5 6.5V16l-3 1.5v-8L3 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
 }
 
 const loggedIn = ref(false)
 const tokenInput = ref('')
 const loginErr = ref('')
-const currentTab = ref('dashboard')
+const currentTab = ref('mind')
 const sidebarOpen = ref(false)
 const appVersion = ref('')
 const buildTime = ref('')
 const isDark = ref(false)
 
 const tabs = [
-  { id: 'dashboard', name: '仪表盘', icon: I.dashboard, desc: '系统总览与关键指标', comp: DashboardView },
-  { id: 'analytics', name: 'Token 分析', icon: I.analytics, desc: 'API 用量与 Prompt 统计', comp: AnalyticsView },
-  { id: 'schedule', name: '日程计划', icon: I.schedule, desc: '周/月计划管理', comp: ScheduleView },
-  { id: 'config', name: '配置', icon: I.config, desc: 'Bot 与 AI 参数', comp: ConfigView },
-  { id: 'conversations', name: '对话管理', icon: I.conversations, desc: '活跃会话控制', comp: ConversationsView },
-  { id: 'quota', name: '配额', icon: I.quota, desc: '回复配额', comp: QuotaView },
-  { id: 'sticker', name: '表情包', icon: I.sticker, desc: '表情管理', comp: StickerView },
-  { id: 'self-thoughts', name: '自我记忆', icon: I['self-thoughts'], desc: '内心想法', comp: SelfThoughts },
-  { id: 'memory', name: '用户记忆', icon: I.memory, desc: '长期记忆', comp: UserMemory },
-  { id: 'working-memory', name: '工作记忆', icon: I['working-memory'], desc: '短期工作记忆', comp: WorkingMemory },
-  { id: 'memory-ops-log', name: '内存监视', icon: I['memory-ops-log'], desc: '内存操作日志', comp: MemoryOpsLog },
-  { id: 'emotion', name: '情绪', icon: I.emotion, desc: '情绪状态', comp: EmotionView },
-  { id: 'mental-state', name: '心理状态', icon: I['mental-state'], desc: 'Bot 心理', comp: MentalState },
-  { id: 'proactive', name: '主动对话', icon: I.proactive, desc: '主动消息', comp: ProactiveView },
-  { id: 'humanity', name: '人性化', icon: I.humanity, desc: '人性化状态监控', comp: HumanityView },
-  { id: 'narrative-self', name: '叙事自我', icon: I['narrative-self'], desc: '自我认知与时间线', comp: NarrativeSelfView },
-  { id: 'relationships', name: '关系', icon: I.relationships, desc: '关系动力学', comp: RelationshipsView },
-  { id: 'blocklist', name: '黑名单', icon: I.blocklist, desc: '用户管理', comp: BlocklistView },
-  { id: 'anti-injection', name: '防注入', icon: I['anti-injection'], desc: '安全防护', comp: AntiInjectionView },
-  { id: 'archive', name: '归档', icon: I.archive, desc: '数据归档', comp: ArchiveView },
-  { id: 'backups', name: '备份', icon: I.backups, desc: '数据备份', comp: BackupsView },
-  { id: 'sync', name: '同步', icon: I.sync, desc: '远程同步', comp: SyncView },
+  { id: 'mind', name: '此刻', group: '心灵', icon: I.mind, desc: '她的此刻：状态、身体与意识流', comp: MindView },
+  { id: 'stream', name: '意识流', group: '心灵', icon: I.stream, desc: '她的人生时间线', comp: StreamView },
+  { id: 'mind-memory', name: '日记与人物', group: '心灵', icon: I.diary, desc: '她的日记与人物档案', comp: MindMemoryView },
+  { id: 'security', name: '滤壳与安全', group: '心灵', icon: I.security, desc: '滤壳审计记录', comp: SecurityView },
+  { id: 'dashboard', name: '仪表盘', group: '概览', icon: I.dashboard, desc: '系统总览与关键指标', comp: DashboardView },
+  { id: 'analytics', name: 'Token 分析', group: '概览', icon: I.analytics, desc: 'API 用量与 Prompt 统计', comp: AnalyticsView },
+  { id: 'schedule', name: '日程计划', group: '管理', icon: I.schedule, desc: '周/月计划管理', comp: ScheduleView },
+  { id: 'config', name: '配置', group: '管理', icon: I.config, desc: 'Bot 与 AI 参数', comp: ConfigView },
+  { id: 'conversations', name: '对话管理', group: '管理', icon: I.conversations, desc: '活跃会话控制', comp: ConversationsView },
+  { id: 'quota', name: '配额', group: '管理', icon: I.quota, desc: '回复配额', comp: QuotaView },
+  { id: 'sticker', name: '表情包', group: '管理', icon: I.sticker, desc: '表情管理', comp: StickerView },
+  { id: 'memory', name: '用户记忆', group: '数据', icon: I.memory, desc: '长期记忆', comp: UserMemory },
+  { id: 'working-memory', name: '工作记忆', group: '数据', icon: I['working-memory'], desc: '短期工作记忆', comp: WorkingMemory },
+  { id: 'memory-ops-log', name: '内存监视', group: '数据', icon: I['memory-ops-log'], desc: '内存操作日志', comp: MemoryOpsLog },
+  { id: 'emotion', name: '情绪', group: '数据', icon: I.emotion, desc: '情绪状态', comp: EmotionView },
+  { id: 'humanity', name: '人性化', group: '数据', icon: I.humanity, desc: '人性化状态监控', comp: HumanityView },
+  { id: 'relationships', name: '关系', group: '数据', icon: I.relationships, desc: '关系动力学', comp: RelationshipsView },
+  { id: 'blocklist', name: '黑名单', group: '系统', icon: I.blocklist, desc: '用户管理', comp: BlocklistView },
+  { id: 'anti-injection', name: '防注入', group: '系统', icon: I['anti-injection'], desc: '安全防护', comp: AntiInjectionView },
+  { id: 'archive', name: '归档', group: '系统', icon: I.archive, desc: '数据归档', comp: ArchiveView },
+  { id: 'backups', name: '备份', group: '系统', icon: I.backups, desc: '数据备份', comp: BackupsView },
+  { id: 'sync', name: '同步', group: '系统', icon: I.sync, desc: '远程同步', comp: SyncView },
 ]
 
-const navGroups = computed(() => [
-  { label: '概览', items: tabs.slice(0, 2) },
-  { label: '管理', items: tabs.slice(2, 6) },
-  { label: '数据', items: tabs.slice(6, 11) },
-  { label: '状态', items: tabs.slice(11, 17) },
-  { label: '系统', items: tabs.slice(17) },
-])
+const navGroups = computed(() => {
+  const groups = []
+  for (const tab of tabs) {
+    let group = groups.find(g => g.label === tab.group)
+    if (!group) groups.push(group = { label: tab.group, items: [] })
+    group.items.push(tab)
+  }
+  return groups
+})
 
 const currentTabMeta = computed(() => tabs.find(t => t.id === currentTab.value))
 const tabComponent = computed(() => tabs.find(t => t.id === currentTab.value)?.comp)

@@ -29,8 +29,8 @@
           </svg>
           <div class="chart-legend">
             <div class="legend-item"><span class="dot" style="background:var(--primary)"></span> 全局记忆</div>
-            <div class="legend-item"><span class="dot" style="background:#6366f1"></span> 群记忆</div>
-            <div class="legend-item"><span class="dot" style="background:#8b5cf6"></span> 表情包</div>
+            <div class="legend-item"><span class="dot" style="background:var(--info)"></span> 群记忆</div>
+            <div class="legend-item"><span class="dot" style="background:var(--accent)"></span> 表情包</div>
           </div>
         </div>
       </div>
@@ -49,7 +49,7 @@
           </svg>
           <div class="chart-legend">
             <div class="legend-item"><span class="dot" style="background:var(--info)"></span> 群聊: {{ stats.active_groups ?? 0 }}</div>
-            <div class="legend-item"><span class="dot" style="background:#60a5fa"></span> 私聊: {{ stats.active_users ?? 0 }}</div>
+            <div class="legend-item"><span class="dot" style="background:var(--info)"></span> 私聊: {{ stats.active_users ?? 0 }}</div>
           </div>
         </div>
       </div>
@@ -68,7 +68,7 @@
           </svg>
           <div class="chart-legend">
             <div class="legend-item"><span class="dot" style="background:var(--warning)"></span> 情绪追踪用户</div>
-            <div class="legend-item"><span class="dot" style="background:#fbbf24"></span> 记忆用户</div>
+            <div class="legend-item"><span class="dot" style="background:var(--warning)"></span> 记忆用户</div>
           </div>
         </div>
       </div>
@@ -114,10 +114,10 @@ const I = {
 
 const statCards = computed(() => [
   { label: '记忆条目', value: stats.value.memory_entries, sub: '长期记忆总计', icon: I.brain, color: 'var(--primary)', trend: null },
-  { label: '记忆用户', value: stats.value.memory_users, sub: '已记录用户', icon: I.db, color: '#6366f1', trend: null },
+  { label: '记忆用户', value: stats.value.memory_users, sub: '已记录用户', icon: I.db, color: 'var(--info)', trend: null },
   { label: '表情包', value: stats.value.sticker_count, sub: '已注册', icon: I.sticker, color: 'var(--warning)', trend: null },
   { label: '群聊', value: stats.value.active_groups, sub: '进行中', icon: I.chat, color: 'var(--info)', trend: null },
-  { label: '私聊', value: stats.value.active_users, sub: '进行中', icon: I.chat, color: '#60a5fa', trend: null },
+  { label: '私聊', value: stats.value.active_users, sub: '进行中', icon: I.chat, color: 'var(--info)', trend: null },
   { label: '情绪用户', value: stats.value.emotion_users, sub: '追踪中', icon: I.smile, color: 'var(--warning)', trend: null },
 ])
 

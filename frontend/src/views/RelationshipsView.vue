@@ -103,16 +103,16 @@ const filteredRels = computed(() => {
 
 function getBars(rel) {
   return [
-    { label: '信任', value: rel.trust || 0, color: '#6366f1' },
-    { label: '亲密', value: rel.intimacy || 0, color: '#ec4899' },
-    { label: '好感', value: rel.affection || 0, color: '#f59e0b' },
-    { label: '互惠', value: rel.reciprocity || 0.5, color: '#34d399' },
+    { label: '信任', value: rel.trust || 0, color: 'var(--info)' },
+    { label: '亲密', value: rel.intimacy || 0, color: 'var(--accent)' },
+    { label: '好感', value: rel.affection || 0, color: 'var(--warning)' },
+    { label: '互惠', value: rel.reciprocity || 0.5, color: 'var(--success)' },
   ]
 }
 
 function typeColor(type) {
-  const m = { stranger: '#6b7280', acquaintance: '#60a5fa', regular: '#34d399', close: '#ec4899', confidant: '#f59e0b', antagonistic: '#ef4444', admiring: '#f472b6' }
-  return m[type] || '#6b7280'
+  const m = { stranger: 'var(--text-3)', acquaintance: 'var(--info)', regular: 'var(--success)', close: 'var(--accent)', confidant: 'var(--warning)', antagonistic: 'var(--danger)', admiring: 'var(--primary)' }
+  return m[type] || 'var(--text-3)'
 }
 function typeLabel(type) {
   const m = { stranger: '陌生人', acquaintance: '认识', regular: '常客', close: '亲近', confidant: '知己', antagonistic: '对立', admiring: '仰慕' }

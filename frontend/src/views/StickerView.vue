@@ -44,7 +44,7 @@ import { api } from '../api.js'
 const stickers = ref([])
 const search = ref('')
 
-const statCards = ref([{ label: '表情包', value: '-', sub: '已注册', color: '#6366f1' }])
+const statCards = ref([{ label: '表情包', value: '-', sub: '已注册', color: 'var(--primary)' }])
 
 const filtered = computed(() => {
   if (!search.value) return stickers.value

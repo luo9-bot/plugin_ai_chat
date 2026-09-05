@@ -101,11 +101,11 @@
     <div class="card">
       <div class="card-header"><h3>计划系统说明</h3></div>
       <div class="info-list">
-        <div class="info-item">📅 每日计划：每天早上自动生成当日任务</div>
-        <div class="info-item">📆 每周计划：每周一自动生成周目标，分配到各天</div>
-        <div class="info-item">📋 每月计划：每月1号自动生成月目标</div>
-        <div class="info-item">🔔 推动系统：每天自动检查计划执行情况并提醒</div>
-        <div class="info-item">📂 数据存储于 data/plugin_ai_chat/</div>
+        <div class="info-item">每日计划：每天早上自动生成当日任务</div>
+        <div class="info-item">每周计划：每周一自动生成周目标，分配到各天</div>
+        <div class="info-item">每月计划：每月1号自动生成月目标</div>
+        <div class="info-item">推动系统：每天自动检查计划执行情况并提醒</div>
+        <div class="info-item">数据存储于 data/plugin_ai_chat/</div>
       </div>
     </div>
   </div>

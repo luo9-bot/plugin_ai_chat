@@ -20,8 +20,8 @@
           </select>
           <input v-model="filterUser" placeholder="用户ID..." class="glass-input" style="width:100px" />
           <button class="btn btn-ghost btn-sm" @click="autoRefresh = !autoRefresh">{{ autoRefresh ? '⏸ 暂停' : '▶ 自动刷新' }}</button>
-          <button class="btn btn-ghost btn-sm" @click="load">🔄 刷新</button>
-          <button class="btn btn-danger btn-sm" @click="clearLogs">🗑 清空</button>
+          <button class="btn btn-ghost btn-sm" @click="load">刷新</button>
+          <button class="btn btn-danger btn-sm" @click="clearLogs">清空</button>
         </div>
       </div>
 
@@ -128,7 +128,7 @@ onUnmounted(() => {
 .glass-input, .glass-select { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; outline: none; }
 .btn { padding: 8px 14px; border: none; border-radius: var(--radius-xs); font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition); }
 .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-.btn-danger { background: var(--danger, #ef4444); color: white; }
+.btn-danger { background: var(--danger); color: white; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .empty { text-align: center; padding: 40px; color: var(--text-3); }
 .table-wrap { overflow-x: auto; }
@@ -140,14 +140,12 @@ tr:hover td { background: var(--surface-hover); }
 .truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); }
 .tag { font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
-.tag-add { background: rgba(52,211,153,0.15); color: #10b981; }
-.tag-forget { background: rgba(239,68,68,0.15); color: #ef4444; }
-.tag-correct { background: rgba(251,191,36,0.15); color: #f59e0b; }
-.tag-ai { background: rgba(96,165,250,0.15); color: #3b82f6; }
-.tag-review { background: rgba(168,85,247,0.15); color: #a855f7; }
-.tag-imp-permanent { background: #fef3c7; color: #92400e; }
-.tag-imp-important { background: #dbeafe; color: #1e40af; }
+.tag-add { background: var(--success-subtle); color: var(--success); }
+.tag-forget { background: var(--danger-subtle); color: var(--danger); }
+.tag-correct { background: var(--warning-subtle); color: var(--warning); }
+.tag-ai { background: var(--info-subtle); color: var(--info); }
+.tag-review { background: var(--accent-subtle); color: var(--accent); }
+.tag-imp-permanent { background: var(--warning-subtle); color: var(--warning); }
+.tag-imp-important { background: var(--info-subtle); color: var(--info); }
 .tag-imp-normal { background: var(--surface); color: var(--text-2); }
-[data-theme="dark"] .tag-imp-permanent { background: rgba(251,191,36,0.2); color: #fbbf24; }
-[data-theme="dark"] .tag-imp-important { background: rgba(96,165,250,0.2); color: #60a5fa; }
 </style>

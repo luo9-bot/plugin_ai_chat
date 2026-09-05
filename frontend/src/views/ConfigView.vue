@@ -24,7 +24,7 @@
         <div class="card" v-if="config">
           <div class="card-header">
             <h3><span class="sec-dot" :style="{ background: currentSection.color }"></span> {{ currentSection.label }}</h3>
-            <button class="btn btn-ghost btn-sm" @click="openEdit">✏️ 编辑</button>
+            <button class="btn btn-ghost btn-sm" @click="openEdit">编辑</button>
           </div>
           <div class="field-list">
             <div v-for="f in currentSection.fields" :key="f.key" class="field-item">
@@ -54,7 +54,7 @@
         <div class="card notice-card">
           <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M10 2l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V5l7-3z" stroke="currentColor" stroke-width="1.5"/><path d="M9 9h2v5H9zM9 6h2v2H9z" fill="currentColor"/></svg>
           <span>修改配置后点击「保存」再「重新载入配置」即可生效，无需重启。</span>
-          <button class="btn btn-primary btn-sm" @click="reloadConfig" style="margin-left:auto;flex-shrink:0">🔄 重新载入配置</button>
+          <button class="btn btn-primary btn-sm" @click="reloadConfig" style="margin-left:auto;flex-shrink:0">重新载入配置</button>
         </div>
       </div>
     </div>
@@ -96,7 +96,7 @@ const showEdit = ref(false)
 const editForm = reactive({})
 
 const sections = [
-  { id: 'general', label: '基础配置', color: '#6366f1',
+  { id: 'general', label: '基础配置', color: 'var(--info)',
     fields: [
       { key: 'api_key', label: 'API 密钥', type: 'string' },
       { key: 'base_url', label: 'API 地址', type: 'string' },
@@ -112,7 +112,7 @@ const sections = [
       { key: 'auto_start_groups', label: '自动启动群', type: 'array' },
     ]
   },
-  { id: 'ai', label: 'AI 参数', color: '#8b5cf6',
+  { id: 'ai', label: 'AI 参数', color: 'var(--primary)',
     fields: [
       { key: 'ai.frequency_penalty', label: '频率惩罚', type: 'number' },
       { key: 'ai.presence_penalty', label: '存在惩罚', type: 'number' },
@@ -124,7 +124,7 @@ const sections = [
       { key: 'ai.analysis_temperature', label: '分析温度', type: 'number' },
     ]
   },
-  { id: 'conversation', label: '对话', color: '#34d399',
+  { id: 'conversation', label: '对话', color: 'var(--success)',
     fields: [
       { key: 'conversation.max_history', label: '最大历史轮数', type: 'number' },
       { key: 'conversation.batch_timeout_ms', label: '批次超时(ms)', type: 'number' },
@@ -136,7 +136,7 @@ const sections = [
       { key: 'conversation.reply_cooldown_secs', label: '回复冷却(秒)', type: 'number' },
     ]
   },
-  { id: 'memory', label: '记忆', color: '#f472b6',
+  { id: 'memory', label: '记忆', color: 'var(--accent)',
     fields: [
       { key: 'memory.normal_expire_days', label: '普通记忆过期(天)', type: 'number' },
       { key: 'memory.important_fade_days', label: '重要记忆衰减(天)', type: 'number' },
@@ -144,7 +144,7 @@ const sections = [
       { key: 'memory.working_memory_expire_hours', label: '工作记忆过期(小时)', type: 'number' },
     ]
   },
-  { id: 'emotion', label: '情绪', color: '#f59e0b',
+  { id: 'emotion', label: '情绪', color: 'var(--warning)',
     fields: [
       { key: 'emotion.decay_rate', label: '衰减率', type: 'number' },
       { key: 'emotion.decay_delay_secs', label: '衰减延迟(秒)', type: 'number' },
@@ -152,7 +152,7 @@ const sections = [
       { key: 'emotion.affinity_threshold', label: '好感阈值', type: 'number' },
     ]
   },
-  { id: 'proactive', label: '主动对话', color: '#f97316',
+  { id: 'proactive', label: '主动对话', color: 'var(--danger)',
     fields: [
       { key: 'proactive.enabled', label: '启用', type: 'bool' },
       { key: 'proactive.quiet_start', label: '免打扰开始(时)', type: 'number' },
@@ -163,14 +163,14 @@ const sections = [
       { key: 'proactive.check_interval', label: '检查间隔(秒)', type: 'number' },
     ]
   },
-  { id: 'reflection', label: '自我反思', color: '#60a5fa',
+  { id: 'reflection', label: '自我反思', color: 'var(--info)',
     fields: [
       { key: 'self_reflection.interval', label: '反思间隔(秒)', type: 'number' },
       { key: 'self_reflection.max_thoughts', label: '最大想法数', type: 'number' },
       { key: 'self_reflection.post_conversation_delay_secs', label: '对话后延迟(秒)', type: 'number' },
     ]
   },
-  { id: 'mental', label: '心理状态', color: '#a78bfa',
+  { id: 'mental', label: '心理状态', color: 'var(--primary)',
     fields: [
       { key: 'mental_state.concerns_max', label: '最大担忧数', type: 'number' },
       { key: 'mental_state.concern_decay_rate', label: '担忧衰减率', type: 'number' },
@@ -179,7 +179,7 @@ const sections = [
       { key: 'mental_state.defect_base_probability', label: '缺陷基础概率', type: 'number' },
     ]
   },
-  { id: 'vision', label: '识图', color: '#06b6d4',
+  { id: 'vision', label: '识图', color: 'var(--info)',
     fields: [
       { key: 'vision.api_key', label: 'API 密钥', type: 'string' },
       { key: 'vision.base_url', label: 'API 地址', type: 'string' },
@@ -187,21 +187,21 @@ const sections = [
       { key: 'vision.max_tokens', label: '最大 Tokens', type: 'number' },
     ]
   },
-  { id: 'embedding', label: '向量嵌入', color: '#14b8a6',
+  { id: 'embedding', label: '向量嵌入', color: 'var(--success)',
     fields: [
       { key: 'embedding.api_key', label: 'API 密钥', type: 'string' },
       { key: 'embedding.base_url', label: 'API 地址', type: 'string' },
       { key: 'embedding.model', label: '模型', type: 'string' },
     ]
   },
-  { id: 'style', label: '回复风格', color: '#e879f9',
+  { id: 'style', label: '回复风格', color: 'var(--accent)',
     fields: [
       { key: 'style.omit_subject', label: '省略主语', type: 'bool' },
       { key: 'style.punctuation_style', label: '标点风格', type: 'string' },
       { key: 'style.max_reply_chars', label: '最大回复字数', type: 'number' },
     ]
   },
-  { id: 'anti_injection', label: '防注入', color: '#ef4444',
+  { id: 'anti_injection', label: '防注入', color: 'var(--danger)',
     fields: [
       { key: 'anti_injection.input.max_message_length', label: '最大消息长度', type: 'number' },
       { key: 'anti_injection.input.sensitive_action', label: '敏感内容处理', type: 'string' },
@@ -215,13 +215,13 @@ const sections = [
       { key: 'anti_injection.detection_whitelist', label: '检测白名单(不封禁)', type: 'array' },
     ]
   },
-  { id: 'quota', label: '配额', color: '#a3e635',
+  { id: 'quota', label: '配额', color: 'var(--success)',
     fields: [
       { key: 'quota.enabled', label: '启用', type: 'bool' },
       { key: 'quota.segment_minutes', label: '配额段长度(分)', type: 'number' },
     ]
   },
-  { id: 'humanity', label: '人性化', color: '#ec4899',
+  { id: 'humanity', label: '人性化', color: 'var(--accent)',
     fields: [
       { key: 'humanity.social_battery_enabled', label: '社交电量', type: 'bool' },
       { key: 'humanity.battery_capacity', label: '电池容量', type: 'number' },
@@ -250,7 +250,7 @@ const sections = [
       { key: 'humanity.circadian_amplitude', label: '节律振幅', type: 'number' },
     ]
   },
-  { id: 'sync', label: '远程同步', color: '#67e8f9',
+  { id: 'sync', label: '远程同步', color: 'var(--info)',
     fields: [
       { key: 'sync.enabled', label: '启用', type: 'bool' },
       { key: 'sync.api_url', label: 'API 地址', type: 'string' },
@@ -258,20 +258,20 @@ const sections = [
       { key: 'sync.display_name', label: '显示名称', type: 'string' },
     ]
   },
-  { id: 'sticker', label: '表情包', color: '#f0abfc',
+  { id: 'sticker', label: '表情包', color: 'var(--accent)',
     fields: [
       { key: 'sticker.steal_emoji', label: '自动收集表情', type: 'bool' },
       { key: 'sticker.max_reg_num', label: '最大注册数', type: 'number' },
       { key: 'sticker.do_replace', label: '自动替换', type: 'bool' },
     ]
   },
-  { id: 'log', label: '日志', color: '#94a3b8',
+  { id: 'log', label: '日志', color: 'var(--text-2)',
     fields: [
       { key: 'log.enabled', label: '日志文件输出', type: 'bool' },
       { key: 'log.level', label: '日志级别', type: 'string' },
     ]
   },
-  { id: 'admin', label: '管理', color: '#64748b',
+  { id: 'admin', label: '管理', color: 'var(--text-2)',
     fields: [
       { key: 'admin.token', label: '管理 Token', type: 'string' },
       { key: 'admin.port', label: '管理端口', type: 'number' },
@@ -394,12 +394,12 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .config-error-banner {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; margin-bottom: 16px;
-  background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius-sm);
-  font-size: 13px; color: #991b1b;
+  background: var(--danger-subtle); border: 1px solid var(--danger); border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--danger);
 }
 .error-icon {
   flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
-  background: #ef4444; color: white; font-weight: 700; font-size: 14px;
+  background: var(--danger); color: white; font-weight: 700; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
 }
 .error-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }

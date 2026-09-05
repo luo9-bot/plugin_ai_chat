@@ -14,7 +14,7 @@
         <div class="chart-container">
           <svg viewBox="0 0 160 160" width="170" height="170">
             <circle cx="80" cy="80" r="64" fill="none" stroke="var(--surface)" stroke-width="20"/>
-            <circle cx="80" cy="80" r="64" fill="none" stroke="#6366f1" stroke-width="20"
+            <circle cx="80" cy="80" r="64" fill="none" stroke="var(--primary)" stroke-width="20"
               :stroke-dasharray="totalArc" stroke-dashoffset="0"
               transform="rotate(-90 80 80)" stroke-linecap="round"
               style="transition: stroke-dasharray 1s ease"/>
@@ -22,9 +22,9 @@
             <text x="80" y="94" text-anchor="middle" fill="var(--text-2)" font-size="10">总 Tokens</text>
           </svg>
           <div class="chart-legend">
-            <div class="legend-item"><span class="dot" style="background:#6366f1"></span> Prompt: {{ fmtNum(stats.total_prompt_tokens || 0) }}</div>
-            <div class="legend-item"><span class="dot" style="background:#8b5cf6"></span> Completion: {{ fmtNum(stats.total_completion_tokens || 0) }}</div>
-            <div class="legend-item"><span class="dot" style="background:#34d399"></span> 缓存命中: {{ stats.cache_hit_ratio || '0%' }}</div>
+            <div class="legend-item"><span class="dot" style="background:var(--primary)"></span> Prompt: {{ fmtNum(stats.total_prompt_tokens || 0) }}</div>
+            <div class="legend-item"><span class="dot" style="background:var(--info)"></span> Completion: {{ fmtNum(stats.total_completion_tokens || 0) }}</div>
+            <div class="legend-item"><span class="dot" style="background:var(--success)"></span> 缓存命中: {{ stats.cache_hit_ratio || '0%' }}</div>
           </div>
         </div>
       </div>
@@ -34,7 +34,7 @@
         <div class="chart-container">
           <svg viewBox="0 0 160 160" width="170" height="170">
             <circle cx="80" cy="80" r="64" fill="none" stroke="var(--surface)" stroke-width="20"/>
-            <circle cx="80" cy="80" r="64" fill="none" stroke="#f59e0b" stroke-width="20"
+            <circle cx="80" cy="80" r="64" fill="none" stroke="var(--warning)" stroke-width="20"
               :stroke-dasharray="callArc" stroke-dashoffset="0"
               transform="rotate(-90 80 80)" stroke-linecap="round"
               style="transition: stroke-dasharray 1s ease"/>
@@ -42,8 +42,8 @@
             <text x="80" y="94" text-anchor="middle" fill="var(--text-2)" font-size="10">总调用</text>
           </svg>
           <div class="chart-legend">
-            <div class="legend-item"><span class="dot" style="background:#f59e0b"></span> API 调用次数</div>
-            <div class="legend-item"><span class="dot" style="background:#f97316"></span> 缓存命中率</div>
+            <div class="legend-item"><span class="dot" style="background:var(--warning)"></span> API 调用次数</div>
+            <div class="legend-item"><span class="dot" style="background:var(--accent)"></span> 缓存命中率</div>
           </div>
         </div>
       </div>
@@ -115,10 +115,10 @@ const totalTokens = computed(() => (stats.value.total_tokens || 0))
 const maxToken = computed(() => { const m = Math.max(...sortedPrompts.value.map(p => p.total_tokens), 1); return m })
 
 const summaryCards = computed(() => [
-  { label: '总调用次数', value: stats.value.total_calls ?? '-', sub: 'API 请求', color: '#6366f1' },
-  { label: '总 Tokens', value: fmtNum(stats.value.total_tokens), sub: 'Prompt + Completion', color: '#8b5cf6' },
-  { label: '平均每次', value: stats.value.total_calls > 0 ? fmtNum(Math.round(stats.value.total_tokens / stats.value.total_calls)) : '-', sub: 'Tokens/调用', color: '#34d399' },
-  { label: '缓存命中率', value: stats.value.cache_hit_ratio || '0%', sub: '节省 Tokens', color: '#f59e0b' },
+  { label: '总调用次数', value: stats.value.total_calls ?? '-', sub: 'API 请求', color: 'var(--primary)' },
+  { label: '总 Tokens', value: fmtNum(stats.value.total_tokens), sub: 'Prompt + Completion', color: 'var(--info)' },
+  { label: '平均每次', value: stats.value.total_calls > 0 ? fmtNum(Math.round(stats.value.total_tokens / stats.value.total_calls)) : '-', sub: 'Tokens/调用', color: 'var(--success)' },
+  { label: '缓存命中率', value: stats.value.cache_hit_ratio || '0%', sub: '节省 Tokens', color: 'var(--warning)' },
 ])
 
 const sortedPrompts = computed(() => {
@@ -177,8 +177,8 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .mono { font-family: monospace; font-size: 12px; color: var(--text-2); }
 .pr-bar-wrap { height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; display: flex; gap: 2px; }
 .pr-bar { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
-.bar-pt { background: #6366f1; }
-.bar-ct { background: #8b5cf6; }
+.bar-pt { background: var(--primary); }
+.bar-ct { background: var(--info); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th { text-align: left; padding: 8px 10px; font-weight: 600; font-size: 10px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }
