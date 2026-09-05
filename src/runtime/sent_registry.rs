@@ -26,36 +26,25 @@ pub struct SentRecord {
 
 static REGISTRY: Mutex<VecDeque<SentRecord>> = Mutex::new(VecDeque::new());
 
-/// 核心回执 JSON（与 SDK `BusPayload::Sent` 的外层标签格式兼容）：
+/// 核心回执 JSON（SDK `BusPayload::Sent` 外层标签格式）：
 /// `{"Sent": {"group_id":..., "user_id":..., "message_id":..., "message":...}}`
-#[derive(serde::Deserialize)]
-struct SentEchoEnvelope {
-    #[serde(rename = "Sent")]
-    sent: SentEcho,
-}
-
-#[derive(serde::Deserialize)]
-struct SentEcho {
-    #[serde(default)]
-    group_id: Option<u64>,
-    #[serde(default)]
-    user_id: u64,
-    #[serde(default)]
-    message_id: u64,
-    #[serde(default)]
-    message: String,
-}
-
-/// 从回执 JSON 登记一条发送记录；解析失败返回 false
+///
+/// 通过 SDK 的 `BusPayload::parse` 解析，`Sent` 以外的载荷返回 false。
 pub fn record_from_json(json: &str) -> bool {
-    let Ok(envelope) = serde_json::from_str::<SentEchoEnvelope>(json) else {
+    let Some(luo9_sdk::payload::BusPayload::Sent(payload)) =
+        luo9_sdk::payload::BusPayload::parse(json)
+    else {
         return false;
     };
-    let echo = envelope.sent;
-    if echo.message_id == 0 {
+    if payload.message_id == 0 {
         return false;
     }
-    record(echo.group_id, echo.user_id, echo.message_id, &echo.message);
+    record(
+        payload.group_id,
+        payload.user_id,
+        payload.message_id,
+        &payload.message,
+    );
     true
 }
 
