@@ -425,6 +425,44 @@ fn check_periodic() {
     // 主动消息动机更新
     proactive::motivation::update_motivations();
 
+    // 回神：兑现她自己留下的想起（后台线程；夜间她睡着，tick 返回空）
+    std::thread::spawn(|| {
+        for (plan, turn) in mind::wake_tick() {
+            for thought in &turn.inner {
+                mind::push_inner(thought.clone());
+            }
+            if let voice::WakeAction::Speak { text, reply_to } = &turn.action {
+                let payload = match reply_to {
+                    Some(mid) => format!("[CQ:reply,id={mid}]{text}"),
+                    None => text.clone(),
+                };
+                let sent = match (plan.target_group, plan.target_user) {
+                    (Some(gid), _) => {
+                        sender::safe_send_quiet(gid, 0, &payload);
+                        mind::push_acted(text.clone());
+                        true
+                    }
+                    (_, Some(uid)) => {
+                        sender::safe_send_quiet(0, uid, &payload);
+                        mind::push_acted(text.clone());
+                        true
+                    }
+                    _ => false,
+                };
+                if !sent {
+                    debug!("wake: 回神想说但无目标，只留在心里");
+                }
+            }
+            if let Some((in_secs, reason)) = turn.wake {
+                let due_at = util::now_secs() + in_secs.max(60);
+                let mut follow = mind::WakePlan::new(plan.kind, due_at, reason);
+                follow.target_group = plan.target_group;
+                follow.target_user = plan.target_user;
+                mind::add_wake_plan(follow);
+            }
+        }
+    });
+
     // 推进到期事项：等待超时不会被虚构为完成，只转为需要决定下一步。
     personal_tasks::review_due_tasks();
 

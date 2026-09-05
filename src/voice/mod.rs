@@ -1,21 +1,21 @@
 //! 语音合一：感知、决策、表达由同一次调用完成
 //!
-//! 她不是"分析脑 → 发言者"的两段式傀儡，而是像人一样：读完场面之后，
-//! 在同一口气里决定开口、沉默或发表情包，说出来的话就是最终发言。
+//! v2 架构下她的输入不再是被拼装的上下文，而是：
+//! - system：语音框架 + 身份 + 精简边界 + 一句场景 + 时间
+//! - user：她最近的意识流（经历）+ 此刻的身体信号 + 刚刚发生的事
 //!
-//! - 群聊：以带名字和时间戳的场景记录呈现整个群，她自行判断谁在跟谁说话
-//! - 私聊：以正常的对话轮次呈现，全神贯注的一对一
-//! - 沉默是合法输出：空响应或 finish 工具都意味着"这轮不说话"
+//! 回神（wake）走两阶段：先写下此刻心里的活动，再决定行动（say/finish/plan_next）。
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use tracing::{debug, info};
 
 use crate::ai::{Tool, ToolOutcome, run_tool_loop};
 use crate::config;
-use crate::conversation::context::{VoiceScene, build_voice_context};
+use crate::mind::{self, SensoryPacket};
 
-/// 语音调用的最终决策
+/// 语音调用的最终决策（对话路径）
 #[derive(Debug)]
 pub enum VoiceAction {
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
@@ -28,11 +28,30 @@ pub enum VoiceAction {
 pub struct GroupUtterance {
     pub user_id: u64,
     pub text: String,
+    /// 消息到达时间（unix 秒，转译入流用）
+    pub ts: u64,
 }
 
-/// 群聊场景记录的时间窗口与条数上限
-const TRANSCRIPT_WINDOW_SECS: u64 = 3600;
-const TRANSCRIPT_MAX_ENTRIES: usize = 30;
+// ── 回神协议 ────────────────────────────────────────────────────
+
+/// 回神的行动产物
+#[derive(Debug)]
+pub enum WakeAction {
+    /// 说一句话（reply_to = 引用的消息 id）
+    Speak { text: String, reply_to: Option<u64> },
+    /// 这一轮只想想，没说话
+    Silent,
+}
+
+/// 一次回神的完整产物
+#[derive(Debug)]
+pub struct WakeTurn {
+    /// 她亲笔的内心活动（入流 Inner）
+    pub inner: Vec<String>,
+    pub action: WakeAction,
+    /// 她留下的下一个想起：(多久之后秒数, 她的原话)
+    pub wake: Option<(u64, String)>,
+}
 
 // ── 工具定义 ────────────────────────────────────────────────────
 
@@ -60,7 +79,7 @@ fn send_sticker_tool() -> Tool {
         tool_type: "function".to_string(),
         function: crate::ai::FunctionDef {
             name: "send_sticker".to_string(),
-            description: "发表情包。当语言不够到位、想用图回应、或氛围需要时使用。系统会自动挑一张合适的。调用后你可以继续说话，也可以不说话。"
+            description: "发表情包。当语言不够到位、想用图回应、或氛围需要时使用。系统会自动挑。调用后你可以继续说话，也可以不说话。"
                 .to_string(),
             parameters: serde_json::json!({"type": "object", "properties": {}}),
         },
@@ -84,6 +103,51 @@ fn finish_tool() -> Tool {
 
 fn voice_tools() -> Vec<Tool> {
     vec![query_memory_tool(), send_sticker_tool(), finish_tool()]
+}
+
+fn say_tool(allow_reply: bool) -> Tool {
+    let mut props = serde_json::Map::new();
+    props.insert(
+        "text".into(),
+        serde_json::json!({"type": "string", "description": "要说的话"}),
+    );
+    if allow_reply {
+        props.insert(
+            "reply_to".into(),
+            serde_json::json!({"type": "integer", "description": "（可选）要引用的那条消息的 id"}),
+        );
+    }
+    Tool {
+        tool_type: "function".to_string(),
+        function: crate::ai::FunctionDef {
+            name: "say".to_string(),
+            description: "说出你要说的话（输出即为发言）。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": props,
+                "required": ["text"]
+            }),
+        },
+    }
+}
+
+fn plan_next_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: crate::ai::FunctionDef {
+            name: "plan_next".to_string(),
+            description: "留一个想起：之后某个时候再想想/做点什么。可以和 say/finish 一起用。"
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "in_secs": {"type": "integer", "description": "多久之后（秒，最低 60）"},
+                    "reason": {"type": "string", "description": "到时候想什么，用你自己的话说"}
+                },
+                "required": ["in_secs", "reason"]
+            }),
+        },
+    }
 }
 
 // ── 工具执行 ────────────────────────────────────────────────────
@@ -149,68 +213,90 @@ fn execute_tool(
     }
 }
 
-// ── 系统提示组装 ────────────────────────────────────────────────
+// ── 系统提示装配（最小化：框架 + 身份 + 边界 + 场景 + 时间）──────
 
-fn build_system_prompt(scene: &VoiceScene, identity: &str) -> String {
+fn build_system(scene_line: &str, identity: &str) -> String {
     let cfg = config::get();
-    let bot_name = &cfg.bot_name;
 
     let mut vars: HashMap<&str, &str> = HashMap::new();
-    vars.insert("bot_name", bot_name);
+    vars.insert("bot_name", &cfg.bot_name);
     let frame = crate::prompt::PromptManager::get().render("voice", &vars);
 
     let mut parts = vec![frame, identity.to_string()];
-    let rules = crate::prompt::PromptManager::get().raw("core_rules");
+    let rules = crate::ai::rendered_core_rules();
     if !rules.is_empty() {
-        parts.push(rules.to_string());
+        parts.push(rules);
     }
-
-    let context = build_voice_context(scene);
-    if !context.is_empty() {
-        parts.push(context);
+    if !scene_line.is_empty() {
+        parts.push(scene_line.to_string());
     }
-
     parts.push(format!("当前时间：{}", crate::util::now_formatted_cst()));
     parts.join("\n\n")
 }
-
-// ── 群聊 ────────────────────────────────────────────────────────
 
 fn display_name(user_id: u64, group_id: u64) -> String {
     crate::person_info::get_display_name(user_id, group_id).unwrap_or_else(|| "群友".to_string())
 }
 
-/// 群聊场景记录：最近的消息流（旧在上）+ 本轮新消息（明确标出）
-fn build_group_transcript(group_id: u64, utterances: &[GroupUtterance]) -> (String, Vec<String>) {
-    let mut lines: Vec<String> = Vec::new();
-    for entry in
-        crate::working_memory::get_recent(group_id, TRANSCRIPT_WINDOW_SECS, TRANSCRIPT_MAX_ENTRIES)
-    {
-        let name = display_name(entry.user_id, group_id);
-        lines.push(format!(
-            "[{} {}] {}",
-            name,
-            crate::util::hh_mm(entry.timestamp),
-            entry.content
-        ));
+/// 场景一句话 + darl­ing/强制回应备注
+fn scene_line(group_id: u64, involved: &[u64], force_reply: bool) -> String {
+    let cfg = config::get();
+    let mut text = if group_id == 0 {
+        let name = involved
+            .first()
+            .map(|&uid| display_name(uid, 0))
+            .unwrap_or_else(|| "对方".to_string());
+        format!(
+            "# 现在的场景\n你和{name}在一对一私聊，只有你们两个人。这是你们之间的事，不需要@任何人。"
+        )
+    } else {
+        let names: Vec<String> = involved
+            .iter()
+            .map(|&uid| display_name(uid, group_id))
+            .collect();
+        format!(
+            "# 现在的场景\n你在群 {} 里。这轮说话的人：{}。先看清谁在跟谁说话、有没有人在等你，再决定接不接。",
+            group_id,
+            names.join("、")
+        )
+    };
+    if cfg.darling_qq > 0 && involved.contains(&cfg.darling_qq) {
+        text.push_str("\n在场有你是认定的人——在他面前你不用想那么多。");
     }
-
-    let new_lines: Vec<String> = utterances
-        .iter()
-        .map(|u| format!("[{}] {}", display_name(u.user_id, group_id), u.text))
-        .collect();
-
-    let mut content = String::new();
-    if !lines.is_empty() {
-        content.push_str("# 群里的消息（最近一段时间的记录，旧在上）\n");
-        content.push_str(&lines.join("\n"));
-        content.push_str("\n\n");
+    if force_reply {
+        text.push_str("\n这一轮有人直接叫你（或情况特殊），应该给出回应。");
     }
-    content.push_str("# 刚刚到达的新消息（还没有人回应过）\n");
-    content.push_str(&new_lines.join("\n"));
-
-    (content, lines)
+    text
 }
+
+/// 组装回神/对话共用的"她的经历 + 身体 + 刚刚发生"用户内容
+fn stream_user_content(new_perceptions: &str) -> String {
+    let mut sections: Vec<String> = Vec::new();
+
+    let recent = mind::recent_text(45 * 60, 40);
+    if !recent.is_empty() {
+        sections.push(format!("# 你最近的经历\n{recent}"));
+    }
+
+    let signals = mind::body_signals();
+    if !signals.is_empty() {
+        let rendered = signals
+            .iter()
+            .map(|s| format!("{} {:.1}", s.name, s.level))
+            .collect::<Vec<_>>()
+            .join("、");
+        sections.push(format!("身体：{rendered}"));
+    }
+
+    if !new_perceptions.is_empty() {
+        sections.push(format!("# 刚刚发生（需要你回应/决定）\n{new_perceptions}"));
+    }
+
+    sections.push("回神。".to_string());
+    sections.join("\n\n")
+}
+
+// ── 群聊 ────────────────────────────────────────────────────────
 
 /// 群聊语音：她读完整个群的场面，决定说什么、对谁说，或者不说
 pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bool) -> VoiceAction {
@@ -221,33 +307,25 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
         }
     }
     let primary = involved.first().copied().unwrap_or(0);
-    let query_text = utterances
-        .iter()
-        .map(|u| u.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
 
-    let scene = VoiceScene {
-        group_id,
-        primary_user_id: primary,
-        involved_users: &involved,
-        query_text: &query_text,
-        force_reply,
-    };
+    let new_lines: Vec<String> = utterances
+        .iter()
+        .map(|u| mind::transcribe_message(&display_name(u.user_id, group_id), u.ts, &u.text, false))
+        .collect();
 
     let cfg = config::get();
     let identity = config::prompt();
-    let system = build_system_prompt(&scene, &identity);
-    let (user_content, transcript_lines) = build_group_transcript(group_id, utterances);
+    let system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
+    let user_content = stream_user_content(&new_lines.join("\n"));
 
     debug!(group_id, users = ?involved, force_reply, "voice: group thinking");
 
-    let transcript_tail: Vec<String> = transcript_lines
+    let transcript_tail: Vec<String> = utterances
         .iter()
         .rev()
         .take(5)
         .rev()
-        .cloned()
+        .map(|u| u.text.clone())
         .collect();
 
     let result = run_tool_loop(
@@ -273,8 +351,8 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
 
 /// 私聊语音：一对一，她全神贯注
 ///
-/// `history` 是这段关系的对话轮次；`extra_system` 允许调用方追加
-/// 特殊场景指令（如对话结束检测提示）。
+/// `message` 是刚刚发生的感知内容（含图片描述）；`extra_system` 允许
+/// 调用方追加特殊场景指令（如对话结束检测提示）。
 pub fn speak_private(
     user_id: u64,
     message: &str,
@@ -283,19 +361,30 @@ pub fn speak_private(
 ) -> VoiceAction {
     let cfg = config::get();
     let involved = [user_id];
-    let scene = VoiceScene {
-        group_id: 0,
-        primary_user_id: user_id,
-        involved_users: &involved,
-        query_text: message,
-        force_reply: false,
-    };
-
     let identity = config::prompt();
-    let mut system = build_system_prompt(&scene, &identity);
+    let mut system = build_system(&scene_line(0, &involved, false), &identity);
     if let Some(extra) = extra_system {
         system.push_str("\n\n");
         system.push_str(extra);
+    }
+
+    // 她惦记这个人的心事进入感官
+    let loops = mind::wake::pending_reasons_for(user_id);
+    let packet = SensoryPacket {
+        loops,
+        ..Default::default()
+    };
+    let mut user_content = stream_user_content(message);
+    if !packet.loops.is_empty() {
+        user_content.push_str("\n\n你惦记的：\n");
+        user_content.push_str(
+            &packet
+                .loops
+                .iter()
+                .map(|l| format!("- {l}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
 
     debug!(user_id, "voice: private thinking");
@@ -310,7 +399,7 @@ pub fn speak_private(
     let result = run_tool_loop(
         &system,
         history,
-        message,
+        &user_content,
         &voice_tools(),
         cfg.conversation.voice_max_rounds,
         |name, args| execute_tool(name, args, 0, user_id, &transcript_tail),
@@ -323,6 +412,115 @@ pub fn speak_private(
             info!(user_id, error = %e, "voice: private API error");
             VoiceAction::Silent
         }
+    }
+}
+
+// ── 回神（wake）────────────────────────────────────────────────
+
+/// 一次回神：两阶段——先写内心，再决定行动
+///
+/// `allow_speak` 为 false（睡前整理）时只写内心，不安排 say 工具。
+pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
+    let identity = config::prompt();
+    let system = build_system("", &identity);
+
+    // 阶段一：内心活动
+    let phase1 = format!(
+        "{input}\n\n先把此刻心里真实的活动写下来（1~3 条，每行一条，第一人称，像真的在想）。如果完全没什么可想的，就只回「没什么」。"
+    );
+    let inner_text = match crate::ai::chat(&system, "", &[], &phase1) {
+        Ok((text, _)) => text,
+        Err(e) => {
+            info!(error = %e, "voice: wake phase1 failed");
+            return WakeTurn {
+                inner: Vec::new(),
+                action: WakeAction::Silent,
+                wake: None,
+            };
+        }
+    };
+    let inner: Vec<String> = inner_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && *l != "没什么")
+        .take(3)
+        .map(str::to_string)
+        .collect();
+
+    if !allow_speak {
+        return WakeTurn {
+            inner,
+            action: WakeAction::Silent,
+            wake: None,
+        };
+    }
+
+    // 阶段二：决定行动
+    let decision_tools: Vec<Tool> = vec![say_tool(true), finish_tool(), plan_next_tool()];
+    let captured_action: RefCell<Option<WakeAction>> = RefCell::new(None);
+    let captured_wake: RefCell<Option<(u64, String)>> = RefCell::new(None);
+
+    let decision_content = format!(
+        "{input}\n\n（刚才你心里想的是：{}）\n\n现在收尾这轮回神：有话就说（say），不想说就 finish（finish）。之后还想想想/做点什么，再调 plan_next 留个想起。",
+        if inner.is_empty() {
+            "没什么特别的".to_string()
+        } else {
+            inner.join(" / ")
+        }
+    );
+    let history = vec![("user".to_string(), input.to_string())];
+
+    let _ = run_tool_loop(
+        &system,
+        &history,
+        &decision_content,
+        &decision_tools,
+        4,
+        |name, args| match name {
+            "say" => {
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !text.is_empty() {
+                    let reply_to = args.get("reply_to").and_then(|v| v.as_u64());
+                    *captured_action.borrow_mut() = Some(WakeAction::Speak { text, reply_to });
+                    return ToolOutcome::Abort;
+                }
+                ToolOutcome::Continue("say 需要非空 text。".into())
+            }
+            "finish" => {
+                *captured_action.borrow_mut() = Some(WakeAction::Silent);
+                ToolOutcome::Abort
+            }
+            "plan_next" => {
+                let secs = args
+                    .get("in_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .max(60);
+                let reason = args
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if reason.is_empty() {
+                    return ToolOutcome::Continue("plan_next 需要 reason。".into());
+                }
+                *captured_wake.borrow_mut() = Some((secs.min(48 * 3600), reason));
+                ToolOutcome::Continue("已记下这个安排。现在收尾：say 或 finish。".into())
+            }
+            _ => ToolOutcome::Continue("未知工具，可用：say、finish、plan_next。".into()),
+        },
+    );
+
+    WakeTurn {
+        inner,
+        action: captured_action.into_inner().unwrap_or(WakeAction::Silent),
+        wake: captured_wake.into_inner(),
     }
 }
 

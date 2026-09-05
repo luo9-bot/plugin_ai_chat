@@ -138,6 +138,27 @@ pub fn process_message(user_id: u64, message: &str) {
     // 追加用户消息到对话历史
     with_shared_state(|s| s.push_history(0, user_id, "user", &ai_message, max_history));
 
+    // ── 感知入流 + 夜间门控：夜间是睡眠，不是免打扰（危机除外） ──
+    let crisis_level = crate::emotion::get_state(user_id).crisis_level;
+    let asleep = crate::mind::is_night() && !crisis_level.is_crisis();
+    let mut perception = crate::mind::transcribe_message(
+        &crate::person_info::get_display_name(user_id, 0).unwrap_or_else(|| "有人".into()),
+        crate::util::now_secs(),
+        &ai_message,
+        false,
+    );
+    if asleep {
+        perception.push_str("（她在睡梦中，还没看到这条）");
+    }
+    crate::mind::stream::push(
+        crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, perception)
+            .with_about(user_id),
+    );
+    if asleep {
+        debug!(user_id, "handler: 她在睡觉，消息留到早上");
+        return;
+    }
+
     // 注意力模型
     if cfg.humanity.attention_enabled {
         let mut attn = crate::conversation::attention::load_attention();
@@ -167,8 +188,22 @@ pub fn process_message(user_id: u64, message: &str) {
     });
 
     match voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref()) {
-        VoiceAction::Reply(reply) => finish_private_reply(user_id, &ai_message, &reply),
+        VoiceAction::Reply(reply) => {
+            crate::mind::stream::push(
+                crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
+                    .with_about(user_id),
+            );
+            finish_private_reply(user_id, &ai_message, &reply);
+        }
         VoiceAction::Silent => {
+            // 沉默也是一次被记录的决策（私聊关系里，沉默有分量）
+            crate::mind::stream::push(
+                crate::mind::StreamEvent::new(
+                    crate::mind::StreamKind::Acted,
+                    "（她看了一眼，没有说话）",
+                )
+                .with_about(user_id),
+            );
             debug!(user_id, "voice: private silent");
         }
     }
@@ -240,13 +275,17 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
             crisis_utterances.push(GroupUtterance {
                 user_id: *user_id,
                 text: perceived,
+                ts: timestamps
+                    .first()
+                    .copied()
+                    .unwrap_or_else(crate::util::now_secs),
             });
             forced_users.push(*user_id);
         }
     }
 
     if !crisis_utterances.is_empty() {
-        speak_and_deliver_group(group_id, &crisis_utterances, true, false);
+        speak_and_deliver_group(group_id, &crisis_utterances, true, false, true);
         record_group_activity(group_id);
         return;
     }
@@ -309,10 +348,11 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         .map(|(uid, msg, ts)| GroupUtterance {
             user_id: *uid,
             text: perceive_batch_message(group_id, *uid, msg, ts),
+            ts: ts.first().copied().unwrap_or_else(crate::util::now_secs),
         })
         .collect();
 
-    speak_and_deliver_group(group_id, &utterances, addressed, quota_available);
+    speak_and_deliver_group(group_id, &utterances, addressed, quota_available, false);
     record_group_activity(group_id);
 
     // ── 表达学习：从群聊消息中学习语言风格（后台） ──
@@ -328,14 +368,40 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
 }
 
 /// 语音调用 + 回复落地/沉默簿记
+///
+/// `crisis` 为 true 时绕过夜间门控（真正的危机不会被"她睡着了"挡住）。
 fn speak_and_deliver_group(
     group_id: u64,
     utterances: &[GroupUtterance],
     force_reply: bool,
     consume_quota_on_reply: bool,
+    crisis: bool,
 ) {
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
+
+    // ── 感知入流（含夜间标记）+ 夜间门控：她真的睡了 ──
+    let asleep = crate::mind::is_night() && !crisis;
+    for u in utterances {
+        let mut perception = crate::mind::transcribe_message(
+            &crate::person_info::get_display_name(u.user_id, group_id)
+                .unwrap_or_else(|| "群友".into()),
+            u.ts,
+            &u.text,
+            false,
+        );
+        if asleep {
+            perception.push_str("（她在睡梦中，还没看到这条）");
+        }
+        crate::mind::stream::push(
+            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, perception)
+                .with_about(u.user_id),
+        );
+    }
+    if asleep {
+        debug!(group_id, "handler: 她在睡觉，群消息留到早上");
+        return;
+    }
 
     // 用户消息进入各自历史（摘要压缩依赖它）
     for u in utterances {
@@ -370,12 +436,18 @@ fn speak_and_deliver_group(
 
     match voice::speak_group(group_id, utterances, force_reply) {
         VoiceAction::Reply(reply) => {
+            // 她说的话成为她的经历
+            crate::mind::stream::push(
+                crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
+                    .with_about(primary),
+            );
             if consume_quota_on_reply {
                 crate::quota::check_and_consume(group_id);
             }
             finish_group_reply(group_id, primary, utterances, &reply);
         }
         VoiceAction::Silent => {
+            // 群聊沉默不逐次入流（会淹没她的经历），只做冷却与电量记账
             debug!(group_id, "voice: group silent");
             mark_silence(group_id);
             if cfg.humanity.social_battery_enabled {

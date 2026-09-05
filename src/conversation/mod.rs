@@ -1,8 +1,7 @@
-//! 对话处理模块：消息入口、批次处理、回复生成、上下文构建
+//! 对话处理模块：消息入口、批次处理、回复生成
 
 pub mod attention;
 pub mod batch;
-pub mod context;
 pub mod handler;
 
 use crate::{config, is_admin, read_shared_state, with_shared_state, with_state};

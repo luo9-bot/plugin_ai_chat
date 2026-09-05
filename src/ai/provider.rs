@@ -168,21 +168,11 @@ pub fn parse_bool(value: &serde_json::Value) -> Option<bool> {
     })
 }
 
-/// 调用 AI API，注入记忆/人格/情绪上下文
-///
-/// 返回 (reply, detected_emotion)
-pub fn chat(
-    base_prompt: &str,
-    extra_context: &str,
-    history: &[(String, String)],
-    user_message: &str,
-) -> Result<(String, String), String> {
+/// 渲染 core_rules（占位符已按配置填充）——对话与回神共用的唯一渲染路径
+pub fn rendered_core_rules() -> String {
     let cfg = config::get();
     let bot_name = &cfg.bot_name;
-    let now = crate::util::now_formatted_cst();
-    let time_prompt = format!("\n你的时间为：{}\n", now);
 
-    // 根据配置填充 CORE_RULES 中的风格占位符
     let omit_rule = if cfg.style.omit_subject {
         "- 说话经常省略主语，\"我\"字能省就省。不是\"我觉得很无聊\"，是\"无聊\"。不是\"我在想事情\"，是\"在想事情\""
     } else {
@@ -193,17 +183,32 @@ pub fn chat(
         _ => "- 日常发言不加句号，用换行或竖线代替停顿。问句偶尔加问号但也可以不加",
     };
 
-    // 使用 PromptRenderer 渲染 core_rules
     let mut vars = std::collections::HashMap::new();
     vars.insert("bot_name", bot_name.as_str());
     let max_chars_str = &cfg.style.max_reply_chars.to_string();
     vars.insert("max_reply_chars", max_chars_str.as_str());
     vars.insert("omit_subject_rule", omit_rule);
     vars.insert("punctuation_rule", punct_rule);
-    let resolved_rules = crate::prompt::PromptRenderer::render_simple(
+    crate::prompt::PromptRenderer::render_simple(
         crate::prompt::PromptManager::get().raw("core_rules"),
         &vars,
-    );
+    )
+}
+
+/// 调用 AI API，注入记忆/人格/情绪上下文
+///
+/// 返回 (reply, detected_emotion)
+pub fn chat(
+    base_prompt: &str,
+    extra_context: &str,
+    history: &[(String, String)],
+    user_message: &str,
+) -> Result<(String, String), String> {
+    let cfg = config::get();
+    let now = crate::util::now_formatted_cst();
+    let time_prompt = format!("\n你的时间为：{}\n", now);
+
+    let resolved_rules = rendered_core_rules();
 
     // 组装 system prompt: 核心规则 + 用户 prompt + 记忆/人格/情绪 + 时间
     let mut full_system = format!(
