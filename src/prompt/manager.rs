@@ -124,10 +124,6 @@ impl PromptManager {
                 include_str!("../../defaults/post_analyze.prompt"),
             ),
             (
-                "review_conversation",
-                include_str!("../../defaults/review_conversation.prompt"),
-            ),
-            (
                 "emotion_analyze",
                 include_str!("../../defaults/emotion_analyze.prompt"),
             ),
@@ -156,20 +152,8 @@ impl PromptManager {
                 include_str!("../../defaults/memory_summarize.prompt"),
             ),
             (
-                "self_reflect",
-                include_str!("../../defaults/self_reflect.prompt"),
-            ),
-            (
                 "task_progress",
                 include_str!("../../defaults/task_progress.prompt"),
-            ),
-            (
-                "proactive_message",
-                include_str!("../../defaults/proactive_message.prompt"),
-            ),
-            (
-                "mental_state_generate",
-                include_str!("../../defaults/mental_state_generate.prompt"),
             ),
             (
                 "vision_describe",

@@ -16,19 +16,14 @@ pub mod emoji;
 pub mod emotion;
 pub mod learner;
 pub mod memory;
-pub mod mental_state;
 pub mod mind;
-pub mod narrative_self;
 pub mod person_info;
 pub mod personal_tasks;
-pub mod personality;
-pub mod proactive;
 pub mod prompt;
 pub mod quota;
 pub mod reply_effect;
 pub mod runtime;
 pub mod schedule;
-pub mod self_memory;
 #[cfg(feature = "plugin")]
 pub mod sender;
 pub mod social_battery;
@@ -160,8 +155,6 @@ where
 static LAST_PROACTIVE_CHECK: AtomicU64 = AtomicU64::new(0);
 /// 上次记忆审查时间
 static LAST_MEMORY_REVIEW: AtomicU64 = AtomicU64::new(0);
-/// 上次自我反思时间
-static LAST_SELF_REFLECTION: AtomicU64 = AtomicU64::new(0);
 
 // ── 插件入口 ────────────────────────────────────────────────────
 
@@ -306,9 +299,6 @@ pub extern "C" fn plugin_main() {
     // 初始化 ECC 密钥对 (在注册之前)
     crypto::init();
 
-    // 注册到远程注册表 (后台线程，不阻塞启动)
-    thread::spawn(crate::self_memory::register_to_registry);
-
     // 启动管理后台 (后台线程)
     if !config::get().admin.token.is_empty() {
         thread::spawn(admin::start_server);
@@ -334,7 +324,6 @@ pub extern "C" fn plugin_main() {
     let now = util::now_secs();
     LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
     LAST_MEMORY_REVIEW.store(now, Ordering::Relaxed);
-    LAST_SELF_REFLECTION.store(now, Ordering::Relaxed);
 
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
@@ -421,9 +410,6 @@ fn check_periodic() {
         social_battery::update(&mut battery);
         social_battery::save(&battery);
     }
-
-    // 主动消息动机更新
-    proactive::motivation::update_motivations();
 
     // 回神：兑现她自己留下的想起 + 睡前整理（后台线程）
     std::thread::spawn(|| {
@@ -603,11 +589,6 @@ fn check_periodic() {
     // 检查活动进度（完成的活动会记录，供生命事件路径触发）
     activity::check_activity_progress();
 
-    // 心理状态衰减 (担忧 + 要考量)
-    let ms_cfg = &config::get().mental_state;
-    mental_state::decay_concerns(ms_cfg.concern_decay_rate);
-    mental_state::decay_deliberations(ms_cfg.deliberation_decay_rate);
-
     // 每日计划检查 (每天早上生成新计划)
     if schedule::check_and_generate_plan() {
         do_daily_plan_generation();
@@ -627,152 +608,9 @@ fn check_periodic() {
     let pushes = schedule::check_plan_push();
     for push in &pushes {
         debug!(content = %push, "schedule: plan push");
-        // 把推动内容加入自我记忆，主动消息会读取并自然带出来
-        self_memory::add(push, self_memory::ThoughtCategory::Plan);
+        // 推动内容以感官形式进入她的意识流，由她自己决定是否提起
+        mind::push_sensation(format!("今天计划里有：{push}"));
     }
-
-    // 对话后反思: 对话结束一段时间后回顾刚结束的对话（后台线程执行）
-    let post_delay = config::get().self_reflection.post_conversation_delay_secs;
-    let idle_groups = read_shared_state(|s| s.get_idle_groups(now, post_delay));
-    for group_id in idle_groups {
-        with_shared_state(|s| {
-            s.reflected_groups.insert(group_id);
-        });
-        with_state(|s| {
-            s.last_review_times.insert(group_id, now);
-        });
-        std::thread::spawn(move || {
-            do_post_conversation_reflection(group_id);
-        });
-    }
-
-    // 长时间对话的定期审查：对话还在继续，但距离上次审查已经很久（后台线程执行）
-    let review_interval = config::get().self_reflection.interval;
-    let conv_times = read_shared_state(|s| s.last_conversation_times.clone());
-    let active_review_groups = with_state(|s| {
-        state::get_groups_needing_review(
-            &conv_times,
-            &s.last_review_times,
-            now,
-            review_interval,
-            post_delay,
-        )
-    });
-    for group_id in active_review_groups {
-        with_state(|s| {
-            s.last_review_times.insert(group_id, now);
-        });
-        std::thread::spawn(move || {
-            do_post_conversation_reflection(group_id);
-        });
-    }
-
-    // 内心独白：生成和衰减（生成移到后台线程）
-    if config::get().humanity.inner_thought_enabled {
-        std::thread::spawn(|| {
-            if let Some(thought) = self_memory::inner_thought::try_generate() {
-                debug!(content = %thought.content, "inner_thought: new thought generated");
-                // 有行动潜力的想法加入自我记忆，可能触发主动消息
-                if thought.action_potential > 0.5 {
-                    self_memory::add(&thought.content, self_memory::ThoughtCategory::Feeling);
-                }
-            }
-        });
-        self_memory::inner_thought::decay_thoughts();
-    }
-
-    // 定时空闲反思 (从配置读取间隔，后台线程执行)
-    let reflect_interval = config::get().self_reflection.interval;
-    let last_reflect = LAST_SELF_REFLECTION.load(Ordering::Relaxed);
-    if now.saturating_sub(last_reflect) >= reflect_interval {
-        LAST_SELF_REFLECTION.store(now, Ordering::Relaxed);
-        std::thread::spawn(|| {
-            do_self_reflection();
-        });
-    }
-}
-
-/// 执行自我反思：收集最近对话上下文，调用 AI 生成内心想法
-fn do_self_reflection() {
-    // 收集群组列表 (thread_local) 和私聊上下文 (shared)
-    let group_ids: Vec<u64> = with_state(|s| {
-        s.active_groups
-            .iter()
-            .filter(|&&gid| gid > 0)
-            .copied()
-            .collect()
-    });
-
-    let recent_context = read_shared_state(|s| {
-        let mut context_parts = Vec::new();
-        for (&(gid, uid), ctx) in &s.contexts {
-            if gid == 0 && !ctx.history.is_empty() {
-                let recent: Vec<String> = ctx
-                    .history
-                    .iter()
-                    .rev()
-                    .take(4)
-                    .map(|(role, content)| format!("[{}] {}", role, content))
-                    .collect();
-                if !recent.is_empty() {
-                    context_parts.push(format!("用户{}的私聊:\n{}", uid, recent.join("\n")));
-                }
-            }
-        }
-        context_parts.join("\n\n")
-    });
-
-    // 构建群组画像：每个群的最近消息，让 AI 理解每个群是干什么的
-    let group_profiles: Vec<self_memory::GroupProfile> = group_ids
-        .iter()
-        .map(|&gid| {
-            let entries = working_memory::get_recent(gid, 7200, 20);
-            let recent_messages = if entries.is_empty() {
-                "(最近没有消息)".to_string()
-            } else {
-                let lines: Vec<String> = entries
-                    .iter()
-                    .map(|e| {
-                        let name = person_info::get_display_name(e.user_id, gid)
-                            .unwrap_or_else(|| "群友".to_string());
-                        format!("[{}] {}", name, e.content)
-                    })
-                    .collect();
-                lines.join("\n")
-            };
-            self_memory::GroupProfile {
-                group_id: gid,
-                recent_messages,
-            }
-        })
-        .collect();
-
-    let (count, share) = self_memory::reflect(&recent_context, &group_profiles);
-
-    // 如果反思产生了想分享的想法，主动发送 (只发到激活的群)
-    // 但要检查对话是否仍然活跃，避免发送过时的内容
-    if let Some((content, group_id)) = share {
-        let is_active = with_state(|s| s.active_groups.contains(&group_id));
-        if !is_active {
-            debug!(group_id, "self_reflect: skipping share to inactive group");
-            return;
-        }
-
-        // 检查该群最近是否有活跃对话（5分钟内有消息）
-        let recent_entries = working_memory::get_recent(group_id, 300, 5);
-        if recent_entries.is_empty() {
-            debug!(
-                group_id,
-                "self_reflect: skipping share, no recent conversation"
-            );
-            return;
-        }
-
-        debug!(group_id, content, "self_reflect: sharing thought");
-        sender::safe_send_quiet(group_id, 0, &content);
-    }
-
-    debug!(count, "self_reflect completed");
 }
 
 /// 生成每日计划
@@ -783,17 +621,11 @@ fn do_daily_plan_generation() {
     }
 
     // 构建上下文
-    let mut context = format!(
+    let context = format!(
         "{}\n\n{}",
         user_prompt,
         schedule::get_plan_generation_prompt()
     );
-
-    // 添加最近的自我记忆
-    let self_mem = self_memory::get_context(5);
-    if !self_mem.is_empty() {
-        context = format!("{}\n\n# 最近的想法\n{}", context, self_mem);
-    }
 
     // 调用 AI 生成计划
     match ai::analyze_with_tools(
@@ -826,10 +658,9 @@ fn do_weekly_plan_generation() {
     }
 
     let context = format!(
-        "{}\n\n{}\n\n# 最近的想法\n{}",
+        "{}\n\n{}",
         user_prompt,
         crate::prompt::PromptManager::get().raw("weekly_plan"),
-        self_memory::get_context(5),
     );
 
     match ai::analyze_with_tools(
@@ -870,10 +701,9 @@ fn do_monthly_plan_generation() {
     }
 
     let context = format!(
-        "{}\n\n{}\n\n# 最近的想法\n{}",
+        "{}\n\n{}",
         user_prompt,
         crate::prompt::PromptManager::get().raw("monthly_plan"),
-        self_memory::get_context(5),
     );
 
     match ai::analyze_with_tools(
@@ -899,155 +729,6 @@ fn do_monthly_plan_generation() {
             }
         }
         Err(e) => debug!(error = %e, "monthly plan generation failed"),
-    }
-}
-
-/// 对话后反思：回顾刚结束的群对话 + 审查新消息（已读+未读）
-fn do_post_conversation_reflection(group_id: u64) {
-    // 获取上次审查到的时间戳，只处理之后的新消息
-    let last_reviewed =
-        with_shared_state(|s| *s.last_reviewed_timestamps.get(&group_id).unwrap_or(&0));
-
-    // 取该群的新工作记忆 (上次审查之后的消息)
-    let entries = working_memory::get_since(group_id, last_reviewed, 50);
-    if entries.is_empty() {
-        return;
-    }
-
-    let self_qq = config::get().self_qq;
-
-    // 全部消息都展示，但用 [bot] 和 [user_id:XXX] 清晰区分谁说了什么
-    let recent_context: Vec<String> = entries
-        .iter()
-        .map(|e| {
-            let is_self = self_qq > 0 && e.user_id == self_qq;
-            let who = if is_self {
-                "bot".to_string()
-            } else {
-                person_info::get_display_name(e.user_id, group_id)
-                    .unwrap_or_else(|| "群友".to_string())
-            };
-            let tag = if e.bot_replied {
-                "[已回复]"
-            } else {
-                "[未回复]"
-            };
-            format!("[{}]{} {}", who, tag, e.content)
-        })
-        .collect();
-    let context_text = recent_context.join("\n");
-
-    // 记录最新消息的时间戳，下次只处理更新的
-    let max_timestamp = entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
-    with_shared_state(|s| {
-        s.last_reviewed_timestamps.insert(group_id, max_timestamp);
-    });
-
-    // 检查内容是否与上次反思时足够相似，避免对同一话题反复思考
-    let normalized = util::normalize_for_compare(&context_text);
-    let should_reflect = with_shared_state(|s| {
-        if let Some(prev) = s.last_reflected_content.get(&group_id) {
-            util::content_overlap(prev, &normalized) < 0.5
-        } else {
-            true
-        }
-    });
-
-    if should_reflect {
-        // 1. 自我反思
-        let group_profiles = vec![self_memory::GroupProfile {
-            group_id,
-            recent_messages: context_text.clone(),
-        }];
-        let (count, _share) = self_memory::reflect(&context_text, &group_profiles);
-        debug!(group_id, count, "post_conversation_reflect completed");
-
-        with_shared_state(|s| {
-            s.last_reflected_content.insert(group_id, normalized);
-        });
-    } else {
-        debug!(
-            group_id,
-            "post_conversation_reflect skipped (similar content)"
-        );
-    }
-
-    // 2. 审查对话消息 (已读+未读，像人翻聊天记录一样)
-    review_conversation_messages(group_id, &context_text);
-
-    // 3. 从对话中生成担忧和要考量
-    mental_state::generate_from_conversation(group_id, &context_text);
-}
-
-/// 审查对话消息，只提取有关的记忆
-fn review_conversation_messages(group_id: u64, messages_text: &str) {
-    let mut context_parts = Vec::new();
-    let user_prompt = config::prompt();
-    if !user_prompt.is_empty() {
-        context_parts.push(format!("# 你的身份\n{}", user_prompt));
-    }
-    let personality = personality::get_prompt_context();
-    if !personality.is_empty() {
-        context_parts.push(personality);
-    }
-    let mem = memory::get_context(0, group_id);
-    if !mem.is_empty() {
-        context_parts.push(mem);
-    }
-
-    let full_context = format!(
-        "{}\n\n# 对话记录\n{}",
-        context_parts.join("\n\n"),
-        messages_text
-    );
-
-    match ai::analyze_with_tools(
-        crate::prompt::PromptManager::get().raw("review_conversation"),
-        &full_context,
-        &[ai::review_conversation_tool()],
-        Some(serde_json::json!("auto")),
-    ) {
-        Ok(parsed) => {
-            if let Some(relevant) = parsed.get("relevant").and_then(|r| r.as_array()) {
-                for item in relevant {
-                    let user_id = item.get("user_id").and_then(|u| u.as_u64()).unwrap_or(0);
-                    let memory_content = item.get("memory").and_then(|m| m.as_str()).unwrap_or("");
-                    let importance_str = item
-                        .get("importance")
-                        .and_then(|i| i.as_str())
-                        .unwrap_or("normal");
-                    if memory_content.is_empty() || user_id == 0 {
-                        continue;
-                    }
-                    let importance = match importance_str {
-                        "permanent" => memory::Importance::Permanent,
-                        "important" => memory::Importance::Important,
-                        _ => memory::Importance::Normal,
-                    };
-                    memory::add(user_id, group_id, memory_content, importance);
-                }
-                debug!(
-                    group_id,
-                    count = relevant.len(),
-                    "review_conversation: memories extracted"
-                );
-            }
-
-            if let Some(emotion_obj) = parsed.get("emotion") {
-                let state = emotion_obj
-                    .get("state")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("neutral");
-                let intensity = emotion_obj
-                    .get("intensity")
-                    .and_then(|i| i.as_f64())
-                    .unwrap_or(0.3) as f32;
-                emotion::update_from_analysis(0, state, intensity);
-            }
-        }
-        Err(e) => {
-            debug!(error = %e, "review_conversation: AI error");
-        }
     }
 }
 
@@ -1131,5 +812,3 @@ pub(crate) fn is_admin(user_id: u64) -> bool {
 // ── 命令处理 re-exports（供 admin 模块调用） ─────────────────────
 pub use conversation::handle_admin_command;
 pub use conversation::handle_control_command;
-pub use conversation::handle_personality_command;
-pub use conversation::handle_proactive_command;

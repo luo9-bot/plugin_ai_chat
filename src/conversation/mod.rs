@@ -162,16 +162,6 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
             crate::sender::send_msg(group_id, user_id, &reply);
             return;
         }
-
-        // 人格/主动对话管理命令 (管理员专属)
-        if let Some(reply) = handle_personality_command(trimmed) {
-            crate::sender::send_msg(group_id, user_id, &reply);
-            return;
-        }
-        if let Some(reply) = handle_proactive_command(trimmed) {
-            crate::sender::send_msg(group_id, user_id, &reply);
-            return;
-        }
     }
 
     // ── 群组未激活则不处理 ──
@@ -189,7 +179,6 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     // ── 记录用户交互 + 情绪分析 + 工作记忆 (无论是否回复) ──
     // 去除图片 CQ 码后再做情绪分析和工作记忆记录
     let text_only = crate::vision::strip_image_cq(trimmed);
-    crate::proactive::record_user_reply(user_id);
     crate::emotion::analyze_user_message(user_id, &text_only);
     let record_ts = crate::working_memory::record(
         group_id,
@@ -336,18 +325,7 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
         return;
     }
 
-    if let Some(reply) = handle_personality_command(trimmed) {
-        crate::sender::send_msg(0, user_id, &reply);
-        return;
-    }
-
-    if let Some(reply) = handle_proactive_command(trimmed) {
-        crate::sender::send_msg(0, user_id, &reply);
-        return;
-    }
-
     if with_state(|s| s.active.contains(&user_id)) {
-        crate::proactive::record_private_user_reply(user_id);
         crate::emotion::analyze_user_message(user_id, trimmed);
 
         // 表情包自动注册（同群聊逻辑）
@@ -427,99 +405,6 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
         }
         _ => None,
     }
-}
-
-// ── 人格管理命令 ────────────────────────────────────────────────
-
-pub fn handle_personality_command(msg: &str) -> Option<String> {
-    if msg == "查看人格" {
-        let ctx = crate::personality::get_prompt_context();
-        return Some(format!("当前人格设定:\n{}", ctx));
-    }
-
-    if msg == "人格模板" {
-        let templates = [
-            "温柔体贴",
-            "幽默风趣",
-            "理性分析",
-            "傲娇毒舌",
-            "元气活泼",
-            "安静内敛",
-        ];
-        return Some(format!("可用人格模板:\n{}", templates.join("\n")));
-    }
-
-    if let Some(name) = msg.strip_prefix("切换人格:") {
-        let name = name.trim();
-        return Some(crate::personality::apply_template(name).unwrap_or_else(|e| e));
-    }
-
-    if let Some(rest) = msg.strip_prefix("调整特质:") {
-        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-        if parts.len() == 2
-            && let Ok(value) = parts[1].parse::<f32>()
-        {
-            return Some(crate::personality::adjust_trait(parts[0], value).unwrap_or_else(|e| e));
-        }
-        return Some("格式: 调整特质:特质名 数值 (0.0~1.0)".into());
-    }
-
-    if let Some(name) = msg.strip_prefix("保存人格:") {
-        return Some(crate::personality::save_snapshot(name.trim()).unwrap_or_else(|e| e));
-    }
-
-    if let Some(name) = msg.strip_prefix("加载人格:") {
-        return Some(crate::personality::load_snapshot(name.trim()).unwrap_or_else(|e| e));
-    }
-
-    if msg == "人格列表" {
-        let list = crate::personality::list_snapshots();
-        if list.is_empty() {
-            return Some("没有保存的人格快照".into());
-        }
-        return Some(format!("已保存的人格:\n{}", list.join("\n")));
-    }
-
-    None
-}
-
-// ── 主动对话命令 ────────────────────────────────────────────────
-
-pub fn handle_proactive_command(msg: &str) -> Option<String> {
-    match msg {
-        "开启主动对话" => {
-            crate::proactive::set_enabled(true);
-            return Some("已开启主动对话".into());
-        }
-        "关闭主动对话" => {
-            crate::proactive::set_enabled(false);
-            return Some("已关闭主动对话".into());
-        }
-        _ => {}
-    }
-
-    if let Some(rest) = msg.strip_prefix("设置免打扰:") {
-        let parts: Vec<&str> = rest.splitn(2, '-').collect();
-        if parts.len() == 2
-            && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-        {
-            crate::proactive::set_quiet_hours(start, end);
-            return Some(format!("已设置免打扰: {}时 - {}时", start, end));
-        }
-        return Some("格式: 设置免打扰:23-7".into());
-    }
-
-    if let Some(rest) = msg.strip_prefix("提醒我:") {
-        // 提醒我:MM-DD 描述
-        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-        if parts.len() == 2 {
-            crate::proactive::add_date_reminder(0, parts[0], parts[1]);
-            return Some(format!("已添加日期提醒: {} {}", parts[0], parts[1]));
-        }
-        return Some("格式: 提醒我:MM-DD 描述".into());
-    }
-
-    None
 }
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────

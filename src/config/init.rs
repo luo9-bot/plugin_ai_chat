@@ -147,26 +147,16 @@ pub fn init() {
 
 fn load_all() {
     let mem_count = crate::memory::load_user_count();
-    let pers = crate::personality::current_name();
-    let snapshots = crate::personality::snapshot_count();
     let emo_count = crate::emotion::user_count();
-    let proactive_count = crate::proactive::user_count();
     let wm_groups = crate::working_memory::group_count();
-    let self_thoughts = crate::self_memory::load_count();
-    let mental_count = crate::mental_state::load_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
     let block_count = crate::blocklist::load_count();
 
     debug!(
         path = ?super::data_dir(),
         users = mem_count,
-        personality = %pers,
-        snapshots,
         emotions = emo_count,
-        proactive = proactive_count,
         wm_groups,
-        self_thoughts,
-        mental_state = mental_count,
         blocked = block_count,
         archive_wm,
         archive_lt,

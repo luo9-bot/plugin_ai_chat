@@ -582,7 +582,7 @@ pub fn analyze_with_tools_cfg(
 /// 尝试将纯文本包装为工具的 JSON 参数
 ///
 /// 兼容模型直接输出消息文本而不调用 tool_calls 的情况，
-/// 适用于 proactive_message、mental_state_generate、memory_review 等场景。
+/// 适用于 memory_review、decide_reply 等场景。
 fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Value, ()> {
     for tool in tools {
         let params = &tool.function.parameters;
@@ -605,69 +605,7 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             }
         }
 
-        // 情况 2: mental_state_generate — { concerns: [], deliberations: [{content: text}] }
-        if tool.function.name == "mental_state_generate" {
-            let trimmed = text.trim();
-            // 过滤掉对话回复（短文本、口语化回应），这些不是内心想法
-            let conversational = [
-                "嗯",
-                "嗯嗯",
-                "好的",
-                "去吧",
-                "好",
-                "哦",
-                "好吧",
-                "知道了",
-                "嗯 去吧",
-                "嗯 好",
-                "好的呢",
-                "行",
-                "行吧",
-                "可以",
-                "没问题",
-                "嗯嗯 好的",
-                "收到",
-                "了解",
-                "嗯呐",
-                "对",
-                "是的",
-                "你说是就是吧",
-                "那真好",
-                "下午好呀",
-            ];
-            let is_short_response =
-                trimmed.chars().count() <= 15 && conversational.iter().any(|c| trimmed.contains(c));
-            // 过滤掉包含括号描述的内容（AI 格式违规，不是真正的内心想法）
-            let has_parenthetical = trimmed.contains('（') || trimmed.contains('(');
-            // 过滤掉看起来像对话回复的内容（包含换行+短句的模式）
-            let lines: Vec<&str> = trimmed.split('\n').collect();
-            let has_conversational_line = lines.iter().any(|line| {
-                let l = line.trim();
-                l.chars().count() <= 10 && conversational.iter().any(|c| l.contains(c))
-            });
-            if is_short_response
-                || has_parenthetical
-                || (has_conversational_line && trimmed.chars().count() < 60)
-            {
-                // 短对话回复或格式违规，跳过不记录为内心想法
-                let wrapped = serde_json::json!({
-                    "concerns": [],
-                    "deliberations": []
-                });
-                debug!(
-                    "try_wrap_text_for_tools: wrapped as mental_state_generate (skip conversational)"
-                );
-                return Ok(wrapped);
-            }
-            let wrapped = serde_json::json!({
-                "concerns": [],
-                "deliberations": [{"content": text}]
-            });
-            debug!("try_wrap_text_for_tools: wrapped as mental_state_generate deliberation");
-            return Ok(wrapped);
-        }
-
-        // 情况 3: memory_review — { action: "keep", reason: text }
+        // 情况 2: memory_review — { action: "keep", reason: text }
         if tool.function.name == "memory_review" {
             let wrapped = serde_json::json!({
                 "action": "keep",
@@ -677,27 +615,7 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             return Ok(wrapped);
         }
 
-        // 情况 4: review_conversation — { relevant: [], emotion: { state: "neutral", intensity: 0.3 } }
-        if tool.function.name == "review_conversation" {
-            let wrapped = serde_json::json!({
-                "relevant": [],
-                "emotion": {"state": "neutral", "intensity": 0.3}
-            });
-            debug!("try_wrap_text_for_tools: wrapped as review_conversation (skip)");
-            return Ok(wrapped);
-        }
-
-        // 情况 5: self_reflect — { thoughts: [{ content, category }], share: { should_share: false } }
-        if tool.function.name == "self_reflect" {
-            let wrapped = serde_json::json!({
-                "thoughts": [{"content": text, "category": "reflection"}],
-                "share": {"should_share": false, "content": "", "target_group_id": 0}
-            });
-            debug!("try_wrap_text_for_tools: wrapped as self_reflect");
-            return Ok(wrapped);
-        }
-
-        // 情况 6: decide_reply — AI 直接输出文本而非调用工具
+        // 情况 3: decide_reply — AI 直接输出文本而非调用工具
         if tool.function.name == "decide_reply" {
             let trimmed = text.trim();
             // 检测 AI 是否在表达"不想回复"的意图
@@ -724,34 +642,6 @@ fn try_wrap_text_for_tools(text: &str, tools: &[Tool]) -> Result<serde_json::Val
             // 默认认为想回复（AI 输出了内容，通常意味着想说什么）
             let wrapped = serde_json::json!({"reply": true, "reason": "fallback: AI直接输出文本"});
             debug!("try_wrap_text_for_tools: wrapped as decide_reply (reply)");
-            return Ok(wrapped);
-        }
-
-        // 情况 7: proactive_message
-        if tool.function.name == "proactive_message" {
-            let trimmed = text.trim();
-            let meaningless = [
-                "没什么要说的",
-                "没有想说的",
-                "没什么想说的",
-                "安静待着",
-                "该安静",
-                "没什么好说的",
-                "不想说话",
-                "先不说了",
-                "先不说话",
-                "下次再说",
-                "不用说话",
-                "不说了",
-                "就不说了",
-            ];
-            if trimmed.is_empty() || meaningless.iter().any(|p| trimmed.contains(p)) {
-                let wrapped = serde_json::json!({"skip": true, "distinct_from_recent": "ai判断没什么好说的，选择沉默", "message": ""});
-                debug!("try_wrap_text_for_tools: wrapped as proactive_message (skip)");
-                return Ok(wrapped);
-            }
-            let wrapped = serde_json::json!({"skip": false, "distinct_from_recent": "fallback: ai直接输出文本", "message": text});
-            debug!("try_wrap_text_for_tools: wrapped as proactive_message");
             return Ok(wrapped);
         }
     }
@@ -1025,13 +915,9 @@ pub fn post_analyze(
 
     // 动态拼接人设到系统提示词
     let user_prompt = config::prompt();
-    let personality = crate::personality::get_prompt_context();
     let mut system_prompt = String::new();
     if !user_prompt.is_empty() {
         system_prompt.push_str(&format!("# 你的身份\n{}\n\n", user_prompt));
-    }
-    if !personality.is_empty() {
-        system_prompt.push_str(&format!("{}\n\n", personality));
     }
     system_prompt.push_str(crate::prompt::PromptManager::get().raw("post_analyze"));
 

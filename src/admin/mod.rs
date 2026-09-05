@@ -150,14 +150,11 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
     let api_segs = &segs[1..]; // 去掉 "api"
 
     match api_segs.first() {
-        Some(&"self-thoughts") => handlers::handle_self_thoughts(&method, &api_segs[1..], &body),
         Some(&"memory") => handlers::handle_memory(&method, &api_segs[1..], &body),
         Some(&"working-memory") => handlers::handle_working_memory(&method, &api_segs[1..], &body),
         Some(&"backups") => handlers::handle_backups(&method, &api_segs[1..], &body),
         Some(&"emotion") => handlers::handle_emotion(&method, &api_segs[1..], &body),
-        Some(&"mental-state") => handlers::handle_mental_state(&method, &api_segs[1..], &body),
         Some(&"blocklist") => handlers::handle_blocklist(&method, &api_segs[1..], &body),
-        Some(&"proactive") => handlers::handle_proactive(&method, &api_segs[1..], &body),
         Some(&"archive") => {
             if method == Method::Get {
                 handlers::handle_archive()
@@ -167,7 +164,6 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"schedule") => handlers::handle_schedule(&method, &body),
         Some(&"analytics") => handlers::handle_analytics(),
-        Some(&"sync") => handlers::handle_sync(&method, &api_segs[1..], &body),
         Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..], &body),
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handlers::handle_config(&method, &api_segs[1..], &body),
@@ -199,7 +195,6 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"humanity") => handlers::handle_humanity(),
         Some(&"memory-ops-log") => handlers::handle_memory_ops_log(&method, &api_segs[1..]),
         Some(&"relationships") => handlers::handle_relationships(&method, &api_segs[1..]),
-        Some(&"narrative-self") => handlers::handle_narrative_self(&method, &api_segs[1..], &body),
         Some(&"info") => handlers::handle_info(),
         Some(&"version") => ok(serde_json::json!({"version": env!("CARGO_PKG_VERSION")})),
         _ => err(404, "not found"),
