@@ -388,6 +388,7 @@ fn speak_and_deliver_group(
 ) {
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
+    let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
 
     // ── 感知入流（含夜间标记）+ 夜间门控：她真的睡了 ──
     let asleep = crate::mind::is_night() && !crisis;
@@ -412,6 +413,31 @@ fn speak_and_deliver_group(
         return;
     }
 
+    // ── SpeakScore 门控：开口势低于阈值 → 这轮她没注意到（批次已照常入流，
+    //    下次回神翻流时依然看得见；@/危机等 forced 路径不会走到这里） ──
+    if !force_reply {
+        let utterance_refs: Vec<(u64, &str)> = utterances
+            .iter()
+            .map(|u| (u.user_id, u.text.as_str()))
+            .collect();
+        let score = crate::mind::social::speak_score(group_id, &utterance_refs, primary);
+        if score < crate::mind::social::SPEAK_GATE {
+            debug!(
+                group_id,
+                score,
+                gate = crate::mind::social::SPEAK_GATE,
+                "voice: speak score below gate, staying quiet"
+            );
+            mark_silence(group_id);
+            if cfg.humanity.social_battery_enabled {
+                let mut battery = crate::social_battery::load();
+                crate::social_battery::record_passive_participation(&mut battery);
+                crate::social_battery::save(&battery);
+            }
+            return;
+        }
+    }
+
     // 用户消息进入各自历史（摘要压缩依赖它）
     for u in utterances {
         let text_only = crate::vision::strip_image_cq(&u.text);
@@ -426,7 +452,6 @@ fn speak_and_deliver_group(
     }
 
     // 联想：她能想起什么（以在场话题为线索，转述入流）
-    let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
     let joined_text: String = utterances
         .iter()
         .map(|u| u.text.as_str())
@@ -537,6 +562,10 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
         .collect::<Vec<_>>()
         .join("\n");
     crate::mind::archive::record_reply(group_id, primary, &trigger, reply, false);
+
+    // ── 社会世界模型：她的话挂进最热线程——
+    //    她下一眼能看见自己刚说过什么，并由此开始观察有没有人接她的话 ──
+    crate::mind::social::record_bot_speech(group_id, reply);
 
     // 后处理任务不阻塞，逐用户放入后台线程
     let rep = reply.to_string();

@@ -957,6 +957,45 @@ pub fn state_for_admin(group_id: u64) -> SocialState {
     with_state(group_id, |state| state.clone())
 }
 
+/// 磁盘上已有社会状态文件的群（含本进程未加载的）
+fn known_group_ids() -> Vec<u64> {
+    let mut ids: Vec<u64> = {
+        let _lock = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let states = STATES.lock().unwrap_or_else(|e| e.into_inner());
+        states
+            .as_ref()
+            .map(|m| m.keys().copied().collect())
+            .unwrap_or_default()
+    };
+    let dir = config::data_dir().join("mind").join("social");
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            if let Ok(gid) = name.strip_suffix(".json").unwrap_or("").parse::<u64>() {
+                ids.push(gid);
+            }
+        }
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// 被拉黑用户的一切社会痕迹清洗（内存 + 落盘，随零容忍/管理员拉黑调用）
+pub fn purge_user(user_id: u64) {
+    for group_id in known_group_ids() {
+        let snapshot = with_state(group_id, |state| {
+            purge_user_in(state, user_id);
+            state.updated_at = util::now_secs();
+            state.clone()
+        });
+        save_state_to_disk(group_id, &snapshot);
+    }
+}
+
 // speak_score_of 里 unanswered 判定需要 bot_name/self_qq：
 // 把它们并入打分上下文而不是塞进 Input（Input 只承载她的内在状态）
 /// 计算这批消息对她的"开口势"（speak_score ∈ 约 [-0.5, 1.0]）。

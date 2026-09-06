@@ -25,6 +25,7 @@ fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, 
     mind::persons::purge_user_want_to_say(user_id);
     mind::diary::purge_about(user_id);
     mind::wake::purge_loops_about(user_id);
+    mind::social::purge_user(user_id);
     mind::security::log_event(
         user_id,
         "perception",
@@ -202,6 +203,18 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
         } else {
             &text_only
         },
+    );
+
+    // ── 社会世界模型：这条消息改变群里的势（纯内存观察，主循环零 IO） ──
+    crate::mind::social::observe_message(
+        group_id,
+        user_id,
+        if text_only.is_empty() {
+            "[图片]"
+        } else {
+            &text_only
+        },
+        record_ts,
     );
 
     // ── 人物档案：注册/更新 ──
@@ -536,6 +549,7 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
                         s.forget_user_local(uid);
                     });
                     with_shared_state(|s| s.forget_user_shared(uid));
+                    crate::mind::social::purge_user(uid);
                     format!("已拉黑用户{}，该用户的所有消息将被忽略", uid)
                 }
             }

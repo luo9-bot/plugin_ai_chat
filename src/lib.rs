@@ -411,6 +411,12 @@ fn check_periodic() {
         social_battery::save(&battery);
     }
 
+    // 社会世界模型周期维护：注意力全表衰减 + 线程生命周期 + 落盘
+    let active_groups: Vec<u64> = with_state(|s| s.active_groups.iter().copied().collect());
+    for group_id in active_groups {
+        mind::social::tick(group_id);
+    }
+
     // 回神：兑现她自己留下的想起 + 睡前整理（后台线程）
     std::thread::spawn(|| {
         for (plan, product) in mind::wake_tick() {
