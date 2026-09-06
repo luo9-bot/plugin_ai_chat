@@ -16,10 +16,11 @@ use crate::mind::stream::{self, StreamKind};
 use crate::util;
 
 /// 虚词停用表：这类字出现在哪都不构成"话题相关"
-const STOPWORDS: &str = "的了是我你他她它在呢啊吧嘛嗯哦哈呀就都也很又还说要不好这那个什么有没";
+pub(crate) const STOPWORDS: &str =
+    "的了是我你他她它在呢啊吧嘛嗯哦哈呀就都也很又还说要不好这那个什么有没吗们";
 
 /// 话题相关度：话题中的实词字符被候选文本命中的个数（≥2 视为相关）
-fn topic_overlap(topic: &str, candidate: &str) -> usize {
+pub(crate) fn topic_overlap(topic: &str, candidate: &str) -> usize {
     topic
         .chars()
         .filter(|c| !c.is_whitespace() && !STOPWORDS.contains(*c))

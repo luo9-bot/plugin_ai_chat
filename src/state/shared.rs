@@ -96,6 +96,13 @@ impl SharedState {
         }
     }
 
+    /// 她在某群最近一次发言距今多少秒（None = 从未或已超出记录）
+    pub fn last_reply_ago(&self, group_id: u64) -> Option<u64> {
+        self.last_reply_times
+            .get(&(group_id, 0))
+            .map(|t| t.elapsed().as_secs())
+    }
+
     /// 记录机器人在群里发出的消息
     pub fn record_bot_message(&mut self, group_id: u64, message: &str) {
         let entry = self.recent_bot_messages.entry(group_id).or_default();

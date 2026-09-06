@@ -14,6 +14,7 @@ pub mod recall;
 pub mod security;
 pub mod self_model;
 pub mod sensation;
+pub mod social;
 pub mod stream;
 pub mod style;
 pub mod wake;
@@ -21,6 +22,7 @@ pub mod wake;
 pub use diary::DiaryEntry;
 pub use persons::{PersonFile, PersonSeed};
 pub use sensation::{SensoryPacket, body_signals, transcribe_message, transcribe_world};
+pub use social::{SocialState, TopicThread};
 pub use stream::{
     KEEP_DAYS, StreamEvent, StreamKind, cleanup, push_acted, push_digested, push_inner,
     push_sensation, recent, recent_text,
