@@ -25,6 +25,9 @@ pub struct ReplyEffectRecord {
     pub followups: Vec<FollowupMessage>,
     pub asi_score: Option<f64>,
     pub status: EffectStatus,
+    /// 训练留档 replies.db 的行 id——评分定稿时把 reward 写回（旧记录无此字段）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_reply_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

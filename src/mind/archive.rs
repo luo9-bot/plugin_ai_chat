@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS replies (
     user_id         INTEGER NOT NULL,
     trigger_content TEXT    NOT NULL DEFAULT '',
     reply_content   TEXT    NOT NULL,
-    was_reply       INTEGER NOT NULL DEFAULT 0
+    was_reply       INTEGER NOT NULL DEFAULT 0,
+    reward          REAL
 );
 CREATE INDEX IF NOT EXISTS idx_replies_ts ON replies(ts);
 ";
@@ -67,6 +68,8 @@ fn open_conn(group_id: u64, kind: &str, schema: &str) -> Option<Connection> {
     }
     let conn = Connection::open(&path).ok()?;
     conn.execute_batch(schema).ok()?;
+    // 旧库迁移：reward 列（列已存在时静默忽略）
+    let _ = conn.execute_batch("ALTER TABLE replies ADD COLUMN reward REAL");
     // WAL：写不阻塞读，断电恢复
     conn.pragma_update(None, "journal_mode", "WAL").ok()?;
     conn.pragma_update(None, "synchronous", "NORMAL").ok()?;
@@ -106,34 +109,54 @@ pub fn record_message(group_id: u64, user_id: u64, user_name: &str, content: &st
 }
 
 /// 归档一条她的回复（与触发消息配对——训练监督信号的形状）
+///
+/// 返回新行 id，供回复效果追踪把 reward 精确写回这一行。
 pub fn record_reply(
     group_id: u64,
     user_id: u64,
     trigger_content: &str,
     reply_content: &str,
     was_reply: bool,
-) {
+) -> Option<i64> {
     let ts = util::now_secs();
     let day = util::ts_to_date_str(ts);
     let stored = with_conn(group_id, "replies", SCHEMA_REPLIES, |conn| {
-        let ok = conn
-            .execute(
-                "INSERT INTO replies (ts, day, user_id, trigger_content, reply_content, was_reply)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![
-                    ts as i64,
-                    day,
-                    user_id as i64,
-                    trigger_content,
-                    reply_content,
-                    was_reply as i64
-                ],
+        conn.execute(
+            "INSERT INTO replies (ts, day, user_id, trigger_content, reply_content, was_reply)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                ts as i64,
+                day,
+                user_id as i64,
+                trigger_content,
+                reply_content,
+                was_reply as i64
+            ],
+        )
+        .ok()
+        .map(|_| conn.last_insert_rowid())
+    });
+    if stored.is_none() {
+        warn!(group_id, user_id, "archive: 回复留档失败");
+    }
+    stored
+}
+
+/// 把回复效果（ASI 0~100 → reward 0~1）写回对应归档行——
+/// 强化训练的样本权重来源："获得互动的回复"概率上升
+pub fn set_reward(group_id: u64, reply_id: i64, reward: f32) {
+    let reward = reward.clamp(0.0, 1.0);
+    let stored = with_conn(group_id, "replies", SCHEMA_REPLIES, |conn| {
+        Some(
+            conn.execute(
+                "UPDATE replies SET reward = ?1 WHERE id = ?2",
+                rusqlite::params![reward, reply_id],
             )
-            .is_ok();
-        Some(ok)
+            .is_ok(),
+        )
     });
     if stored != Some(true) {
-        warn!(group_id, user_id, "archive: 回复留档失败");
+        warn!(group_id, reply_id, "archive: reward 写回失败");
     }
 }
 

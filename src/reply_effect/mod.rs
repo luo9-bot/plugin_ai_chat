@@ -8,7 +8,12 @@ pub use store::*;
 
 use tracing::{debug, info};
 
-pub fn record_reply(group_id: u64, target_user: u64, reply_text: &str) {
+pub fn record_reply(
+    group_id: u64,
+    target_user: u64,
+    reply_text: &str,
+    archive_reply_id: Option<i64>,
+) {
     let mut s = load_store();
     let now = crate::util::now_secs();
     s.records.retain(|r| {
@@ -25,6 +30,7 @@ pub fn record_reply(group_id: u64, target_user: u64, reply_text: &str) {
         followups: Vec::new(),
         asi_score: None,
         status: EffectStatus::Pending,
+        archive_reply_id,
     });
     save_store(&s);
     debug!(group_id, target_user, "reply_effect: recorded");
@@ -75,6 +81,12 @@ pub fn observe_message(group_id: u64, user_id: u64, message: &str) {
                 };
 
                 rec.asi_score = Some(final_score);
+                // Reward 写回训练留档：ASI 0~100 → reward 0~1，
+                // "获得互动的回复"在强化重训中概率上升（L6 闭环）
+                if let Some(id) = rec.archive_reply_id {
+                    let reward = (final_score / 100.0) as f32;
+                    crate::mind::archive::set_reward(group_id, id, reward);
+                }
                 info!(
                     group_id,
                     target_user = user_id,

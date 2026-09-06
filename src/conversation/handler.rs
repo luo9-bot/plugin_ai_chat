@@ -241,7 +241,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
     }
 
     crate::person_info::relationship::record_interaction(user_id, true);
-    crate::reply_effect::record_reply(0, user_id, reply);
+    crate::reply_effect::record_reply(0, user_id, reply, None);
     crate::working_memory::mark_replied(0, user_id);
     crate::activity::check_bot_message(user_id, reply);
 
@@ -551,21 +551,23 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
         crate::working_memory::mark_replied(group_id, u.user_id);
     }
 
-    crate::reply_effect::record_reply(group_id, primary, reply);
-    crate::runtime::reply_dedup::record(group_id, primary, reply);
-    crate::activity::check_bot_message(primary, reply);
-
     // ── 训练数据留档：(触发, 回复) 配对——离线风格学习的监督信号 ──
+    // 行 id 传给回复效果追踪：ASI 定稿后 reward 精确写回这一行
     let trigger: String = utterances
         .iter()
         .map(|u| u.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    crate::mind::archive::record_reply(group_id, primary, &trigger, reply, false);
+    let archive_reply_id =
+        crate::mind::archive::record_reply(group_id, primary, &trigger, reply, false);
 
     // ── 社会世界模型：她的话挂进最热线程——
     //    她下一眼能看见自己刚说过什么，并由此开始观察有没有人接她的话 ──
     crate::mind::social::record_bot_speech(group_id, reply);
+
+    crate::reply_effect::record_reply(group_id, primary, reply, archive_reply_id);
+    crate::runtime::reply_dedup::record(group_id, primary, reply);
+    crate::activity::check_bot_message(primary, reply);
 
     // 后处理任务不阻塞，逐用户放入后台线程
     let rep = reply.to_string();
