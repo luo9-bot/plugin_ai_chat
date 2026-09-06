@@ -60,6 +60,7 @@ pub fn init() {
                 tracing::error!(path = ?config_path, error = %e, "{}", msg);
                 *CONFIG_ERROR.write().unwrap() = msg;
                 Config {
+                    search: Default::default(),
                     api_key: String::new(),
                     base_url: "https://api.deepseek.com".into(),
                     model: "deepseek-chat".into(),
@@ -96,6 +97,7 @@ pub fn init() {
         Err(e) => {
             debug!(path = ?config_path, error = %e, "failed to read config, using defaults");
             Config {
+                search: Default::default(),
                 api_key: String::new(),
                 base_url: "https://api.deepseek.com".into(),
                 model: "deepseek-chat".into(),

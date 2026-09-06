@@ -36,6 +36,10 @@ pub struct Config {
     pub style: StyleConfig,
     #[serde(default)]
     pub vision: VisionConfig,
+    /// 联网搜索（默认关闭）：她的行动而非系统的自动补丁；
+    /// 结果只作转述感官、永不进入她的记忆（方案书：搜索给她知识，不给她记忆）
+    #[serde(default)]
+    pub search: SearchConfig,
     #[serde(default)]
     pub embedding: EmbeddingConfig,
     #[serde(default)]
@@ -277,6 +281,23 @@ impl Default for MentalStateConfig {
             defect_base_probability: default_defect_base_probability(),
         }
     }
+}
+
+/// 联网搜索配置
+///
+/// 协议约定：POST `{"query": "..."}` 到 `api_url`（Bearer `api_key`），
+/// 期望响应 `{"results": [{"title": "...", "snippet": "..."}]}`——
+/// 任何能适配该形状的自建代理/搜索服务都可用。
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct SearchConfig {
+    /// 是否开启 search_web 工具（默认关闭）
+    #[serde(default)]
+    pub enabled: bool,
+    /// 搜索代理端点
+    #[serde(default)]
+    pub api_url: String,
+    #[serde(default)]
+    pub api_key: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
