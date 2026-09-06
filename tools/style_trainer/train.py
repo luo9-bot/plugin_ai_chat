@@ -17,6 +17,7 @@
 用法：
   python train.py --group 961949571 \
       --archive ../../data/mind/archive --out ../../data/mind/style
+  python train.py --group 961949571 --rewarded   # reward 加权重训（L6 强化闭环）
 依赖：numpy（仅本脚本需要；运行端零依赖）
 """
 
@@ -90,7 +91,10 @@ def pattern_label(reply, patterns):
 
 
 def load_pairs(group_id: int, archive_dir: str):
-    """从 SQLite 读 (触发, 回复) 配对 + 群友语料"""
+    """从 SQLite 读 (触发, 回复, reward) 配对 + 群友语料
+
+    reward 列是运行端 L6 回写的回复效果（0~1）；旧库没有该列时全部记 None。
+    """
     db_dir = os.path.join(archive_dir, str(group_id))
     replies_db = os.path.join(db_dir, "replies.db")
     messages_db = os.path.join(db_dir, "messages.db")
@@ -98,10 +102,16 @@ def load_pairs(group_id: int, archive_dir: str):
         raise SystemExit(f"未找到 {replies_db}——先让 bot 跑一段时间积累留档")
 
     conn = sqlite3.connect(replies_db)
-    rows = conn.execute(
-        "SELECT ts, user_id, trigger_content, reply_content "
-        "FROM replies ORDER BY ts ASC"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT ts, user_id, trigger_content, reply_content, reward "
+            "FROM replies ORDER BY ts ASC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = [(ts, uid, trig, rep, None) for (ts, uid, trig, rep) in conn.execute(
+            "SELECT ts, user_id, trigger_content, reply_content "
+            "FROM replies ORDER BY ts ASC"
+        ).fetchall()]
     conn.close()
 
     corpus = []
@@ -112,11 +122,16 @@ def load_pairs(group_id: int, archive_dir: str):
     return rows, corpus
 
 
-def train(pairs):
-    """单隐层 MLP + 多任务 softmax 头，教科书反向传播"""
+def train(pairs, rewarded=False):
+    """单隐层 MLP + 多任务 softmax 头，教科书反向传播
+
+    rewarded 模式：reward ∈ [0,1] 作为样本权重（w = 1 + 3×reward），
+    梯度按 w 缩放——与"正样本上采样"等价且更平滑：获得互动的回复
+    对权重的拉力更强，"被冷落的回复风格"相对被稀释。
+    """
     rng = np.random.default_rng(SEED)
 
-    replies = [r for (_, _, _, r) in pairs]
+    replies = [row[3] for row in pairs]
     patterns = derive_patterns(replies)
     classes = {
         "length": ["短", "中", "长"],
@@ -138,14 +153,17 @@ def train(pairs):
     }
 
     samples = []
-    for (ts, user_id, trigger, reply) in pairs:
+    for row in pairs:
+        ts, user_id, trigger, reply = row[0], row[1], row[2], row[3]
+        reward = row[4] if len(row) > 4 and row[4] is not None else None
         hour = (ts + 8 * 3600) % 86400 // 3600
         x = features(trigger, user_id, hour)
         y = {}
         for head in HEADS:
             label = label_fn[head](reply)
             y[head] = classes[head].index(label)
-        samples.append((x, y, trigger, reply, user_id, hour))
+        weight = (1.0 + 3.0 * float(reward)) if rewarded and reward is not None else 1.0
+        samples.append((x, y, trigger, reply, user_id, hour, weight))
 
     split = max(1, int(len(samples) * 0.9))
     train_set, valid_set = samples[:split], samples[split:]
@@ -180,10 +198,8 @@ def train(pairs):
         rng.shuffle(train_set)
         total_loss = 0.0
         lr = LR * (0.5 ** (epoch // 8))  # 阶梯衰减
-        for (x_idx, y, *_ ) in train_set:
+        for (x_idx, y, _trigger, _reply, _user_id, _hour, weight) in train_set:
             z1, h, z2 = forward(x_idx)
-            x_vec = np.zeros(D)
-            x_vec[x_idx] = 1.0
 
             dz2 = np.zeros(total_classes)
             for head in HEADS:
@@ -191,8 +207,8 @@ def train(pairs):
                 prob = softmax(z2[lo:lo + ln])
                 onehot = np.zeros(ln)
                 onehot[y[head]] = 1.0
-                dz2[lo:lo + ln] = prob - onehot
-                total_loss -= math.log(max(prob[y[head]], 1e-9))
+                dz2[lo:lo + ln] = (prob - onehot) * weight
+                total_loss -= weight * math.log(max(prob[y[head]], 1e-9))
 
             gW2 = np.outer(dz2, h) + L2 * W2
             gb2 = dz2
@@ -268,7 +284,8 @@ def export_sft(path, pairs):
     """SFT 数据集：用户用自己的底座做微调的原料"""
     system = "（此处替换为洛玖的人设——训练前改成你的 persona 文本）"
     with open(path, "w", encoding="utf-8") as f:
-        for (_, _, trigger, reply) in pairs:
+        for row in pairs:
+            trigger, reply = row[2], row[3]
             record = {
                 "messages": [
                     {"role": "system", "content": system},
@@ -284,20 +301,24 @@ def main():
     parser.add_argument("--group", type=int, required=True, help="群号")
     parser.add_argument("--archive", default="../../data/mind/archive", help="留档目录")
     parser.add_argument("--out", default="../../data/mind/style", help="产物输出目录")
+    parser.add_argument("--rewarded", action="store_true",
+                        help="reward 加权重训：回复效果（0~1）作为样本权重，"
+                             "获得互动的回复风格概率上升（L6 强化闭环）")
     args = parser.parse_args()
 
     pairs, corpus = load_pairs(args.group, args.archive)
     corpus = corpus if corpus else []
-    print(f"配对样本 {len(pairs)} 条，群消息语料 {len(corpus)} 条")
+    n_rewarded = sum(1 for row in pairs if len(row) > 4 and row[4] is not None)
+    print(f"配对样本 {len(pairs)} 条（含 reward {n_rewarded} 条），群消息语料 {len(corpus)} 条")
     if len(pairs) < 30:
         raise SystemExit("配对样本太少（<30）——让 bot 再跑几天，数据够了再来训练")
 
-    W1, b1, W2, b2, classes, slices, patterns, train_set, valid_set = train(pairs)
+    W1, b1, W2, b2, classes, slices, patterns, train_set, valid_set = train(pairs, args.rewarded)
 
     os.makedirs(args.out, exist_ok=True)
     export_nn(os.path.join(args.out, f"{args.group}.nn.json"), W1, b1, W2, b2, classes)
     export_style(os.path.join(args.out, f"{args.group}.style.json"),
-                 args.group, corpus, [r for (*_, r) in pairs], patterns)
+                 args.group, corpus, [row[3] for row in pairs], patterns)
     export_sft(os.path.join(args.out, f"{args.group}.sft.jsonl"), pairs)
 
     weights_kb = os.path.getsize(os.path.join(args.out, f"{args.group}.nn.json")) // 1024
