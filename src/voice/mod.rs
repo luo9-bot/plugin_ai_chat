@@ -487,6 +487,12 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
     let system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
     let new_perceptions = new_lines.join("\n");
     let mut user_content = stream_user_content(&new_perceptions);
+    // 社会感知：群里的势——几条线在聊、谁和谁熟、有人在等、她刚说过话没有。
+    // 感知语气呈现，说不说、接哪条线仍由她自己决定
+    if let Some(block) = mind::social::context_block(group_id) {
+        user_content.push_str("\n\n");
+        user_content.push_str(&block);
+    }
     // 风格神经元：从她自己的回复记录学来的统计先验（有训练产物时才出现）
     if let Some(block) = style_block(group_id, &new_perceptions, primary) {
         user_content.push_str("\n\n");
