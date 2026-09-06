@@ -7,6 +7,7 @@
 //! - 意识流 append-only，72h 消亡；日记（[`diary`]）与人物档案（[`persons`]）
 //!   是睡前整理沉淀下的长存记忆
 
+pub mod archive;
 pub mod diary;
 pub mod persons;
 pub mod recall;
@@ -14,6 +15,7 @@ pub mod security;
 pub mod self_model;
 pub mod sensation;
 pub mod stream;
+pub mod style;
 pub mod wake;
 
 pub use diary::DiaryEntry;

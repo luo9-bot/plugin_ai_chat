@@ -530,6 +530,14 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
     crate::runtime::reply_dedup::record(group_id, primary, reply);
     crate::activity::check_bot_message(primary, reply);
 
+    // ── 训练数据留档：(触发, 回复) 配对——离线风格学习的监督信号 ──
+    let trigger: String = utterances
+        .iter()
+        .map(|u| u.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::mind::archive::record_reply(group_id, primary, &trigger, reply, false);
+
     // 后处理任务不阻塞，逐用户放入后台线程
     let rep = reply.to_string();
     let gid = group_id;

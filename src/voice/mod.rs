@@ -460,6 +460,11 @@ fn stream_user_content(new_perceptions: &str) -> String {
     sections.join("\n\n")
 }
 
+/// 风格神经元手感块（有训练产物时才出现）
+fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
+    crate::mind::style::context_block(group_id, trigger, user_id)
+}
+
 // ── 群聊 ────────────────────────────────────────────────────────
 
 /// 群聊开口：她读完整个群的场面，决定说什么、对谁说，或者不说
@@ -480,7 +485,13 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
     let cfg = config::get();
     let identity = crate::mind::self_model::identity_text();
     let system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
-    let user_content = stream_user_content(&new_lines.join("\n"));
+    let new_perceptions = new_lines.join("\n");
+    let mut user_content = stream_user_content(&new_perceptions);
+    // 风格神经元：从她自己的回复记录学来的统计先验（有训练产物时才出现）
+    if let Some(block) = style_block(group_id, &new_perceptions, primary) {
+        user_content.push_str("\n\n");
+        user_content.push_str(&block);
+    }
 
     debug!(group_id, users = ?involved, force_reply, "voice: group thinking");
 
@@ -549,6 +560,11 @@ pub fn speak_private(
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
+    }
+    // 风格神经元：私聊场景的手感先验（有训练产物时才出现）
+    if let Some(block) = style_block(0, message, user_id) {
+        user_content.push_str("\n\n");
+        user_content.push_str(&block);
     }
 
     debug!(user_id, "voice: private thinking");

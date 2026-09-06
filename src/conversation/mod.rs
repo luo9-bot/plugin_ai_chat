@@ -191,6 +191,19 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
         false,
     );
 
+    // ── 训练数据留档：人类说话语料（防注入放行的才进库） ──
+    let archive_name = crate::person_info::get_display_name(user_id, group_id).unwrap_or_default();
+    crate::mind::archive::record_message(
+        group_id,
+        user_id,
+        &archive_name,
+        if text_only.is_empty() {
+            "[图片]"
+        } else {
+            &text_only
+        },
+    );
+
     // ── 人物档案：注册/更新 ──
     crate::person_info::register_person(user_id);
 
