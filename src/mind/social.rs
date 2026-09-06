@@ -957,6 +957,11 @@ pub fn state_for_admin(group_id: u64) -> SocialState {
     with_state(group_id, |state| state.clone())
 }
 
+/// admin API：已有社会状态的群列表（内存态 + 磁盘文件）
+pub fn known_groups() -> Vec<u64> {
+    known_group_ids()
+}
+
 /// 磁盘上已有社会状态文件的群（含本进程未加载的）
 fn known_group_ids() -> Vec<u64> {
     let mut ids: Vec<u64> = {

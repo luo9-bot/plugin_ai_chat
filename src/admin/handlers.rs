@@ -1435,6 +1435,18 @@ pub fn handle_mind(
         (Method::Get, "security") => {
             ok(serde_json::json!({"events": crate::mind::security::tail(300)}))
         }
+        (Method::Get, "social") => match rest.first() {
+            Some(gid) => match gid.parse::<u64>() {
+                Ok(group_id) => ok(serde_json::json!({
+                    "group_id": group_id,
+                    "state": crate::mind::social::state_for_admin(group_id),
+                })),
+                Err(_) => err(400, "invalid group_id"),
+            },
+            None => ok(serde_json::json!({
+                "groups": crate::mind::social::known_groups(),
+            })),
+        },
         (Method::Get, "kernel") => match crate::mind::self_model::kernel() {
             Some(k) => ok(serde_json::json!({"kernel": k})),
             None => err(404, "kernel.json 不存在——先在 data/self/kernel.json 创建"),

@@ -87,6 +87,7 @@ import MindView from './views/MindView.vue'
 import StreamView from './views/StreamView.vue'
 import MindMemoryView from './views/MindMemoryView.vue'
 import SecurityView from './views/SecurityView.vue'
+import SocialView from './views/SocialView.vue'
 import DashboardView from './views/DashboardView.vue'
 import ConfigView from './views/ConfigView.vue'
 import ConversationsView from './views/ConversationsView.vue'
@@ -129,6 +130,7 @@ const I = {
   'memory-ops-log': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14v14H3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7h6M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="currentColor" opacity="0.6"/></svg>',
   relationships: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M3 17c0-2.2 1.8-4 4-4s4 1.8 4 4M9 17c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.5"/></svg>',
   security: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14l-5.5 6.5V16l-3 1.5v-8L3 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  social: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="14.5" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="14" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 7.5L13 9M7.8 12.5L10.5 9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/></svg>',
 }
 
 const loggedIn = ref(false)
@@ -143,6 +145,7 @@ const isDark = ref(false)
 const tabs = [
   { id: 'mind', name: '此刻', group: '心灵', icon: I.mind, desc: '她的此刻：状态、身体与意识流', comp: MindView },
   { id: 'stream', name: '意识流', group: '心灵', icon: I.stream, desc: '她的人生时间线', comp: StreamView },
+  { id: 'social', name: '群里的势', group: '心灵', icon: I.social, desc: '她的社会感知：话题线、注意力、关系与等待', comp: SocialView },
   { id: 'mind-memory', name: '日记与人物', group: '心灵', icon: I.diary, desc: '她的日记与人物档案', comp: MindMemoryView },
   { id: 'security', name: '滤壳与安全', group: '心灵', icon: I.security, desc: '滤壳审计记录', comp: SecurityView },
   { id: 'dashboard', name: '仪表盘', group: '概览', icon: I.dashboard, desc: '系统总览与关键指标', comp: DashboardView },
