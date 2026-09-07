@@ -91,6 +91,67 @@ fn compose_perception(descriptions: &[String], text: &str) -> String {
     }
 }
 
+// ── 多模态统一记忆 ──────────────────────────────────────────────
+
+/// 每个用户两次图片记忆之间的最小间隔（防刷屏，不防真心分享）
+const IMAGE_MEMORY_COOLDOWN_SECS: u64 = 3600;
+/// 描述短于这个长度的不值得记（VLM 兜话或没识别出内容）
+const IMAGE_MEMORY_MIN_DESC_CHARS: usize = 12;
+
+static LAST_IMAGE_MEMORY: OnceLock<Mutex<HashMap<u64, u64>>> = OnceLock::new();
+
+/// 把图片描述沉淀为文本记忆，与文字记忆进同一个向量空间
+///
+/// 图片是不可信输入：描述先过与搜索结果同源的防注入检测，命中即丢弃。
+/// 表情包是语气不是信息，由调用方负责不送进来。
+fn remember_images(user_id: u64, group_id: u64, descriptions: &[String]) {
+    if !config::get().vision.memory_images || descriptions.is_empty() {
+        return;
+    }
+    // 每人冷却：主线程轻查，写入在后台
+    let now = crate::util::now_secs();
+    let last = LAST_IMAGE_MEMORY
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&user_id).copied())
+        .unwrap_or(0);
+    if now.saturating_sub(last) < IMAGE_MEMORY_COOLDOWN_SECS {
+        return;
+    }
+
+    let usable: Vec<String> = descriptions
+        .iter()
+        .filter(|d| d.chars().count() >= IMAGE_MEMORY_MIN_DESC_CHARS)
+        .filter(|d| crate::anti_injection::check_memory_entry(d).passed)
+        .cloned()
+        .collect();
+    if usable.is_empty() {
+        return;
+    }
+    if let Ok(mut m) = LAST_IMAGE_MEMORY
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        m.insert(user_id, now);
+    }
+
+    let name = crate::person_info::get_display_name(user_id, group_id)
+        .unwrap_or_else(|| "有人".to_string());
+    std::thread::spawn(move || {
+        for desc in usable {
+            let content = format!("（{name}给我看过一张图：{desc}）");
+            crate::memory::add(
+                user_id,
+                group_id,
+                &content,
+                crate::memory::Importance::Normal,
+            );
+        }
+        debug!(user_id, group_id, "vision: 图片描述沉淀为记忆");
+    });
+}
+
 /// 感知一条批次消息：图片描述回写工作记忆，返回组装好的感知文本
 fn perceive_batch_message(
     group_id: u64,
@@ -107,6 +168,10 @@ fn perceive_batch_message(
             &descriptions,
             record_timestamps,
         );
+    }
+    // 表情包是语气不是信息：只有普通图片才沉淀记忆
+    if !crate::sticker::is_sticker_cq(message) {
+        remember_images(user_id, group_id, &descriptions);
     }
     compose_perception(&descriptions, &text_only)
 }
@@ -134,6 +199,10 @@ pub fn process_message(user_id: u64, message: &str) {
 
     let (descriptions, text_only) = perceive_images(user_id, message);
     let ai_message = compose_perception(&descriptions, &text_only);
+    // 表情包是语气不是信息：只有普通图片才沉淀记忆
+    if !crate::sticker::is_sticker_cq(message) {
+        remember_images(user_id, 0, &descriptions);
+    }
 
     // 追加用户消息到对话历史
     with_shared_state(|s| s.push_history(0, user_id, "user", &ai_message, max_history));

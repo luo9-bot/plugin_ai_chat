@@ -334,6 +334,9 @@ pub struct VisionConfig {
     /// 最大回复 token 数
     #[serde(default = "default_vision_max_tokens")]
     pub max_tokens: u32,
+    /// 多模态统一记忆：把图片描述沉淀为文本记忆，与文字同一向量空间
+    #[serde(default = "default_true")]
+    pub memory_images: bool,
 }
 
 impl Default for VisionConfig {
@@ -343,6 +346,7 @@ impl Default for VisionConfig {
             base_url: default_vision_base_url(),
             model: default_vision_model(),
             max_tokens: default_vision_max_tokens(),
+            memory_images: true,
         }
     }
 }
