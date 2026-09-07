@@ -54,6 +54,8 @@ pub struct WakeTurn {
     pub action: WakeAction,
     /// 她留下的下一个想起：(多久之后秒数, 她的原话)
     pub wake: Option<(u64, String)>,
+    /// 回神因 API 故障等没能完成——调用方据此退避重试，而不是弄丢她的想起
+    pub api_failed: bool,
 }
 
 // ── 工具定义 ────────────────────────────────────────────────────
@@ -622,6 +624,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
                 inner: Vec::new(),
                 action: WakeAction::Silent,
                 wake: None,
+                api_failed: true,
             };
         }
     };
@@ -638,6 +641,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
             inner,
             action: WakeAction::Silent,
             wake: None,
+            api_failed: false,
         };
     }
 
@@ -656,7 +660,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     );
     let history = vec![("user".to_string(), input.to_string())];
 
-    let _ = run_tool_loop(
+    let decision_result = run_tool_loop(
         &system,
         &history,
         &decision_content,
@@ -702,11 +706,14 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
             _ => ToolOutcome::Continue("未知工具，可用：say、finish、plan_next。".into()),
         },
     );
+    // 决策阶段失败且她什么都没留下 = 这次回神没有完成，不是她的沉默
+    let api_failed = decision_result.is_err() && captured_action.borrow().is_none();
 
     WakeTurn {
         inner,
         action: captured_action.into_inner().unwrap_or(WakeAction::Silent),
         wake: captured_wake.into_inner(),
+        api_failed,
     }
 }
 

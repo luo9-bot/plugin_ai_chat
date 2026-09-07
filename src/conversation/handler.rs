@@ -610,8 +610,15 @@ fn capture_last_plan(group_id: u64, target_user: u64, about_user: u64) {
         return;
     };
     let due_at = crate::util::now_secs() + in_secs.max(60);
+    // 十分钟内的想起算"稍后想"：到期更早被兑现，失败也更早重试
+    let urgency = if in_secs <= 600 {
+        crate::mind::Urgency::Soon
+    } else {
+        crate::mind::Urgency::Later
+    };
     let mut plan = crate::mind::WakePlan::new(crate::mind::WakeKind::Idle, due_at, reason)
-        .with_about(about_user);
+        .with_about(about_user)
+        .with_urgency(urgency);
     if group_id > 0 {
         plan.target_group = Some(group_id);
     } else {

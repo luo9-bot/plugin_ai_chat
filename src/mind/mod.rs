@@ -28,5 +28,5 @@ pub use stream::{
     push_sensation, recent, recent_text,
 };
 pub use wake::{
-    WakeKind, WakePlan, WakeProduct, add as add_wake_plan, is_night, tick as wake_tick,
+    Urgency, WakeKind, WakePlan, WakeProduct, add as add_wake_plan, is_night, tick as wake_tick,
 };

@@ -32,6 +32,40 @@ pub enum WakeKind {
     Digest,
 }
 
+/// 紧迫度：决定到期想起的兑现顺序与失败后的重试节奏
+///
+/// 排序语义 Now < Soon < Later：同一批到期的想起，更紧的先被兑现；
+/// 退避语义：更紧的失败后更快回来重试。夜间门控对三种紧迫度一视同仁——
+/// 夜间是睡眠不是免打扰。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Urgency {
+    /// 马上想（几分钟内的事）
+    Now,
+    /// 稍后想（今天之内）
+    Soon,
+    /// 慢慢想（不急）
+    #[default]
+    Later,
+}
+
+impl Urgency {
+    /// 失败重试的基础退避（秒），按 attempts 指数放大
+    fn backoff_base_secs(self) -> u64 {
+        match self {
+            Self::Now => 5 * 60,
+            Self::Soon => 30 * 60,
+            Self::Later => 2 * 3600,
+        }
+    }
+}
+
+/// 失败退避：第 `attempts` 次失败后等待多久（指数放大，封顶一天）
+fn backoff_secs(urgency: Urgency, attempts: u8) -> u64 {
+    let base = urgency.backoff_base_secs() as f64;
+    (base * 2.0f64.powi(attempts as i32)).clamp(60.0, 24.0 * 3600.0) as u64
+}
+
 /// 一个"想起"：她在某次回神里留给未来的自己
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakePlan {
@@ -48,6 +82,19 @@ pub struct WakePlan {
     /// 发言目标（私聊用户）
     pub target_user: Option<u64>,
     pub created_at: u64,
+    /// 紧迫度（旧数据默认 Later）
+    #[serde(default)]
+    pub urgency: Urgency,
+    /// 已失败的回神次数
+    #[serde(default)]
+    pub attempts: u8,
+    /// 放弃前最多失败次数
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u8,
+}
+
+fn default_max_attempts() -> u8 {
+    3
 }
 
 impl WakePlan {
@@ -63,6 +110,9 @@ impl WakePlan {
             target_group: None,
             target_user: None,
             created_at: util::now_secs(),
+            urgency: Urgency::Later,
+            attempts: 0,
+            max_attempts: default_max_attempts(),
         }
     }
 
@@ -78,6 +128,11 @@ impl WakePlan {
 
     pub fn with_about(mut self, user_id: u64) -> Self {
         self.about_user = Some(user_id);
+        self
+    }
+
+    pub fn with_urgency(mut self, urgency: Urgency) -> Self {
+        self.urgency = urgency;
         self
     }
 }
@@ -144,14 +199,14 @@ fn remove_by_id(plans: &mut Vec<WakePlan>, id: u64) {
     plans.retain(|p| p.id != id);
 }
 
-/// 到期的想起（旧在前）
+/// 到期的想起（紧迫的在前，同级按到期时间）
 pub fn due(now: u64) -> Vec<WakePlan> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans: Vec<WakePlan> = load_plans()
         .into_iter()
         .filter(|p| p.due_at <= now)
         .collect();
-    plans.sort_by_key(|p| p.due_at);
+    plans.sort_by_key(|p| (p.urgency, p.due_at));
     plans
 }
 
@@ -309,7 +364,36 @@ pub fn tick() -> Vec<(WakePlan, WakeProduct)> {
                 WakeProduct::Idle(crate::voice::wake_think(&input, allow_speak))
             }
         };
-        info!(plan_id = plan.id, kind = ?plan.kind, "wake: 回神完成");
+
+        // 回神失败（API 故障等）不丢她的想起：退避后重试，超过上限才放弃
+        let failed = matches!(&product, WakeProduct::Idle(turn) if turn.api_failed);
+        if failed {
+            let attempts = plan.attempts + 1;
+            if attempts >= plan.max_attempts {
+                warn!(
+                    plan_id = plan.id,
+                    attempts,
+                    reason = %plan.reason,
+                    "wake: 回神连续失败，放弃这个想起"
+                );
+            } else {
+                let delay = backoff_secs(plan.urgency, attempts.saturating_sub(1));
+                warn!(
+                    plan_id = plan.id,
+                    attempts, delay, "wake: 回神失败，退避重试"
+                );
+                let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                let mut plans = load_plans();
+                if let Some(p) = plans.iter_mut().find(|p| p.id == plan.id) {
+                    p.attempts = attempts;
+                    p.due_at = now + delay;
+                }
+                save_plans(&plans);
+                continue;
+            }
+        } else {
+            info!(plan_id = plan.id, kind = ?plan.kind, "wake: 回神完成");
+        }
         {
             let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let mut plans = load_plans();
@@ -418,6 +502,38 @@ mod tests {
             r#""digest""#
         );
         assert_eq!(serde_json::to_string(&WakeKind::Idle).unwrap(), r#""idle""#);
+    }
+
+    #[test]
+    fn old_plans_without_urgency_parse_as_later() {
+        // 兼容旧意图堆：缺字段时按"慢慢想"处理
+        let legacy = r#"{"id":1,"kind":"idle","due_at":100,"reason":"看看","about_user":null,"target_group":null,"target_user":null,"created_at":50}"#;
+        let plan: WakePlan = serde_json::from_str(legacy).unwrap();
+        assert_eq!(plan.urgency, Urgency::Later);
+        assert_eq!(plan.attempts, 0);
+        assert_eq!(plan.max_attempts, 3);
+    }
+
+    #[test]
+    fn urgency_orders_now_before_later() {
+        let mut plans = [
+            WakePlan::new(WakeKind::Idle, 100, "慢慢想的事"),
+            WakePlan::new(WakeKind::Idle, 50, "马上想的事").with_urgency(Urgency::Now),
+        ];
+        plans.sort_by_key(|p| (p.urgency, p.due_at));
+        assert_eq!(plans[0].urgency, Urgency::Now);
+        assert_eq!(plans[0].due_at, 50);
+    }
+
+    #[test]
+    fn backoff_grows_exponentially_and_caps() {
+        let base = Urgency::Soon.backoff_base_secs();
+        // 首次重试用基础退避，之后指数放大
+        assert_eq!(backoff_secs(Urgency::Soon, 0), base);
+        assert_eq!(backoff_secs(Urgency::Soon, 1), base * 2);
+        // 封顶一天，且不短于一分钟
+        assert_eq!(backoff_secs(Urgency::Later, 20), 24 * 3600);
+        assert!(backoff_secs(Urgency::Now, 0) >= 60);
     }
 
     #[test]
