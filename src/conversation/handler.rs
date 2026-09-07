@@ -390,6 +390,9 @@ fn speak_and_deliver_group(
     let max_history = cfg.conversation.max_history;
     let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
 
+    // 概率式中断记账：从这里到开口，期间新到的消息都可能让话题变掉
+    crate::conversation::interruption::begin(group_id);
+
     // ── 感知入流（含夜间标记）+ 夜间门控：她真的睡了 ──
     let asleep = crate::mind::is_night() && !crisis;
     for u in utterances {
@@ -483,16 +486,31 @@ fn speak_and_deliver_group(
 
     match voice::speak_group(group_id, utterances, force_reply) {
         VoiceAction::Reply(reply) => {
-            // 她说的话成为她的经历
-            crate::mind::stream::push(
-                crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
-                    .with_about(primary),
-            );
-            capture_last_plan(group_id, primary, primary);
-            if consume_quota_on_reply {
-                crate::quota::check_and_consume(group_id);
+            // 概率式中断：生成完、开口前的最后一刻，若处理期间涌进大量新消息，
+            // 话题可能已经变了——把到嘴边的话咽回去，带着最新消息重新看一眼
+            let swallowed = !force_reply
+                && cfg.conversation.interruption_enabled
+                && crate::conversation::interruption::should_swallow(group_id);
+            if swallowed {
+                debug!(group_id, "voice: interrupted before speaking");
+                mark_silence(group_id);
+                if cfg.humanity.social_battery_enabled {
+                    let mut battery = crate::social_battery::load();
+                    crate::social_battery::record_passive_participation(&mut battery);
+                    crate::social_battery::save(&battery);
+                }
+            } else {
+                // 她说的话成为她的经历
+                crate::mind::stream::push(
+                    crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
+                        .with_about(primary),
+                );
+                capture_last_plan(group_id, primary, primary);
+                if consume_quota_on_reply {
+                    crate::quota::check_and_consume(group_id);
+                }
+                finish_group_reply(group_id, primary, utterances, &reply);
             }
-            finish_group_reply(group_id, primary, utterances, &reply);
         }
         VoiceAction::Silent => {
             // 群聊沉默不逐次入流（会淹没她的经历），只做冷却与电量记账
@@ -505,6 +523,7 @@ fn speak_and_deliver_group(
             }
         }
     }
+    crate::conversation::interruption::end(group_id);
 }
 
 /// 群聊回复落地：发送 + 簿记

@@ -3,6 +3,7 @@
 pub mod attention;
 pub mod batch;
 pub mod handler;
+pub mod interruption;
 
 use crate::{config, is_admin, mind, read_shared_state, with_shared_state, with_state};
 use tracing::{debug, info, warn};
@@ -216,6 +217,9 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
         },
         record_ts,
     );
+
+    // ── 概率式中断记账：她正在生成回复时又来了新消息 ──
+    crate::conversation::interruption::note_arrival(group_id);
 
     // ── 人物档案：注册/更新 ──
     crate::person_info::register_person(user_id);
