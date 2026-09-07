@@ -27,9 +27,9 @@ pub fn init() {
     ops_log::init();
 }
 
-/// 语义检索记忆：双路检索 + 后置图门控 + 自适应阈值 + 智能回退
+/// 语义检索记忆：双路检索 + 无状态遗忘曲线 + 后置图门控 + 自适应阈值 + 智能回退
 ///
-/// 同时检索全局记忆和群特定记忆
+/// 同时检索全局记忆和群特定记忆；被想起的记忆会得到强化（检索即强化）。
 pub fn search_memories(
     user_id: u64,
     current_group_id: u64,
@@ -37,21 +37,39 @@ pub fn search_memories(
     top_k: usize,
 ) -> Vec<retrieval::RetrievalResult> {
     let mut documents: Vec<(String, String)> = Vec::new();
+    let mut meta: HashMap<String, retrieval::forgetting::MemoryMeta> = HashMap::new();
 
     // 全局记忆
     let global = store::load_user_memory(user_id);
     for (i, entry) in global.entries.iter().enumerate() {
-        documents.push((format!("global_{}_{}", user_id, i), entry.content.clone()));
+        let id = format!("global_{}_{}", user_id, i);
+        meta.insert(
+            id.clone(),
+            retrieval::forgetting::MemoryMeta {
+                last_accessed: entry.last_accessed,
+                access_count: entry.access_count,
+                is_permanent: entry.importance == Importance::Permanent,
+                is_important: entry.importance == Importance::Important,
+            },
+        );
+        documents.push((id, entry.content.clone()));
     }
 
     // 群特定记忆
     if current_group_id > 0 {
         let group_user = store::load_group_user_memory(current_group_id, user_id);
         for (i, entry) in group_user.entries.iter().enumerate() {
-            documents.push((
-                format!("group_{}_{}_{}", current_group_id, user_id, i),
-                entry.content.clone(),
-            ));
+            let id = format!("group_{}_{}_{}", current_group_id, user_id, i);
+            meta.insert(
+                id.clone(),
+                retrieval::forgetting::MemoryMeta {
+                    last_accessed: entry.last_accessed,
+                    access_count: entry.access_count,
+                    is_permanent: entry.importance == Importance::Permanent,
+                    is_important: entry.importance == Importance::Important,
+                },
+            );
+            documents.push((id, entry.content.clone()));
         }
     }
 
@@ -121,6 +139,25 @@ pub fn search_memories(
         }
     }
 
+    // 无状态遗忘曲线：陈旧的记忆被时间压低，常被想起的例外
+    let mcfg = config::get().memory.clone();
+    let fcfg = retrieval::forgetting::ForgettingConfig {
+        enabled: mcfg.forgetting_enabled,
+        half_life_secs: mcfg.forgetting_half_life_days * 86400.0,
+        time_weight: mcfg.forgetting_time_weight,
+        similarity_weight: mcfg.forgetting_similarity_weight,
+        reinforcement_gain: mcfg.forgetting_reinforcement_gain,
+    };
+    let now = crate::util::now_secs();
+    retrieval::forgetting::apply(&mut results, |id| meta.get(id).copied(), now, &fcfg);
+
+    // 检索即强化：被想起的记忆延长半衰期（下一次更难忘记）
+    if fcfg.enabled && !results.is_empty() {
+        let hits: std::collections::HashSet<&str> =
+            results.iter().map(|r| r.content.as_str()).collect();
+        reinforce_hits(user_id, current_group_id, &hits);
+    }
+
     // 应用认知偏差修正
     if config::get().humanity.cognitive_biases_enabled {
         let emotion = crate::emotion::get_state(user_id);
@@ -130,6 +167,31 @@ pub fn search_memories(
     }
 
     results
+}
+
+/// 检索即强化：命中条目 access_count+1、刷新 last_accessed 并回写
+fn reinforce_hits(user_id: u64, group_id: u64, hits: &std::collections::HashSet<&str>) {
+    let reinforce_file = |entries: &mut Vec<MemoryEntry>| -> bool {
+        let mut touched = false;
+        for entry in entries.iter_mut() {
+            if hits.contains(entry.content.as_str()) {
+                operations::touch_entry(entry, entry.importance.clone());
+                touched = true;
+            }
+        }
+        touched
+    };
+
+    let mut global = store::load_user_memory(user_id);
+    if reinforce_file(&mut global.entries) {
+        store::save_user_memory(user_id, &global);
+    }
+    if group_id > 0 {
+        let mut group_user = store::load_group_user_memory(group_id, user_id);
+        if reinforce_file(&mut group_user.entries) {
+            store::save_group_user_memory(group_id, user_id, &group_user);
+        }
+    }
 }
 
 fn dual_path_bm25_only(

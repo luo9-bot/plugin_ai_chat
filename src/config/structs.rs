@@ -165,6 +165,17 @@ pub struct MemoryConfig {
     pub auto_summarize_threshold: usize,
     #[serde(default = "default_working_memory_expire_hours")]
     pub working_memory_expire_hours: u64,
+    // 无状态遗忘曲线：遗忘是查询时的纯函数，检索即强化
+    #[serde(default = "default_true")]
+    pub forgetting_enabled: bool,
+    #[serde(default = "default_forgetting_half_life_days")]
+    pub forgetting_half_life_days: f64,
+    #[serde(default = "default_forgetting_time_weight")]
+    pub forgetting_time_weight: f64,
+    #[serde(default = "default_forgetting_similarity_weight")]
+    pub forgetting_similarity_weight: f64,
+    #[serde(default = "default_forgetting_reinforcement_gain")]
+    pub forgetting_reinforcement_gain: f64,
 }
 
 impl Default for MemoryConfig {
@@ -174,6 +185,11 @@ impl Default for MemoryConfig {
             important_fade_days: default_important_fade_days(),
             auto_summarize_threshold: default_auto_summarize_threshold(),
             working_memory_expire_hours: default_working_memory_expire_hours(),
+            forgetting_enabled: true,
+            forgetting_half_life_days: default_forgetting_half_life_days(),
+            forgetting_time_weight: default_forgetting_time_weight(),
+            forgetting_similarity_weight: default_forgetting_similarity_weight(),
+            forgetting_reinforcement_gain: default_forgetting_reinforcement_gain(),
         }
     }
 }
@@ -880,6 +896,18 @@ fn default_auto_summarize_threshold() -> usize {
 }
 fn default_working_memory_expire_hours() -> u64 {
     6
+}
+fn default_forgetting_half_life_days() -> f64 {
+    14.0
+}
+fn default_forgetting_time_weight() -> f64 {
+    0.2
+}
+fn default_forgetting_similarity_weight() -> f64 {
+    1.2
+}
+fn default_forgetting_reinforcement_gain() -> f64 {
+    0.5
 }
 fn default_decay_rate() -> f32 {
     0.15

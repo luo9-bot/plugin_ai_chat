@@ -6,6 +6,7 @@
 
 pub mod bm25;
 pub mod fallback;
+pub mod forgetting;
 mod fusion;
 pub mod posterior_graph;
 pub mod threshold;

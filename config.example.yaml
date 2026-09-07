@@ -176,6 +176,23 @@ memory:
   # 开启群聊时会加载最近的工作记忆作为上下文
   working_memory_expire_hours: 6
 
+  # 无状态遗忘曲线：遗忘是查询时的纯函数，不需要后台任务维护
+  # 检索得分 = (1.2×语义相似 + 0.2×时间保留率) 归一化；被想起的记忆半衰期延长（检索即强化）
+  forgetting_enabled: true
+
+  # 基础半衰期（天）：普通记忆从"上次想起"到淡忘到一半的时间
+  # 重要记忆 ×4；永久记忆不衰减
+  forgetting_half_life_days: 14
+
+  # 时间分权重（与 forgetting_similarity_weight 配对，AIRI 式 1.2×相似 + 0.2×时间）
+  forgetting_time_weight: 0.2
+
+  # 语义相似分权重
+  forgetting_similarity_weight: 1.2
+
+  # 回忆强化的对数增益：半衰期 × (1 + gain × ln(1+回忆次数))
+  forgetting_reinforcement_gain: 0.5
+
 
 # ── 情绪参数 ─────────────────────────────────────────────────────
 emotion:

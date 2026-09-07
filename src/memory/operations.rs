@@ -49,7 +49,7 @@ fn queue_embedding(content: &str) {
     }
 }
 
-fn touch_entry(entry: &mut MemoryEntry, importance: Importance) {
+pub(crate) fn touch_entry(entry: &mut MemoryEntry, importance: Importance) {
     let now = crate::util::now_secs();
     entry.last_accessed = now;
     entry.access_count += 1;
