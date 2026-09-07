@@ -1,11 +1,11 @@
 //! 人物档案：她眼中的每一个人
 //!
-//! 档案里写的是"她眼中的他"，不是客观 profile——
+//! 档案里写的是"她眼中的TA"，不是客观 profile——
 //! impression/my_feeling 允许带偏见、带情绪、甚至不公平（方案书 §6.4）。
 //! 由睡前整理（她亲笔）持续修订；seed 是创作者播种的初始关系，只读。
 //!
 //! 种子：`data/mind/seeds.json`，格式
-//! `{"QQ号": {"address": "豆", "impression": "...", "my_feeling": "...", "mode": "..."}}`。
+//! `{"QQ号": {"display_name": "土豆", "address": "豆", "impression": "...", "my_feeling": "...", "mode": "..."}}`。
 //! 档案不存在时按种子初始化——创作者可以提前把重要的人种进去。
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,9 @@ use crate::config;
 /// 创作者播种的初始关系（只读，固化不可覆盖）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PersonSeed {
+    /// 大家对TA的称呼（如"土豆"）——她认人的依据
+    #[serde(default)]
+    pub display_name: String,
     #[serde(default)]
     pub address: String,
     #[serde(default)]
@@ -36,7 +39,7 @@ pub struct PersonSeed {
 pub struct PersonFile {
     #[serde(default)]
     pub display_name: String,
-    /// 她对他的称呼
+    /// 她对TA的称呼
     #[serde(default)]
     pub address: String,
     /// 她的主观印象
@@ -51,7 +54,7 @@ pub struct PersonFile {
     /// 共同的经历（她记得的事）
     #[serde(default)]
     pub memories: Vec<String>,
-    /// 想对他说而未说的
+    /// 想对TA说而未说的
     #[serde(default)]
     pub want_to_say: Vec<String>,
     #[serde(default)]
@@ -65,14 +68,18 @@ impl PersonFile {
     pub fn summary_for_prompt(&self) -> String {
         let mut lines: Vec<String> = Vec::new();
         let name = if self.display_name.is_empty() {
-            "这个人"
+            if self.address.is_empty() {
+                "这个人".to_string()
+            } else {
+                self.address.clone()
+            }
         } else {
-            &self.display_name
+            self.display_name.clone()
         };
-        let title = if self.address.is_empty() {
-            name.to_string()
+        let title = if self.address.is_empty() || self.address == name {
+            name
         } else {
-            format!("{name}（你叫他{}）", self.address)
+            format!("{name}（你叫TA{}）", self.address)
         };
         if !self.impression.is_empty() {
             lines.push(format!("印象：{}", self.impression));
@@ -84,13 +91,66 @@ impl PersonFile {
             lines.push(format!("相处：{}", self.mode));
         }
         if let Some(last) = self.want_to_say.last() {
-            lines.push(format!("你想对他说：{last}"));
+            lines.push(format!("你想对TA说：{last}"));
         }
         if lines.is_empty() {
             return title;
         }
         format!("{title}：\n{}", lines.join("\n"))
     }
+    /// 档案是否有任何实质内容（供注入过滤）
+    pub fn has_content(&self) -> bool {
+        !self.display_name.is_empty()
+            || !self.address.is_empty()
+            || !self.impression.is_empty()
+            || !self.my_feeling.is_empty()
+            || !self.mode.is_empty()
+            || !self.memories.is_empty()
+    }
+}
+
+// ── 展示名与聊天注入 ────────────────────────────────────────────
+
+/// 展示名：档案里的名字（含创作者种子）优先，其次档案称呼
+///
+/// 是"谁在说话/关于谁"的权威解析入口——她认人靠的是这里，不是原始 QQ 号。
+pub fn display_name_or_address(uid: u64) -> Option<String> {
+    let file = get(uid);
+    if !file.display_name.is_empty() {
+        Some(file.display_name)
+    } else if !file.address.is_empty() {
+        Some(file.address)
+    } else {
+        None
+    }
+}
+
+/// 渲染"你认识的人"感官块（voice 聊天提示词注入用；无人可认时 None）
+///
+/// 在场的人 + 创作者播种的人都在列——她认得谁，不该只限于这一轮说话的人。
+pub fn context_block(involved: &[u64]) -> Option<String> {
+    let mut uids: Vec<u64> = involved.iter().copied().filter(|&uid| uid > 0).collect();
+    for key in load_seeds().keys() {
+        if let Ok(uid) = key.parse::<u64>()
+            && uid > 0
+            && !uids.contains(&uid)
+        {
+            uids.push(uid);
+        }
+    }
+    let lines: Vec<String> = uids
+        .iter()
+        .map(|&uid| get(uid))
+        .filter(PersonFile::has_content)
+        .map(|file| file.summary_for_prompt())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "# 你认识的人\n这些人不管换成什么昵称，你一眼就认得：\n{}",
+        lines.join("\n\n")
+    ))
 }
 
 // ── 存储 ────────────────────────────────────────────────────────
@@ -124,12 +184,16 @@ pub fn get(uid: u64) -> PersonFile {
     {
         return file;
     }
+    let seed = load_seeds().get(&uid.to_string()).cloned();
     let mut file = PersonFile {
-        display_name: crate::person_info::get_display_name(uid, 0).unwrap_or_default(),
         updated_at: crate::util::now_secs(),
         ..Default::default()
     };
-    if let Some(seed) = load_seeds().get(&uid.to_string()) {
+    if let Some(seed) = seed {
+        // 创作者播种的名字最权威
+        if !seed.display_name.is_empty() {
+            file.display_name = seed.display_name.clone();
+        }
         file.address = seed.address.clone();
         if file.impression.is_empty() {
             file.impression = seed.impression.clone();
@@ -140,7 +204,7 @@ pub fn get(uid: u64) -> PersonFile {
         if file.mode.is_empty() {
             file.mode = seed.mode.clone();
         }
-        file.seed = Some(seed.clone());
+        file.seed = Some(seed);
     }
     file
 }
@@ -187,7 +251,7 @@ pub fn involved_today(about_users: &[u64]) -> Vec<(u64, PersonFile)> {
     about_users.iter().map(|&uid| (uid, get(uid))).collect()
 }
 
-/// 零容忍清洗：清除与该用户相关的待办牵挂（他的印象与记忆保留——那是事实）
+/// 零容忍清洗：清除与该用户相关的待办牵挂（TA的印象与记忆保留——那是事实）
 pub fn purge_user_want_to_say(uid: u64) {
     let mut file = get(uid);
     if file.want_to_say.is_empty() {
@@ -213,8 +277,41 @@ mod tests {
             ..Default::default()
         };
         let s = file.summary_for_prompt();
-        assert!(s.contains("土豆（你叫他豆）"));
+        assert!(s.contains("土豆（你叫TA豆）"));
         assert!(s.contains("印象：最放松的搭子"));
         assert!(s.contains("问面试"));
+    }
+
+    #[test]
+    fn title_falls_back_to_address() {
+        let file = PersonFile {
+            address: "豆".into(),
+            impression: "搭子".into(),
+            ..Default::default()
+        };
+        assert!(file.summary_for_prompt().starts_with("豆："));
+    }
+
+    #[test]
+    fn has_content_reflects_fields() {
+        assert!(!PersonFile::default().has_content());
+        assert!(
+            PersonFile {
+                display_name: "土豆".into(),
+                ..Default::default()
+            }
+            .has_content()
+        );
+    }
+
+    #[test]
+    fn seed_parses_with_display_name() {
+        let json =
+            r#"{"3125891038": {"display_name": "土豆", "address": "豆", "impression": "搭子"}}"#;
+        let seeds: HashMap<String, PersonSeed> = serde_json::from_str(json).unwrap();
+        let seed = seeds.get("3125891038").unwrap();
+        assert_eq!(seed.display_name, "土豆");
+        assert_eq!(seed.address, "豆");
+        assert!(seed.my_feeling.is_empty());
     }
 }

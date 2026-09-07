@@ -99,8 +99,12 @@ pub fn get_person_context(user_id: u64) -> String {
 
 /// 获取用户显示名称（用于 AI 上下文，避免暴露原始 user_id）
 ///
-/// 优先使用 person_name，其次使用群昵称，都没有则返回 None。
+/// 人物档案（含创作者播种的名字，见 mind::persons）优先——那是她认人的依据；
+/// 其次自动学到的 person_name，再次群昵称。
 pub fn get_display_name(user_id: u64, group_id: u64) -> Option<String> {
+    if let Some(name) = crate::mind::persons::display_name_or_address(user_id) {
+        return Some(name);
+    }
     let s = load_store();
     s.profiles.get(&user_id).and_then(|p| {
         if !p.person_name.is_empty() {

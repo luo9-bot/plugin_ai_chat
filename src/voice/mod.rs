@@ -504,7 +504,12 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
 
     let cfg = config::get();
     let identity = crate::mind::self_model::identity_text();
-    let system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
+    let mut system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
+    // 认识的人：在场的人 + 创作者播种的人，她本来就认得
+    if let Some(block) = mind::persons::context_block(&involved) {
+        system.push_str("\n\n");
+        system.push_str(&block);
+    }
     let new_perceptions = new_lines.join("\n");
     let mut user_content = stream_user_content(&new_perceptions);
     // 社会感知：群里的势——几条线在聊、谁和谁熟、有人在等、她刚说过话没有。
@@ -564,6 +569,11 @@ pub fn speak_private(
     let involved = [user_id];
     let identity = crate::mind::self_model::identity_text();
     let mut system = build_system(&scene_line(0, &involved, false), &identity);
+    // 认识的人：创作者播种的名单，她本来就认得对面是谁
+    if let Some(block) = mind::persons::context_block(&involved) {
+        system.push_str("\n\n");
+        system.push_str(&block);
+    }
     if let Some(extra) = extra_system {
         system.push_str("\n\n");
         system.push_str(extra);
