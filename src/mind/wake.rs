@@ -435,6 +435,12 @@ fn build_wake_input(plan: &WakePlan) -> String {
         sections.push(wishes);
     }
 
+    // 信息觅食：哪些群攒了没细看的消息——看不看由她自己决定
+    let unread = crate::mind::foraging::unread_lines();
+    if !unread.is_empty() {
+        sections.push(unread.join("\n"));
+    }
+
     sections.push(format!("你留了话：{}", plan.reason));
     sections.join("\n\n")
 }

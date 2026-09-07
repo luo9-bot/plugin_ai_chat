@@ -221,6 +221,9 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     // ── 概率式中断记账：她正在生成回复时又来了新消息 ──
     crate::conversation::interruption::note_arrival(group_id);
 
+    // ── 信息觅食记账：这个群又攒了一条没细看的（纯内存） ──
+    crate::mind::foraging::note_message(group_id);
+
     // ── 人物档案：注册/更新 ──
     crate::person_info::register_person(user_id);
 

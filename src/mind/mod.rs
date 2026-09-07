@@ -9,6 +9,7 @@
 
 pub mod archive;
 pub mod diary;
+pub mod foraging;
 pub mod persons;
 pub mod recall;
 pub mod security;

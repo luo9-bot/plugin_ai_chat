@@ -586,6 +586,11 @@ fn check_periodic() {
         mind::wish::sync_due_to_wake(now);
     }
 
+    // 信息觅食：未读计数周期落盘（记账本身纯内存零 IO）
+    if config::get().humanity.foraging_enabled {
+        mind::foraging::flush();
+    }
+
     // 情绪衰减（轻量，主循环执行）。
     // 主动消息不再由规则触发器驱动：她主动不主动，由她自己的想起（意图堆）决定。
     let mut known_users: Vec<u64> = Vec::new();

@@ -161,6 +161,24 @@ fn plan_next_tool() -> Tool {
     }
 }
 
+fn catch_up_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: crate::ai::FunctionDef {
+            name: "catch_up".to_string(),
+            description: "去翻一个群的记录，把攒着的没细看的消息看完。看完你可以继续决定要不要说话、留什么想起。"
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "group_id": {"type": "integer", "description": "要翻哪个群"}
+                },
+                "required": ["group_id"]
+            }),
+        },
+    }
+}
+
 fn search_web_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
@@ -646,7 +664,10 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     }
 
     // 阶段二：决定行动
-    let decision_tools: Vec<Tool> = vec![say_tool(true), finish_tool(), plan_next_tool()];
+    let mut decision_tools: Vec<Tool> = vec![say_tool(true), finish_tool(), plan_next_tool()];
+    if config::get().humanity.foraging_enabled {
+        decision_tools.push(catch_up_tool());
+    }
     let captured_action: RefCell<Option<WakeAction>> = RefCell::new(None);
     let captured_wake: RefCell<Option<(u64, String)>> = RefCell::new(None);
 
@@ -703,7 +724,14 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
                 *captured_wake.borrow_mut() = Some((secs.min(48 * 3600), reason));
                 ToolOutcome::Continue("已记下这个安排。现在收尾：say 或 finish。".into())
             }
-            _ => ToolOutcome::Continue("未知工具，可用：say、finish、plan_next。".into()),
+            "catch_up" => {
+                let gid = args.get("group_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                if gid == 0 {
+                    return ToolOutcome::Continue("catch_up 需要 group_id。".into());
+                }
+                ToolOutcome::Continue(crate::mind::foraging::catch_up(gid))
+            }
+            _ => ToolOutcome::Continue("未知工具，可用：say、finish、plan_next、catch_up。".into()),
         },
     );
     // 决策阶段失败且她什么都没留下 = 这次回神没有完成，不是她的沉默

@@ -738,6 +738,10 @@ pub struct HumanityConfig {
     // 愿望系统：她自己想要什么（目标 + 想法，睡前整理时自主生成）
     #[serde(default = "default_true")]
     pub wish_enabled: bool,
+
+    // 信息觅食：群消息全量入流，但"坐下来细看"是回神时她自己的动作
+    #[serde(default = "default_true")]
+    pub foraging_enabled: bool,
 }
 
 impl Default for HumanityConfig {
@@ -769,6 +773,7 @@ impl Default for HumanityConfig {
             flashback_probability: default_flashback_probability(),
             flashback_impact_threshold: default_flashback_impact_threshold(),
             wish_enabled: true,
+            foraging_enabled: true,
         }
     }
 }
