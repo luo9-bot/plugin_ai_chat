@@ -730,6 +730,10 @@ pub struct HumanityConfig {
     pub flashback_probability: f32,
     #[serde(default = "default_flashback_impact_threshold")]
     pub flashback_impact_threshold: f32,
+
+    // 愿望系统：她自己想要什么（目标 + 想法，睡前整理时自主生成）
+    #[serde(default = "default_true")]
+    pub wish_enabled: bool,
 }
 
 impl Default for HumanityConfig {
@@ -760,6 +764,7 @@ impl Default for HumanityConfig {
             inner_thought_interval_max: default_inner_thought_interval_max(),
             flashback_probability: default_flashback_probability(),
             flashback_impact_threshold: default_flashback_impact_threshold(),
+            wish_enabled: true,
         }
     }
 }

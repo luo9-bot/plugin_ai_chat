@@ -746,6 +746,31 @@ pub struct LoopDraft {
     pub in_secs: Option<u64>,
 }
 
+/// 目标草稿（她亲笔）：睡前整理时立下的长期愿望
+#[derive(Debug, Clone)]
+pub struct GoalDraft {
+    pub text: String,
+    pub parent_id: Option<u64>,
+    /// 多久之后到期（秒）
+    pub deadline_in_secs: Option<u64>,
+    pub priority: Option<u8>,
+}
+
+/// 想法草稿（她亲笔）：新冒出来的念头
+#[derive(Debug, Clone)]
+pub struct IdeaDraft {
+    pub text: String,
+    pub excitement: Option<u8>,
+}
+
+/// 愿望推进（她亲笔）：目标进度更新或收尾
+#[derive(Debug, Clone)]
+pub struct WishUpdate {
+    pub goal_id: u64,
+    pub progress: Option<u8>,
+    pub achieved: Option<bool>,
+}
+
 /// 睡前整理的完整产物
 #[derive(Debug, Default)]
 pub struct DigestOutcome {
@@ -757,6 +782,10 @@ pub struct DigestOutcome {
     pub beliefs: Vec<String>,
     /// 给明天的她的小结（入流 Digested）
     pub compress: Option<String>,
+    /// 愿望：新目标 / 新念头 / 目标推进
+    pub goal_drafts: Vec<GoalDraft>,
+    pub idea_drafts: Vec<IdeaDraft>,
+    pub wish_updates: Vec<WishUpdate>,
 }
 
 fn digest_tools() -> Vec<Tool> {
@@ -843,6 +872,57 @@ fn digest_tools() -> Vec<Tool> {
         Tool {
             tool_type: "function".to_string(),
             function: crate::ai::FunctionDef {
+                name: "come_up_goal".to_string(),
+                description:
+                    "立一个愿望：你真的想要的东西（不是任务，是想要）。已经在心里的事不用重复立。"
+                        .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "用你自己的话说你想要什么"},
+                        "parent_id": {"type": "integer", "description": "（可选）这是哪个更大目标（#id）的一部分"},
+                        "deadline_in_secs": {"type": "integer", "description": "（可选）想给自己多久（秒）"},
+                        "priority": {"type": "integer", "description": "（可选）重要程度 1~10"}
+                    },
+                    "required": ["text"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "come_up_idea".to_string(),
+                description: "记一个念头：突然想试一试的主意，还没到立目标的程度。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "念头的内容"},
+                        "excitement": {"type": "integer", "description": "（可选）这个念头让你有多兴奋 1~10"}
+                    },
+                    "required": ["text"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
+                name: "update_wish".to_string(),
+                description: "更新你的愿望进度：某个目标有进展了、实现了，或者不想再要了。"
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {"type": "integer", "description": "目标的 #id"},
+                        "progress": {"type": "integer", "description": "（可选）现在的进度 0~100，到 100 自动算实现"},
+                        "achieved": {"type": "boolean", "description": "（可选）true=实现了，false=放下不要了"}
+                    },
+                    "required": ["goal_id"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".to_string(),
+            function: crate::ai::FunctionDef {
                 name: "compress".to_string(),
                 description: "把今天压缩成一段给明天的你的小结（之前的我）。".to_string(),
                 parameters: serde_json::json!({
@@ -887,7 +967,7 @@ pub fn digest_think(input: &str) -> DigestOutcome {
     });
 
     let decision_content = format!(
-        "{input}\n\n（刚才你心里想的是：{}）\n\n现在睡前整理：写日记、修订今天互动过的人的档案、登记心事、给明天的自己留一段小结。都做完后 finish。",
+        "{input}\n\n（刚才你心里想的是：{}）\n\n现在睡前整理：写日记、修订今天互动过的人的档案、登记心事、给明天的自己留一段小结。今天有什么真的想要的东西，也可以立个愿望（come_up_goal）或记个念头（come_up_idea）；心里的事有进展就用 update_wish 更新。都做完后 finish。",
         if inner.is_empty() {
             "没什么特别的".to_string()
         } else {
@@ -1009,9 +1089,61 @@ pub fn digest_think(input: &str) -> DigestOutcome {
                     }
                     ToolOutcome::Abort
                 }
+                "come_up_goal" => {
+                    let text = args
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if text.is_empty() {
+                        return ToolOutcome::Continue("come_up_goal 需要 text。".into());
+                    }
+                    out.goal_drafts.push(GoalDraft {
+                        text,
+                        parent_id: args.get("parent_id").and_then(|v| v.as_u64()),
+                        deadline_in_secs: args.get("deadline_in_secs").and_then(|v| v.as_u64()),
+                        priority: args.get("priority").and_then(|v| v.as_u64()).map(|v| v as u8),
+                    });
+                    ToolOutcome::Continue("这个愿望已经放在心上了。".into())
+                }
+                "come_up_idea" => {
+                    let text = args
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if text.is_empty() {
+                        return ToolOutcome::Continue("come_up_idea 需要 text。".into());
+                    }
+                    out.idea_drafts.push(IdeaDraft {
+                        text,
+                        excitement: args
+                            .get("excitement")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u8),
+                    });
+                    ToolOutcome::Continue("这个念头记下了。".into())
+                }
+                "update_wish" => {
+                    let goal_id = args.get("goal_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if goal_id == 0 {
+                        return ToolOutcome::Continue("update_wish 需要 goal_id。".into());
+                    }
+                    out.wish_updates.push(WishUpdate {
+                        goal_id,
+                        progress: args
+                            .get("progress")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u8),
+                        achieved: args.get("achieved").and_then(|v| v.as_bool()),
+                    });
+                    ToolOutcome::Continue("愿望的进展记下了。".into())
+                }
                 "finish" => ToolOutcome::Abort,
                 _ => ToolOutcome::Continue(
-                    "未知工具，可用：write_diary、update_person、add_loop、add_belief、compress、finish。"
+                    "未知工具，可用：write_diary、update_person、add_loop、add_belief、compress、come_up_goal、come_up_idea、update_wish、finish。"
                         .into(),
                 ),
             }

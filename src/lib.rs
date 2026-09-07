@@ -532,6 +532,41 @@ fn check_periodic() {
                         }
                         mind::add_wake_plan(p);
                     }
+                    // 愿望：新目标 / 新念头 / 目标推进（滤壳；都是她自己的事，不关联用户）
+                    if cfg.humanity.wish_enabled {
+                        for goal in &outcome.goal_drafts {
+                            if !shell_check(&goal.text, "consolidation") {
+                                continue;
+                            }
+                            let deadline = goal
+                                .deadline_in_secs
+                                .map(|s| util::now_secs() + s.max(3600));
+                            mind::wish::add_goal(
+                                &goal.text,
+                                goal.parent_id,
+                                goal.priority.unwrap_or(5),
+                                deadline,
+                                mind::wish::WishSource::Reflection,
+                            );
+                        }
+                        for idea in &outcome.idea_drafts {
+                            if !shell_check(&idea.text, "consolidation") {
+                                continue;
+                            }
+                            mind::wish::add_idea(
+                                &idea.text,
+                                idea.excitement.unwrap_or(5),
+                                mind::wish::WishSource::Reflection,
+                            );
+                        }
+                        for upd in &outcome.wish_updates {
+                            if let Some(achieved) = upd.achieved {
+                                mind::wish::close_goal(upd.goal_id, achieved);
+                            } else if let Some(progress) = upd.progress {
+                                mind::wish::set_goal_progress(upd.goal_id, progress);
+                            }
+                        }
+                    }
                     // 给明天的她的小结（滤壳）
                     if let Some(summary) = &outcome.compress
                         && shell_check(summary, "consolidation")
@@ -545,6 +580,11 @@ fn check_periodic() {
 
     // 推进到期事项：等待超时不会被虚构为完成，只转为需要决定下一步。
     personal_tasks::review_due_tasks();
+
+    // 愿望期限：到期目标的期限变成她自己的"想起"（意图堆）
+    if config::get().humanity.wish_enabled {
+        mind::wish::sync_due_to_wake(now);
+    }
 
     // 情绪衰减（轻量，主循环执行）。
     // 主动消息不再由规则触发器驱动：她主动不主动，由她自己的想起（意图堆）决定。

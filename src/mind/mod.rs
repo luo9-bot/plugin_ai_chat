@@ -18,6 +18,7 @@ pub mod social;
 pub mod stream;
 pub mod style;
 pub mod wake;
+pub mod wish;
 
 pub use diary::DiaryEntry;
 pub use persons::{PersonFile, PersonSeed};

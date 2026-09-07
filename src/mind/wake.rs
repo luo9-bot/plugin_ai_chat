@@ -430,6 +430,11 @@ fn build_wake_input(plan: &WakePlan) -> String {
         sections.push(format!("关于：{name}"));
     }
 
+    // 她想要的：回神时她看得见自己的愿望（不带 id——这里不是更新的时候）
+    if let Some(wishes) = crate::mind::wish::context_block(false) {
+        sections.push(wishes);
+    }
+
     sections.push(format!("你留了话：{}", plan.reason));
     sections.join("\n\n")
 }
@@ -477,6 +482,11 @@ fn build_digest_input() -> String {
             .collect::<Vec<_>>()
             .join("、");
         sections.push(format!("身体：{rendered}"));
+    }
+
+    // 她想要的：带 id——睡前整理时她可以更新进度或收尾
+    if let Some(wishes) = crate::mind::wish::context_block(true) {
+        sections.push(wishes);
     }
 
     sections.join("\n\n")
