@@ -69,6 +69,66 @@ fn diary_echo(topic: &str) -> Vec<String> {
         .collect()
 }
 
+/// 情绪类型 → 情绪效价（+1 正性 / -1 负性 / None 中性）
+fn emotion_valence(emotion: &crate::emotion::EmotionType) -> Option<f32> {
+    use crate::emotion::EmotionType::*;
+    match emotion {
+        Happy | Excited => Some(1.0),
+        Sad | Angry | Worried => Some(-1.0),
+        _ => None,
+    }
+}
+
+/// PTSD 式闪回：情绪冲击极强的记忆平时被压着，偶尔被眼前的字眼猛地勾起
+///
+/// 触发要真：话题与记忆必须有实词交集——闪回不是随机抽样，是眼前的东西
+/// 勾出来的。概率是"不是每次都来"的分寸；此刻情绪与记忆同号时更容易被勾起
+/// （情绪一致性）。产出以第一人称体验入流，她怎么回应仍由她自己决定。
+fn flashback(topic: &str, user_id: u64, group_id: u64) -> Vec<String> {
+    let cfg = crate::config::get();
+    let base_probability = cfg.humanity.flashback_probability;
+    if base_probability <= 0.0 || topic.trim().is_empty() {
+        return Vec::new();
+    }
+
+    // 候选池：情绪冲击达到阈值的记忆（全局 + 本群）
+    let threshold = cfg.humanity.flashback_impact_threshold;
+    let impactful =
+        |e: &&crate::memory::MemoryEntry| e.emotional_impact.is_some_and(|v| v.abs() >= threshold);
+    let global = crate::memory::store::load_user_memory(user_id);
+    let mut candidates: Vec<crate::memory::MemoryEntry> =
+        global.entries.iter().filter(impactful).cloned().collect();
+    if group_id > 0 {
+        let group_mem = crate::memory::store::load_group_user_memory(group_id, user_id);
+        candidates.extend(group_mem.entries.iter().filter(impactful).cloned());
+    }
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    // 眼前的字眼必须真的勾到它
+    let Some(entry) = candidates
+        .into_iter()
+        .find(|e| topic_overlap(topic, &e.content) >= 2)
+    else {
+        return Vec::new();
+    };
+
+    // 情绪一致性：此刻的心情与记忆同号，闸门更松
+    let impact = entry.emotional_impact.unwrap_or(0.0);
+    let probability = match emotion_valence(&crate::emotion::get_state(user_id).current) {
+        Some(v) if v * impact > 0.0 => base_probability * 2.0,
+        _ => base_probability,
+    };
+    if fastrand::f32() >= probability.min(0.9) {
+        return Vec::new();
+    }
+
+    let snippet: String = entry.content.chars().take(50).collect();
+    let word = if impact < 0.0 { "画面" } else { "暖流" };
+    vec![format!("（毫无来由地，一{word}突然涌上来）{snippet}")]
+}
+
 /// 对眼前的人与话题，她能想起什么（"想起：…"行，直接入流）
 pub fn recall_for(text: &str, user_id: u64, group_id: u64) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -87,6 +147,9 @@ pub fn recall_for(text: &str, user_id: u64, group_id: u64) -> Vec<String> {
         }
     }
 
+    // 闪回：情绪冲击极强的记忆，偶尔毫无来由地突现
+    out.extend(flashback(text, user_id, group_id));
+
     // 时间线索：太久没说话的人（私聊才有"多久没见"的分寸）
     if group_id == 0 {
         let relationship = crate::person_info::relationship::get_relationship(user_id);
@@ -104,6 +167,26 @@ pub fn recall_for(text: &str, user_id: u64, group_id: u64) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flashback_output_is_first_person_experience() {
+        // 闪回行必须是第一人称体验的转述，不带指令、不带数值
+        let line = "（毫无来由地，一个画面突然涌上来）他上周说过要去看海";
+        assert!(line.starts_with("（毫无来由地"));
+        assert!(!line.contains("memory"));
+    }
+
+    #[test]
+    fn emotion_valence_signs() {
+        use crate::emotion::EmotionType::*;
+        assert_eq!(emotion_valence(&Happy), Some(1.0));
+        assert_eq!(emotion_valence(&Excited), Some(1.0));
+        assert_eq!(emotion_valence(&Sad), Some(-1.0));
+        assert_eq!(emotion_valence(&Angry), Some(-1.0));
+        assert_eq!(emotion_valence(&Worried), Some(-1.0));
+        assert_eq!(emotion_valence(&Tired), None);
+        assert_eq!(emotion_valence(&Neutral), None);
+    }
 
     #[test]
     fn recall_output_format_is_paraphrase() {

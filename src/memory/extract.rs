@@ -1,6 +1,6 @@
 use tracing::debug;
 
-use super::operations::add;
+use super::operations::{add, add_with_impact};
 use super::store::Importance;
 
 const KEYWORD_COOLDOWN_SECS: u64 = 600;
@@ -153,6 +153,11 @@ pub fn ai_extract(
                         "important" => Importance::Important,
                         _ => Importance::Normal,
                     };
+                    let emotional_impact = item
+                        .get("emotional_impact")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v.clamp(-10.0, 10.0) as f32)
+                        .filter(|&v| v != 0.0);
                     super::ops_log::record(
                         "ai_extract",
                         user_id,
@@ -161,7 +166,7 @@ pub fn ai_extract(
                         importance_str,
                         "AI extracted from conversation",
                     );
-                    add(user_id, group_id, c, importance);
+                    add_with_impact(user_id, group_id, c, importance, emotional_impact);
                 }
             } else {
                 debug!(

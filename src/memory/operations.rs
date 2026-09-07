@@ -65,6 +65,17 @@ pub(crate) fn touch_entry(entry: &mut MemoryEntry, importance: Importance) {
 /// group_id=0  → 用户的全局记忆（私聊/跨群共享，存 users/{uid}.json）
 /// group_id>0  → 用户在群里的特定记忆（存 groups/{gid}/{uid}.json）
 pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
+    add_with_impact(user_id, group_id, content, importance, None);
+}
+
+/// 添加记忆并记录情绪冲击（-10~+10）：冲击极强的记忆可能以闪回的方式突现
+pub fn add_with_impact(
+    user_id: u64,
+    group_id: u64,
+    content: &str,
+    importance: Importance,
+    emotional_impact: Option<f32>,
+) {
     let self_qq = crate::config::get().self_qq;
     if self_qq > 0 && user_id == self_qq {
         debug!(user_id, content = %content.chars().take(40).collect::<String>(), "memory: skipped (self_qq)");
@@ -95,6 +106,7 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
             created: now,
             last_accessed: now,
             access_count: 1,
+            emotional_impact,
         });
         crate::memory::store::save_user_memory(user_id, &mem);
         info!(user_id, content = %content_preview, "memory: saved (global)");
@@ -113,6 +125,7 @@ pub fn add(user_id: u64, group_id: u64, content: &str, importance: Importance) {
             created: now,
             last_accessed: now,
             access_count: 1,
+            emotional_impact,
         });
         crate::memory::store::save_group_user_memory(group_id, user_id, &mem);
         info!(user_id, group_id, content = %content_preview, "memory: saved (group-user)");
@@ -154,6 +167,7 @@ pub fn add_group_memory(group_id: u64, content: &str, importance: Importance) {
         created: now,
         last_accessed: now,
         access_count: 1,
+        emotional_impact: None,
     });
     crate::memory::store::save_group_memory(group_id, &mem);
     debug!(group_id, content = %content.chars().take(40).collect::<String>(), "memory: saved (group level)");

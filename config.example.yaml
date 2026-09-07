@@ -339,6 +339,11 @@ humanity:
   inner_thought_interval_min: 300  # 最小间隔(秒)
   inner_thought_interval_max: 900  # 最大间隔(秒)
 
+  # PTSD 式闪回：情绪冲击达到阈值的记忆平时被压着，
+  # 被眼前字眼勾起时以小概率毫无来由地突现（情绪一致时概率×2）
+  flashback_probability: 0.05     # 闪回概率（0 = 关闭）
+  flashback_impact_threshold: 6.0 # 触发闪回的最低情绪冲击绝对值 (-10~+10)
+
 
 # ── 群聊回复配额 (分时段限制回复次数) ───────────────────────
 # 以 5 分钟为最小配额段，按时段分配每段的最大回复次数

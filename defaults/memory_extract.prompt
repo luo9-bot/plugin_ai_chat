@@ -1,12 +1,19 @@
 分析以下对话，提取关于**用户**的值得长期记忆的事实。
 
 返回 JSON 数组格式（不要输出其他内容）:
-[{"content":"记忆内容","importance":"permanent|important|normal"}]
+[{"content":"记忆内容","importance":"permanent|important|normal","emotional_impact":0}]
 
 ## 重要性判断
 - permanent: 只给用户明确要求长期记住的信息（如说了"记住"、"别忘了"等，且内容合理）
 - important: 用户的稳定个人信息（姓名、职业、喜好、习惯、性格等），有明确证据
 - normal: 一般性话题中值得记录的有趣内容、经历、观点
+
+## 情绪冲击 emotional_impact (-10 ~ +10)
+- 这段记忆给"记住它的人"带来的情绪冲击强度：正数=快乐/温暖，负数=痛苦/不安
+- 0 = 中性事实（姓名、职业这类平淡信息）
+- ±3 以内 = 有点情绪色彩（"他养了只猫，很喜欢"）
+- ±6 以上 = 强冲击（亲人离世、重大争执、求婚、获奖、告别）
+- 只在确实有情绪分量时给出非零值；拿不准就给 0
 
 ## 证据要求
 - 事实必须有用户自己的原话作为直接证据
@@ -30,7 +37,11 @@
 示例:
 [user] 我叫小明，生日是3月15日，我最喜欢吃辣的
 [assistant] 哇那我们可以去吃川菜！
-→ [{"content":"用户叫小明","importance":"important"},{"content":"用户生日是3月15日","importance":"important"},{"content":"用户喜欢吃辣","importance":"important"}]
+→ [{"content":"用户叫小明","importance":"important","emotional_impact":0},{"content":"用户生日是3月15日","importance":"important","emotional_impact":0},{"content":"用户喜欢吃辣","importance":"important","emotional_impact":1}]
+
+[user] 我奶奶上个月走了，她最疼我了
+[assistant] 抱抱你，她一定很想你
+→ [{"content":"用户的奶奶上个月去世了，奶奶生前最疼他","importance":"important","emotional_impact":-8}]
 
 [user] 哈哈 晚安
 → []

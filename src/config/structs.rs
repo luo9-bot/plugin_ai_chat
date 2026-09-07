@@ -724,6 +724,12 @@ pub struct HumanityConfig {
     pub inner_thought_interval_min: u64,
     #[serde(default = "default_inner_thought_interval_max")]
     pub inner_thought_interval_max: u64,
+
+    // PTSD 式闪回：情绪冲击极强的记忆被眼前字眼勾起时，以小概率突现
+    #[serde(default = "default_flashback_probability")]
+    pub flashback_probability: f32,
+    #[serde(default = "default_flashback_impact_threshold")]
+    pub flashback_impact_threshold: f32,
 }
 
 impl Default for HumanityConfig {
@@ -752,6 +758,8 @@ impl Default for HumanityConfig {
             inner_thought_enabled: true,
             inner_thought_interval_min: default_inner_thought_interval_min(),
             inner_thought_interval_max: default_inner_thought_interval_max(),
+            flashback_probability: default_flashback_probability(),
+            flashback_impact_threshold: default_flashback_impact_threshold(),
         }
     }
 }
@@ -912,6 +920,12 @@ fn default_forgetting_similarity_weight() -> f64 {
 }
 fn default_forgetting_reinforcement_gain() -> f64 {
     0.5
+}
+fn default_flashback_probability() -> f32 {
+    0.05
+}
+fn default_flashback_impact_threshold() -> f32 {
+    6.0
 }
 fn default_decay_rate() -> f32 {
     0.15

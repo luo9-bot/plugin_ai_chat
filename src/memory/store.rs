@@ -19,6 +19,10 @@ pub struct MemoryEntry {
     pub created: u64,
     pub last_accessed: u64,
     pub access_count: u32,
+    /// 情绪冲击（-10~+10，正=快乐，负=痛苦）。旧数据缺省为 None。
+    /// 冲击极强的记忆平时被压着，偶尔以闪回的方式突现。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emotional_impact: Option<f32>,
 }
 
 // ── 兼容旧数据格式 ───────────────────────────────────────────────
@@ -173,6 +177,7 @@ fn migrate_old_store(old: &OldMemoryStore) {
                 created: old_entry.created,
                 last_accessed: old_entry.last_accessed,
                 access_count: old_entry.access_count,
+                emotional_impact: None,
             };
             match old_entry.group_id {
                 Some(0) | None => global.entries.push(entry),
@@ -203,6 +208,7 @@ fn migrate_old_store(old: &OldMemoryStore) {
                     created: old_entry.created,
                     last_accessed: old_entry.last_accessed,
                     access_count: old_entry.access_count,
+                    emotional_impact: None,
                 });
             }
             if !mem.entries.is_empty() {
