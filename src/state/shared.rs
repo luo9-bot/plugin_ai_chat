@@ -27,18 +27,10 @@ pub struct SharedState {
     last_reply_times: HashMap<(u64, u64), Instant>,
     /// 用户对话上下文 (按 (group_id, user_id) 隔离)
     pub contexts: HashMap<CtxKey, UserContext>,
-    /// 各群组最近一次消息处理时间 (unix秒)
-    pub last_conversation_times: HashMap<u64, u64>,
-    /// 已触发过对话后反思的群组，新消息到达时清除
-    pub reflected_groups: HashSet<u64>,
     /// 活跃群聊集合 (由主线程同步，供管理线程读取)
     pub active_groups: HashSet<u64>,
     /// 活跃私聊用户集合 (由主线程同步，供管理线程读取)
     pub active_users: HashSet<u64>,
-    /// 各群组最近审查到的工作记忆时间戳 (unix秒)
-    pub last_reviewed_timestamps: HashMap<u64, u64>,
-    /// 各群组上次反思时的对话内容 (标准化后)
-    pub last_reflected_content: HashMap<u64, String>,
     /// 群级对话历史 (group_id → history)，用于群聊中跨用户共享上下文
     pub group_history: HashMap<u64, Vec<(String, String)>>,
 }
@@ -55,12 +47,8 @@ impl SharedState {
             recent_bot_messages: HashMap::new(),
             last_reply_times: HashMap::new(),
             contexts: HashMap::new(),
-            last_conversation_times: HashMap::new(),
-            reflected_groups: HashSet::new(),
             active_groups: HashSet::new(),
             active_users: HashSet::new(),
-            last_reviewed_timestamps: HashMap::new(),
-            last_reflected_content: HashMap::new(),
             group_history: HashMap::new(),
         }
     }
@@ -232,48 +220,6 @@ impl SharedState {
         }
     }
 
-    /// 克隆群级历史
-    pub fn get_group_history_clone(&self, group_id: u64) -> Vec<(String, String)> {
-        if group_id == 0 {
-            return vec![];
-        }
-        self.group_history
-            .get(&group_id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// 记录群组最近对话时间，并清除反思标记
-    pub fn record_conversation(&mut self, group_id: u64, timestamp: u64) {
-        self.last_conversation_times.insert(group_id, timestamp);
-        self.reflected_groups.remove(&group_id);
-    }
-
-    /// 返回空闲超过指定秒数且未反思过的群组列表
-    pub fn get_idle_groups(&self, now: u64, idle_secs: u64) -> Vec<u64> {
-        self.last_conversation_times
-            .iter()
-            .filter(|(gid, last_time)| {
-                **gid > 0
-                    && now.saturating_sub(**last_time) >= idle_secs
-                    && !self.reflected_groups.contains(*gid)
-            })
-            .map(|(gid, _)| *gid)
-            .collect()
-    }
-
-    /// 遗忘用户在指定上下文中的对话 (共享部分)
-    pub fn forget_context_shared(&mut self, group_id: u64, user_id: u64) {
-        let key: CtxKey = (group_id, user_id);
-        self.contexts.remove(&key);
-        self.last_reply_times.remove(&(group_id, user_id));
-    }
-
-    /// 获取上次回复某用户的时间 (用于冷却检查)
-    pub fn last_reply_to_user(&self, group_id: u64, user_id: u64) -> Option<Instant> {
-        self.last_reply_times.get(&(group_id, user_id)).copied()
-    }
-
     /// 遗忘用户的所有对话 (共享部分)
     pub fn forget_user_shared(&mut self, user_id: u64) {
         self.contexts.retain(|&(_, uid), _| uid != user_id);
@@ -284,7 +230,7 @@ impl SharedState {
     ///
     /// - 移除空 history 的 context（已压缩到 summary 的保留）
     /// - 移除超过 1 小时的 last_reply_times
-    /// - 移除不活跃群的 group_history、last_reviewed_timestamps、last_reflected_content
+    /// - 移除不活跃群的 group_history
     pub fn cleanup_inactive(&mut self, active_groups: &HashSet<u64>) {
         let one_hour = 3600u64;
 
@@ -296,7 +242,7 @@ impl SharedState {
         self.last_reply_times
             .retain(|_, instant| instant.elapsed().as_secs() < one_hour);
 
-        // 清理不活跃群的相关数据
+        // 清理不活跃群的群级历史
         let inactive_groups: Vec<u64> = self
             .group_history
             .keys()
@@ -305,29 +251,6 @@ impl SharedState {
             .collect();
         for gid in inactive_groups {
             self.group_history.remove(&gid);
-            self.last_reviewed_timestamps.remove(&gid);
-            self.last_reflected_content.remove(&gid);
         }
     }
-}
-
-/// 返回长时间对话中需要定期审查的群组 (自由函数，需要跨 State/SharedState 数据)
-pub fn get_groups_needing_review(
-    conversation_times: &HashMap<u64, u64>,
-    review_times: &HashMap<u64, u64>,
-    now: u64,
-    review_interval: u64,
-    max_idle: u64,
-) -> Vec<u64> {
-    conversation_times
-        .iter()
-        .filter(|(gid, last_time)| {
-            **gid > 0
-                && now.saturating_sub(**last_time) < max_idle
-                && review_times
-                    .get(*gid)
-                    .is_none_or(|&last_review| now.saturating_sub(last_review) >= review_interval)
-        })
-        .map(|(gid, _)| *gid)
-        .collect()
 }

@@ -128,14 +128,6 @@ impl PromptManager {
                 include_str!("../../defaults/emotion_analyze.prompt"),
             ),
             (
-                "crisis_mild",
-                include_str!("../../defaults/crisis_mild.prompt"),
-            ),
-            (
-                "crisis_severe",
-                include_str!("../../defaults/crisis_severe.prompt"),
-            ),
-            (
                 "crisis_ai_detect",
                 include_str!("../../defaults/crisis_ai_detect.prompt"),
             ),
@@ -180,12 +172,12 @@ impl PromptManager {
                 include_str!("../../defaults/sticker_content_filtration.prompt"),
             ),
             (
-                "sticker_select",
-                include_str!("../../defaults/sticker_select.prompt"),
-            ),
-            (
                 "history_attention",
                 include_str!("../../defaults/history_attention.prompt"),
+            ),
+            (
+                "reply_effect_judge",
+                include_str!("../../defaults/reply_effect_judge.prompt"),
             ),
         ];
 

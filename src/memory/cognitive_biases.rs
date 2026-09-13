@@ -126,18 +126,6 @@ fn estimate_content_valence(content: &str) -> f32 {
     (pos_count - neg_count) / total
 }
 
-/// 记忆衰减权重（基于创建时间）
-#[allow(dead_code)]
-fn recency_weight(created_secs: u64, bias_strength: f32) -> f32 {
-    let now = crate::util::now_secs();
-    let age_hours = now.saturating_sub(created_secs) as f32 / 3600.0;
-    // 基础指数衰减
-    let base_decay = (-age_hours / 168.0).exp(); // 7天半衰期
-    // 近因效应让衰减更平缓
-    let adjusted = base_decay.powf(1.0 - bias_strength * 0.5);
-    adjusted.clamp(0.1, 1.0)
-}
-
 /// 对检索结果应用认知偏差权重，重新排序
 pub fn apply_cognitive_biases(
     results: Vec<RetrievalResult>,
@@ -208,8 +196,7 @@ pub fn apply_cognitive_biases(
                 bonus += biases.confirmation_bias * 0.2;
             }
 
-            // 5. 近因效应：通过 recency_weight 影响分数（需要 creation timestamp）
-            // 从 retrieval result 的元数据中提取或使用默认的中间值
+            // 5. 近因效应：固定加成（简单近期记忆优先）
             let recency_bonus = biases.recency_bias * 0.15;
             bonus += recency_bonus;
 

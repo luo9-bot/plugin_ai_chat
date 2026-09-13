@@ -534,17 +534,23 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
         .map(|u| u.text.clone())
         .collect();
 
+    let tools = voice_tools();
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+
     let result = run_tool_loop(
         &system,
         &[],
         &user_content,
-        &voice_tools(),
+        &tools,
         cfg.conversation.voice_max_rounds,
         |name, args| execute_tool(name, args, group_id, primary, &transcript_tail),
     );
 
     match result {
-        Ok(Some(text)) => VoiceAction::Reply(clean_voice_reply(&text, &cfg.bot_name)),
+        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, &tool_names) {
+            Some(reply) => VoiceAction::Reply(reply),
+            None => VoiceAction::Silent,
+        },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(group_id, error = %e, "voice: group API error");
@@ -612,17 +618,23 @@ pub fn speak_private(
         .map(|(_, c)| c.clone())
         .collect();
 
+    let tools = voice_tools();
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+
     let result = run_tool_loop(
         &system,
         history,
         &user_content,
-        &voice_tools(),
+        &tools,
         cfg.conversation.voice_max_rounds,
         |name, args| execute_tool(name, args, 0, user_id, &transcript_tail),
     );
 
     match result {
-        Ok(Some(text)) => VoiceAction::Reply(clean_voice_reply(&text, &cfg.bot_name)),
+        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, &tool_names) {
+            Some(reply) => VoiceAction::Reply(reply),
+            None => VoiceAction::Silent,
+        },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(user_id, error = %e, "voice: private API error");
@@ -1191,7 +1203,7 @@ pub fn digest_think(input: &str) -> DigestOutcome {
     outcome.into_inner()
 }
 
-// ── 回复清理 ────────────────────────────────────────────────────
+// ── 回复清理与出口守门 ──────────────────────────────────────────
 
 /// 最小化清理：去掉包裹引号和"名字："前缀
 ///
@@ -1222,9 +1234,47 @@ fn clean_voice_reply(reply: &str, bot_name: &str) -> String {
     text
 }
 
+/// 出口守门：过滤绝不该成为发言的内容
+///
+/// 逐段剔除两类污染（与发送端一致地按 |^| 和换行分段）：
+/// - 工具调用语法泄漏（finish(reason: ...) 之类被当成文字输出）
+/// - 记忆流转写格式的复读（土豆：[土豆 15:16] “finish”）
+///
+/// 全部段落被剔除时返回 None（= 这一轮视为沉默）。
+fn guard_voice_reply(reply: &str, bot_name: &str, tool_names: &[&str]) -> Option<String> {
+    let cleaned = clean_voice_reply(reply, bot_name);
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let kept: Vec<&str> = cleaned
+        .split("|^|")
+        .flat_map(|s| s.split('\n'))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter(|s| {
+            let tool_leak = crate::ai::detect_leaked_tool_call(s, tool_names).is_some();
+            let echo = crate::ai::is_transcribed_echo(s);
+            if tool_leak {
+                warn!(segment = %s, "voice: blocked leaked tool call in reply");
+            } else if echo {
+                warn!(segment = %s, "voice: blocked transcribed echo in reply");
+            }
+            !tool_leak && !echo
+        })
+        .collect();
+
+    if kept.is_empty() {
+        return None;
+    }
+    Some(kept.join("|^|"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TOOLS: &[&str] = &["query_memory", "send_sticker", "finish", "plan_next"];
 
     #[test]
     fn strips_wrapping_quotes() {
@@ -1243,6 +1293,50 @@ mod tests {
         assert_eq!(
             clean_voice_reply("他说“好”就“好”吧", "洛玖"),
             "他说“好”就“好”吧"
+        );
+    }
+
+    #[test]
+    fn guard_blocks_leaked_finish() {
+        // 真实泄漏案例：finish 被当文字输出
+        assert_eq!(guard_voice_reply("finish", "洛玖", TOOLS), None);
+        assert_eq!(
+            guard_voice_reply(
+                "finish(reason: 群里就是在玩表情和梗，我没啥要接的，不用凑上去）",
+                "洛玖",
+                TOOLS
+            ),
+            None
+        );
+        // 引号包裹的 finish：剥引号后暴露
+        assert_eq!(guard_voice_reply("“finish”", "洛玖", TOOLS), None);
+    }
+
+    #[test]
+    fn guard_blocks_transcribed_echo() {
+        assert_eq!(
+            guard_voice_reply("土豆：[土豆 15:16] “finish”", "洛玖", TOOLS),
+            None
+        );
+    }
+
+    #[test]
+    fn guard_drops_only_bad_segments() {
+        // 真实泄漏案例：正常段 + 复读段混合，只剔坏段
+        let reply =
+            "这你也学|^|土豆：[土豆 15:16] “finish”|^|你突然发个finish 干什么 我这不是才说过吗";
+        assert_eq!(
+            guard_voice_reply(reply, "洛玖", TOOLS),
+            Some("这你也学|^|你突然发个finish 干什么 我这不是才说过吗".to_string())
+        );
+    }
+
+    #[test]
+    fn guard_keeps_normal_speech() {
+        // "finish" 出现在句中是正常聊天，不拦
+        assert_eq!(
+            guard_voice_reply("你突然发个finish 干什么", "洛玖", TOOLS),
+            Some("你突然发个finish 干什么".to_string())
         );
     }
 }

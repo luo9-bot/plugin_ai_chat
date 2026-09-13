@@ -165,21 +165,11 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"schedule") => handlers::handle_schedule(&method, &body),
         Some(&"analytics") => handlers::handle_analytics(),
-        Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..], &body),
+        Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..]),
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handlers::handle_config(&method, &api_segs[1..], &body),
         Some(&"quota") => handlers::handle_quota(&method, &api_segs[1..]),
         Some(&"sticker") => match api_segs.get(1).copied() {
-            Some(hash) if api_segs.get(2).copied() == Some("image") => {
-                handlers::handle_sticker_image(hash)
-            }
-            Some("image") => {
-                if let Some(hash) = api_segs.get(2).copied() {
-                    handlers::handle_sticker_image(hash)
-                } else {
-                    err(400, "hash required")
-                }
-            }
             Some(hash) if api_segs.get(2).copied() == Some("tags") && method == Method::Put => {
                 handlers::handle_sticker_tags(hash, &body)
             }
@@ -196,7 +186,6 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         Some(&"humanity") => handlers::handle_humanity(),
         Some(&"memory-ops-log") => handlers::handle_memory_ops_log(&method, &api_segs[1..]),
         Some(&"relationships") => handlers::handle_relationships(&method, &api_segs[1..]),
-        Some(&"info") => handlers::handle_info(),
         Some(&"version") => ok(serde_json::json!({"version": env!("CARGO_PKG_VERSION")})),
         _ => err(404, "not found"),
     }

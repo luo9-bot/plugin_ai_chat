@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,32 +22,6 @@ pub struct MemoryEntry {
     /// 冲击极强的记忆平时被压着，偶尔以闪回的方式突现。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emotional_impact: Option<f32>,
-}
-
-// ── 兼容旧数据格式 ───────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-struct OldMemoryEntry {
-    pub content: String,
-    pub importance: Importance,
-    pub group_id: Option<u64>,
-    pub created: u64,
-    pub last_accessed: u64,
-    pub access_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[allow(dead_code)]
-struct OldMemoryStore {
-    pub users: HashMap<String, OldUserMemory>,
-    pub group_memories: Option<HashMap<String, Vec<OldMemoryEntry>>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[allow(dead_code)]
-struct OldUserMemory {
-    pub entries: Vec<OldMemoryEntry>,
 }
 
 // ── 无内存缓存，直接读写磁盘 ─────────────────────────────────────
@@ -135,87 +108,11 @@ pub fn save_group_user_memory(group_id: u64, user_id: u64, mem: &MemoryFile) {
     save_json(&path, mem);
 }
 
-/// 初始化：迁移旧数据 + 创建文件夹
+/// 初始化：创建存储目录
 pub fn init() {
     let new_dir = memory_dir();
     ensure_dir(&new_dir.join("users"));
     ensure_dir(&new_dir.join("groups"));
-
-    // 迁移旧数据（如果存在）
-    let old_path = crate::config::data_dir().join("memory.json");
-    if old_path.exists()
-        && fs::read_dir(new_dir.join("users"))
-            .map(|mut d| d.next().is_none())
-            .unwrap_or(true)
-    {
-        tracing::info!("memory: migrating from old memory.json to new directory structure");
-        if let Ok(content) = fs::read_to_string(&old_path)
-            && let Ok(old_store) = serde_json::from_str::<OldMemoryStore>(&content)
-        {
-            migrate_old_store(&old_store);
-        }
-        // 备份旧文件
-        let backup = crate::config::data_dir().join("memory.json.bak");
-        fs::rename(&old_path, &backup).ok();
-        tracing::info!("memory: migration complete, old file backed up to memory.json.bak");
-    }
-}
-
-fn migrate_old_store(old: &OldMemoryStore) {
-    for (uid_str, user_mem) in &old.users {
-        let uid: u64 = match uid_str.parse() {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
-        let mut global = MemoryFile::default();
-        let mut groups: HashMap<u64, MemoryFile> = HashMap::new();
-
-        for old_entry in &user_mem.entries {
-            let entry = MemoryEntry {
-                content: old_entry.content.clone(),
-                importance: old_entry.importance.clone(),
-                created: old_entry.created,
-                last_accessed: old_entry.last_accessed,
-                access_count: old_entry.access_count,
-                emotional_impact: None,
-            };
-            match old_entry.group_id {
-                Some(0) | None => global.entries.push(entry),
-                Some(gid) => groups.entry(gid).or_default().entries.push(entry),
-            }
-        }
-
-        if !global.entries.is_empty() {
-            save_user_memory(uid, &global);
-        }
-        for (gid, group_mem) in groups {
-            save_group_user_memory(gid, uid, &group_mem);
-        }
-    }
-
-    // 迁移群级别记忆
-    if let Some(ref group_mems) = old.group_memories {
-        for (gid_str, entries) in group_mems {
-            let gid: u64 = match gid_str.parse() {
-                Ok(id) => id,
-                Err(_) => continue,
-            };
-            let mut mem = MemoryFile::default();
-            for old_entry in entries {
-                mem.entries.push(MemoryEntry {
-                    content: old_entry.content.clone(),
-                    importance: old_entry.importance.clone(),
-                    created: old_entry.created,
-                    last_accessed: old_entry.last_accessed,
-                    access_count: old_entry.access_count,
-                    emotional_impact: None,
-                });
-            }
-            if !mem.entries.is_empty() {
-                save_group_memory(gid, &mem);
-            }
-        }
-    }
 }
 
 /// 有记忆的用户数量

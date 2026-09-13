@@ -11,7 +11,6 @@ pub mod conversation_end;
 pub mod crisis;
 #[cfg(feature = "plugin")]
 pub mod cron;
-pub mod crypto;
 pub mod emoji;
 pub mod emotion;
 pub mod learner;
@@ -296,9 +295,6 @@ pub extern "C" fn plugin_main() {
         }
     }
 
-    // 初始化 ECC 密钥对 (在注册之前)
-    crypto::init();
-
     // 启动管理后台 (后台线程)
     if !config::get().admin.token.is_empty() {
         thread::spawn(admin::start_server);
@@ -328,13 +324,9 @@ pub extern "C" fn plugin_main() {
     let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
     let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
     let ver_sub = Bus::topic("luo9_version").subscribe().unwrap();
-    let sent_sub = Bus::topic(runtime::sent_registry::TOPIC_SENT)
-        .subscribe()
-        .ok();
     let msg_topic = Bus::topic("luo9_message");
     let task_topic = Bus::topic("luo9_task");
     let ver_topic = Bus::topic("luo9_version");
-    let sent_topic = Bus::topic(runtime::sent_registry::TOPIC_SENT);
 
     loop {
         if let Some(json) = msg_topic.pop(msg_sub)
@@ -379,13 +371,6 @@ pub extern "C" fn plugin_main() {
             && luo9_sdk::version::is_version_query(&json)
         {
             luo9_sdk::version::reply_version(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-        }
-
-        // ── 发送回执：登记自己消息的 message_id（撤回/引用/表情回应的数据前提） ──
-        if let Some(sent_id) = sent_sub
-            && let Some(json) = sent_topic.pop(sent_id)
-        {
-            runtime::sent_registry::record_from_json(&json);
         }
 
         thread::sleep(Duration::from_millis(1));
@@ -620,14 +605,6 @@ fn check_periodic() {
         std::thread::spawn(|| {
             memory::ai_review_all();
         });
-    }
-
-    // 兴趣分衰减 (每天一次)
-    static LAST_INTEREST_DECAY: AtomicU64 = AtomicU64::new(0);
-    if now.saturating_sub(LAST_INTEREST_DECAY.load(Ordering::Relaxed)) >= 86400 {
-        LAST_INTEREST_DECAY.store(now, Ordering::Relaxed);
-        quota::decay_all_interest();
-        debug!("interest: decayed all scores");
     }
 
     // 每日遗忘扫描
@@ -869,7 +846,3 @@ pub(crate) fn is_admin(user_id: u64) -> bool {
     let admin = config::get().admin_qq;
     admin == 0 || admin == user_id
 }
-
-// ── 命令处理 re-exports（供 admin 模块调用） ─────────────────────
-pub use conversation::handle_admin_command;
-pub use conversation::handle_control_command;

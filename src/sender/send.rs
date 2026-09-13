@@ -1,7 +1,8 @@
 //! 消息发送：底层发送、打字延迟、安全检查
 //!
 //! 分段由她自己的输出决定（|^| 和换行），发送端只负责节奏：
-//! 打字速度受电量/节律/注意力影响，首条消息前有思考延迟。
+//! 打字速度受电量/节律/注意力影响，首条消息前有思考延迟，
+//! 段间隔按下一条的字数模拟"先把下一条打完再发"的真人节奏。
 
 use luo9_sdk::Bot;
 use std::ffi::CString;
@@ -63,15 +64,19 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str) {
             // 第一条消息前应用思考延迟
             let delay = timing.calculate_delay(text);
             if delay > 0 {
-                thread::sleep(Duration::from_millis(delay.min(2000))); // 首条消息思考延迟最多2秒
+                thread::sleep(Duration::from_millis(
+                    delay.min(cfg.conversation.max_typing_delay_ms),
+                ));
             }
         }
 
         raw_send_msg(group_id, user_id, text);
 
-        if i < parts.len() - 1 {
-            let delay = timing.calculate_delay(text);
-            let delay_ms = delay.min(cfg.conversation.max_typing_delay_ms);
+        // 段间隔 = 打下一条消息所需的时间：真人要先把下一条打完才发出来
+        if let Some(next) = parts.get(i + 1) {
+            let delay_ms = timing
+                .calculate_delay(next)
+                .min(cfg.conversation.max_typing_delay_ms);
             if delay_ms > 0 {
                 thread::sleep(Duration::from_millis(delay_ms));
             }

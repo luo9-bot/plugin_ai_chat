@@ -29,10 +29,6 @@ pub struct Config {
     #[serde(default)]
     pub proactive: ProactiveConfig,
     #[serde(default)]
-    pub self_reflection: SelfReflectionConfig,
-    #[serde(default)]
-    pub mental_state: MentalStateConfig,
-    #[serde(default)]
     pub style: StyleConfig,
     #[serde(default)]
     pub vision: VisionConfig,
@@ -46,8 +42,6 @@ pub struct Config {
     pub messages: Messages,
     #[serde(default)]
     pub log: LogConfig,
-    #[serde(default)]
-    pub sync: SyncConfig,
     #[serde(default)]
     pub admin: AdminConfig,
     #[serde(default)]
@@ -223,18 +217,10 @@ impl Default for EmotionConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProactiveConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
     #[serde(default = "default_quiet_start")]
     pub quiet_start: u32,
     #[serde(default = "default_quiet_end")]
     pub quiet_end: u32,
-    #[serde(default = "default_proactive_interval")]
-    pub interval: u64,
-    #[serde(default = "default_max_ignore")]
-    pub max_ignore: u32,
-    #[serde(default = "default_low_mood_multiplier")]
-    pub low_mood_multiplier: f64,
     #[serde(default = "default_check_interval")]
     pub check_interval: u64,
 }
@@ -242,63 +228,9 @@ pub struct ProactiveConfig {
 impl Default for ProactiveConfig {
     fn default() -> Self {
         Self {
-            enabled: default_true(),
             quiet_start: default_quiet_start(),
             quiet_end: default_quiet_end(),
-            interval: default_proactive_interval(),
-            max_ignore: default_max_ignore(),
-            low_mood_multiplier: default_low_mood_multiplier(),
             check_interval: default_check_interval(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct SelfReflectionConfig {
-    /// 自我反思间隔 (秒)，默认 1800 (30分钟)
-    #[serde(default = "default_reflection_interval")]
-    pub interval: u64,
-    /// 注入 prompt 的自我记忆条数上限，默认 8
-    /// 所有自我记忆都会永久保存，此值只控制每次对话注入多少条最近的想法
-    #[serde(default = "default_max_thoughts")]
-    pub max_thoughts: usize,
-    /// 对话结束后多久触发反思 (秒)，默认 120 (2分钟)
-    #[serde(default = "default_post_conversation_delay")]
-    pub post_conversation_delay_secs: u64,
-}
-
-impl Default for SelfReflectionConfig {
-    fn default() -> Self {
-        Self {
-            interval: default_reflection_interval(),
-            max_thoughts: default_max_thoughts(),
-            post_conversation_delay_secs: default_post_conversation_delay(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct MentalStateConfig {
-    #[serde(default = "default_concerns_max")]
-    pub concerns_max: usize,
-    #[serde(default = "default_concern_decay_rate")]
-    pub concern_decay_rate: f32,
-    #[serde(default = "default_deliberations_max")]
-    pub deliberations_max: usize,
-    #[serde(default = "default_deliberation_decay_rate")]
-    pub deliberation_decay_rate: f32,
-    #[serde(default = "default_defect_base_probability")]
-    pub defect_base_probability: f32,
-}
-
-impl Default for MentalStateConfig {
-    fn default() -> Self {
-        Self {
-            concerns_max: default_concerns_max(),
-            concern_decay_rate: default_concern_decay_rate(),
-            deliberations_max: default_deliberations_max(),
-            deliberation_decay_rate: default_deliberation_decay_rate(),
-            defect_base_probability: default_defect_base_probability(),
         }
     }
 }
@@ -482,42 +414,6 @@ impl Default for LogConfig {
         Self {
             enabled: default_true(),
             level: default_log_level(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct SyncConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub api_url: String,
-    #[serde(default = "default_db_name")]
-    pub db_name: String,
-    #[serde(default)]
-    pub mongodb_uri: String,
-    #[serde(default)]
-    pub display_name: String,
-    #[serde(default)]
-    pub icon: String,
-    #[serde(default)]
-    pub expose: bool,
-}
-
-fn default_db_name() -> String {
-    "memory_default".into()
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            api_url: String::new(),
-            db_name: default_db_name(),
-            mongodb_uri: String::new(),
-            display_name: String::new(),
-            icon: String::new(),
-            expose: false,
         }
     }
 }
@@ -962,41 +858,8 @@ fn default_quiet_start() -> u32 {
 fn default_quiet_end() -> u32 {
     7
 }
-fn default_proactive_interval() -> u64 {
-    7200
-}
-fn default_max_ignore() -> u32 {
-    3
-}
-fn default_low_mood_multiplier() -> f64 {
-    2.0
-}
 fn default_check_interval() -> u64 {
     60
-}
-fn default_reflection_interval() -> u64 {
-    1800
-}
-fn default_max_thoughts() -> usize {
-    8
-}
-fn default_post_conversation_delay() -> u64 {
-    120
-}
-fn default_concerns_max() -> usize {
-    5
-}
-fn default_concern_decay_rate() -> f32 {
-    0.1
-}
-fn default_deliberations_max() -> usize {
-    8
-}
-fn default_deliberation_decay_rate() -> f32 {
-    0.05
-}
-fn default_defect_base_probability() -> f32 {
-    0.1
 }
 fn default_max_reply_chars() -> usize {
     30

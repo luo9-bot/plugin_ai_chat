@@ -199,18 +199,40 @@ pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
     }))
 }
 
-// ── Handler: 用户记忆 ──────────────────────────────────────────
+// ── Handler: 用户记忆（读写 memory/users/{uid}.json 存储）──────
+
+/// 组装全部用户记忆（前端数据形状：{users: {uid: {entries: [...]}}}）
+fn memory_store_json() -> serde_json::Value {
+    let mut users = serde_json::Map::new();
+    for uid in crate::memory::store::all_user_ids() {
+        let mem = crate::memory::store::load_user_memory(uid);
+        users.insert(
+            uid.to_string(),
+            serde_json::to_value(&mem).unwrap_or_default(),
+        );
+    }
+    serde_json::json!({ "users": users })
+}
+
+fn parse_importance(
+    value: Option<&serde_json::Value>,
+) -> Result<crate::memory::store::Importance, ()> {
+    match value {
+        Some(v) if !v.is_null() => serde_json::from_value(v.clone()).map_err(|_| ()),
+        _ => Ok(crate::memory::store::Importance::Normal),
+    }
+}
 
 pub fn handle_memory(
     method: &Method,
     segs: &[&str],
     body: &[u8],
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let path = config::data_dir().join("memory.json");
+    use crate::memory::store::{self, MemoryEntry};
 
     // GET /api/memory/export -> 导出全部
     if *method == Method::Get && segs.first() == Some(&"export") {
-        let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
+        let data = serde_json::to_string(&memory_store_json()).unwrap_or_default();
         return Response::from_string(data)
             .with_header(
                 Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
@@ -218,7 +240,7 @@ pub fn handle_memory(
             .with_header(
                 Header::from_bytes(
                     "Content-Disposition",
-                    "attachment; filename=\"memory.json\"",
+                    "attachment; filename=\"memory_export.json\"",
                 )
                 .unwrap(),
             );
@@ -226,186 +248,126 @@ pub fn handle_memory(
 
     // POST /api/memory/{user_id}/batch -> 批量删除
     if *method == Method::Post && segs.len() == 2 && segs[1] == "batch" {
-        let uid = segs[0];
+        let Some(uid) = segs[0].parse().ok() else {
+            return err(400, "invalid user_id");
+        };
         let body_val: serde_json::Value = match parse_json(body) {
             Ok(v) => v,
             Err(e) => return err(400, &e),
         };
-        let indices: Vec<usize> = match body_val.get("indices").and_then(|v| v.as_array()) {
-            Some(arr) => arr
-                .iter()
-                .filter_map(|v| v.as_u64().map(|n| n as usize))
-                .collect(),
-            None => return err(400, "indices required"),
+        let Some(indices) = body_val
+            .get("indices")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as usize))
+                    .collect::<Vec<_>>()
+            })
+        else {
+            return err(400, "indices required");
         };
-        backup::before_modify("memory");
-        let mut store: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
-                .unwrap_or(serde_json::json!({"users": {}}));
-        let users = store
-            .get_mut("users")
-            .and_then(|v| v.as_object_mut())
-            .unwrap();
-        if let Some(user) = users.get_mut(uid) {
-            let entries = user
-                .get_mut("entries")
-                .and_then(|v| v.as_array_mut())
-                .unwrap();
-            let mut sorted = indices;
-            sorted.sort_unstable();
-            sorted.dedup();
-            let mut deleted = 0;
-            for idx in sorted.into_iter().rev() {
-                if idx < entries.len() {
-                    entries.remove(idx);
-                    deleted += 1;
-                }
+        let mut mem = store::load_user_memory(uid);
+        let mut sorted = indices;
+        sorted.sort_unstable();
+        sorted.dedup();
+        let mut deleted = 0;
+        for idx in sorted.into_iter().rev() {
+            if idx < mem.entries.len() {
+                mem.entries.remove(idx);
+                deleted += 1;
             }
-            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-            return ok(serde_json::json!({"ok": true, "deleted": deleted}));
         }
-        return err(404, "user not found");
+        store::save_user_memory(uid, &mem);
+        return ok(serde_json::json!({"ok": true, "deleted": deleted}));
     }
 
     match method {
         Method::Get => {
-            let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let store: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!({"users": {}}));
             // /api/memory -> 完整 store
             // /api/memory/{user_id} -> 单用户
-            if let Some(uid) = segs.first() {
-                let users = store.get("users").and_then(|v| v.as_object()).unwrap();
-                match users.get(*uid) {
-                    Some(user) => {
-                        ok(serde_json::json!({"user_id": uid, "entries": user["entries"]}))
-                    }
-                    None => ok(serde_json::json!({"user_id": uid, "entries": []})),
+            match segs.first().and_then(|s| s.parse::<u64>().ok()) {
+                Some(uid) => {
+                    let mem = store::load_user_memory(uid);
+                    ok(serde_json::json!({
+                        "user_id": uid.to_string(),
+                        "entries": serde_json::to_value(&mem).unwrap_or_default()
+                    }))
                 }
-            } else {
-                ok(store)
+                None => ok(memory_store_json()),
             }
         }
         Method::Post => {
-            let uid = match segs.first() {
-                Some(u) => *u,
-                None => return err(400, "user_id required"),
+            let Some(uid) = segs.first().and_then(|s| s.parse::<u64>().ok()) else {
+                return err(400, "invalid user_id");
             };
             let body_val: serde_json::Value = match parse_json(body) {
                 Ok(v) => v,
                 Err(e) => return err(400, &e),
             };
-            let content = match body_val.get("content").and_then(|v| v.as_str()) {
-                Some(c) if !c.is_empty() => c,
-                _ => return err(400, "content required"),
-            };
-            let importance = body_val
-                .get("importance")
+            let Some(content) = body_val
+                .get("content")
                 .and_then(|v| v.as_str())
-                .unwrap_or("normal");
-            backup::before_modify("memory");
-            let mut store: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-            )
-            .unwrap_or(serde_json::json!({"users": {}}));
-            let users = store
-                .get_mut("users")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            let user = users
-                .entry(uid.to_string())
-                .or_insert(serde_json::json!({"entries": []}));
-            let entries = user
-                .get_mut("entries")
-                .and_then(|v| v.as_array_mut())
-                .unwrap();
-            entries.push(serde_json::json!({
-                "content": content,
-                "importance": serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance)).unwrap_or(serde_json::json!("Normal")),
-                "created": crate::util::now_secs(),
-                "last_accessed": crate::util::now_secs(),
-                "access_count": 1
-            }));
-            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
+                .filter(|c| !c.is_empty())
+            else {
+                return err(400, "content required");
+            };
+            let importance = match parse_importance(body_val.get("importance")) {
+                Ok(i) => i,
+                Err(_) => return err(400, "invalid importance"),
+            };
+            let now = crate::util::now_secs();
+            let mut mem = store::load_user_memory(uid);
+            mem.entries.push(MemoryEntry {
+                content: content.to_string(),
+                importance,
+                created: now,
+                last_accessed: now,
+                access_count: 1,
+                emotional_impact: None,
+            });
+            store::save_user_memory(uid, &mem);
             ok(serde_json::json!({"ok": true}))
         }
         Method::Put => {
-            let uid = match segs.first() {
-                Some(u) => *u,
-                None => return err(400, "user_id required"),
+            let Some(uid) = segs.first().and_then(|s| s.parse::<u64>().ok()) else {
+                return err(400, "invalid user_id");
             };
-            let idx: usize = match segs.get(1).and_then(|s| s.parse().ok()) {
-                Some(i) => i,
-                None => return err(400, "index required"),
+            let Some(idx) = segs.get(1).and_then(|s| s.parse::<usize>().ok()) else {
+                return err(400, "index required");
             };
             let body_val: serde_json::Value = match parse_json(body) {
                 Ok(v) => v,
                 Err(e) => return err(400, &e),
             };
-            backup::before_modify("memory");
-            let mut store: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-            )
-            .unwrap_or(serde_json::json!({"users": {}}));
-            let users = store
-                .get_mut("users")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            if let Some(user) = users.get_mut(uid) {
-                let entries = user
-                    .get_mut("entries")
-                    .and_then(|v| v.as_array_mut())
-                    .unwrap();
-                if idx >= entries.len() {
-                    return err(404, "index out of range");
-                }
-                if let Some(content) = body_val.get("content").and_then(|v| v.as_str()) {
-                    entries[idx]["content"] = serde_json::json!(content);
-                }
-                if let Some(importance) = body_val.get("importance").and_then(|v| v.as_str()) {
-                    entries[idx]["importance"] =
-                        serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", importance))
-                            .unwrap_or(serde_json::json!("Normal"));
-                }
-                entries[idx]["last_accessed"] = serde_json::json!(crate::util::now_secs());
-                std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                ok(serde_json::json!({"ok": true}))
-            } else {
-                err(404, "user not found")
+            let mut mem = store::load_user_memory(uid);
+            let Some(entry) = mem.entries.get_mut(idx) else {
+                return err(404, "index out of range");
+            };
+            if let Some(content) = body_val.get("content").and_then(|v| v.as_str()) {
+                entry.content = content.to_string();
             }
+            match parse_importance(body_val.get("importance")) {
+                Ok(importance) => entry.importance = importance,
+                Err(_) => return err(400, "invalid importance"),
+            }
+            entry.last_accessed = crate::util::now_secs();
+            store::save_user_memory(uid, &mem);
+            ok(serde_json::json!({"ok": true}))
         }
         Method::Delete => {
-            let uid = match segs.first() {
-                Some(u) => *u,
-                None => return err(400, "user_id required"),
+            let Some(uid) = segs.first().and_then(|s| s.parse::<u64>().ok()) else {
+                return err(400, "invalid user_id");
             };
-            let idx: usize = match segs.get(1).and_then(|s| s.parse().ok()) {
-                Some(i) => i,
-                None => return err(400, "index required"),
+            let Some(idx) = segs.get(1).and_then(|s| s.parse::<usize>().ok()) else {
+                return err(400, "index required");
             };
-            backup::before_modify("memory");
-            let mut store: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-            )
-            .unwrap_or(serde_json::json!({"users": {}}));
-            let users = store
-                .get_mut("users")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            if let Some(user) = users.get_mut(uid) {
-                let entries = user
-                    .get_mut("entries")
-                    .and_then(|v| v.as_array_mut())
-                    .unwrap();
-                if idx >= entries.len() {
-                    return err(404, "index out of range");
-                }
-                entries.remove(idx);
-                std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                ok(serde_json::json!({"ok": true}))
-            } else {
-                err(404, "user not found")
+            let mut mem = store::load_user_memory(uid);
+            if idx >= mem.entries.len() {
+                return err(404, "index out of range");
             }
+            mem.entries.remove(idx);
+            store::save_user_memory(uid, &mem);
+            ok(serde_json::json!({"ok": true}))
         }
         _ => err(405, "method not allowed"),
     }
@@ -669,24 +631,6 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
         return err(405, "method not allowed");
     }
     match segs.first() {
-        Some(&"interest") => {
-            let interest = crate::quota::get_all_interest();
-            let map: serde_json::Map<String, serde_json::Value> = interest
-                .iter()
-                .map(|(uid, i)| {
-                    (
-                        uid.to_string(),
-                        serde_json::json!({
-                            "score": i.score,
-                            "marked_count": i.marked_count,
-                            "last_reviewed": i.last_reviewed,
-                            "last_message": i.last_message,
-                        }),
-                    )
-                })
-                .collect();
-            ok(serde_json::json!({"users": map}))
-        }
         Some(&"segments") => {
             if let Some(gid_str) = segs.get(1) {
                 let group_id: u64 = match gid_str.parse() {
@@ -703,25 +647,10 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
         _ => {
             // API quota 配置
             let cfg = &config::get().quota;
-            let interest = crate::quota::get_all_interest();
-            let users: serde_json::Map<String, serde_json::Value> = interest
-                .iter()
-                .map(|(uid, i)| {
-                    (
-                        uid.to_string(),
-                        serde_json::json!({
-                            "score": i.score,
-                            "marked_count": i.marked_count,
-                            "last_reviewed": i.last_reviewed,
-                        }),
-                    )
-                })
-                .collect();
             ok(serde_json::json!({
                 "enabled": cfg.enabled,
                 "segment_minutes": cfg.segment_minutes,
                 "segments": cfg.segments,
-                "users": users,
             }))
         }
     }
@@ -729,11 +658,7 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
 
 // ── 防注入状态管理 ────────────────────────────────────────────────
 
-pub fn handle_anti_injection(
-    method: &Method,
-    segs: &[&str],
-    body: &[u8],
-) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle_anti_injection(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             // GET /api/anti-injection/users - 获取所有用户风险状态
@@ -787,30 +712,15 @@ pub fn handle_anti_injection(
             }))
         }
         Method::Post => {
-            // 支持两种格式：
-            //   POST /api/anti-injection/{user_id}/{action}  (前端实际调用)
-            //   POST /api/anti-injection/{action} + body { user_id }  (旧格式)
-            let (user_id, action) = if segs.len() >= 2 {
-                // 新格式: /api/anti-injection/{user_id}/{action}
-                let uid = match segs[0].parse::<u64>() {
-                    Ok(u) => u,
-                    Err(_) => return err(400, "invalid user_id"),
-                };
-                (uid, segs[1])
-            } else if segs.len() == 1 {
-                // 旧格式: /api/anti-injection/{action} + body
-                let params: serde_json::Value = match serde_json::from_slice(body) {
-                    Ok(v) => v,
-                    Err(e) => return err(400, &format!("invalid json: {}", e)),
-                };
-                let uid = match params.get("user_id").and_then(|v| v.as_u64()) {
-                    Some(id) => id,
-                    None => return err(400, "missing user_id"),
-                };
-                (uid, segs[0])
-            } else {
-                return err(400, "path required");
+            // POST /api/anti-injection/{user_id}/{action}
+            if segs.len() < 2 {
+                return err(400, "path required: /api/anti-injection/{user_id}/{action}");
+            }
+            let user_id = match segs[0].parse::<u64>() {
+                Ok(u) => u,
+                Err(_) => return err(400, "invalid user_id"),
             };
+            let action = segs[1];
 
             match action {
                 "unban" => {
@@ -1277,13 +1187,6 @@ pub fn handle_memory_ops_log(method: &Method, segs: &[&str]) -> Response<std::io
         }
         _ => err(405, "method not allowed"),
     }
-}
-
-pub fn handle_info() -> Response<std::io::Cursor<Vec<u8>>> {
-    ok(serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "build_time": option_env!("BUILD_TIME").unwrap_or("dev"),
-    }))
 }
 
 /// 深合并两个 JSON 对象

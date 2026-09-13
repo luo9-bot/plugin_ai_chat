@@ -6,30 +6,19 @@ use tracing::debug;
 use crate::config;
 use crate::util::{current_hour_cst, now_secs};
 
-// ── 段日志 & 用户兴趣 ────────────────────────────────────────
+// ── 段日志 ──────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SegmentMessage {
     pub user_id: u64,
     pub message: String,
-    pub replied: bool,
-    pub reason: String,
     pub timestamp: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct UserInterest {
-    pub score: f32,
-    pub marked_count: u32,
-    pub last_reviewed: u64,
-    pub last_message: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SegmentLogEntry {
     pub segment_start: u64,
     pub messages: Vec<SegmentMessage>,
-    pub reviewed: bool,
 }
 
 // ── 持久化结构 ──────────────────────────────────────────────
@@ -50,10 +39,6 @@ pub(super) struct QuotaStore {
     pub(super) counts: HashMap<u64, Vec<SegmentCount>>,
     #[serde(default)]
     pub(super) segment_log: HashMap<u64, Vec<SegmentLogEntry>>,
-    #[serde(default)]
-    pub(super) user_interest: HashMap<u64, UserInterest>,
-    #[serde(default)]
-    pub(super) last_reviewed_segment: HashMap<u64, u64>,
 }
 
 // ── 运行时状态 ──────────────────────────────────────────────
@@ -76,8 +61,6 @@ pub fn init() {
         store.date = today;
         store.counts.clear();
         store.segment_log.clear();
-        store.last_reviewed_segment.clear();
-        // user_interest 跨天保留
         save_store(&store);
     }
     // 裁剪 48 小时前的段日志

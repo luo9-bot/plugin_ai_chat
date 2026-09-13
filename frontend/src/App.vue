@@ -19,8 +19,6 @@
       <div class="login-err" v-if="loginErr">{{ loginErr }}</div>
       <div class="login-footer" v-if="appVersion">
         <span>v{{ appVersion }}</span>
-        <span class="sep">·</span>
-        <span>{{ buildTime }}</span>
       </div>
     </div>
   </div>
@@ -100,7 +98,6 @@ import BlocklistView from './views/BlocklistView.vue'
 import AntiInjectionView from './views/AntiInjectionView.vue'
 import ArchiveView from './views/ArchiveView.vue'
 import BackupsView from './views/BackupsView.vue'
-import SyncView from './views/SyncView.vue'
 import MemoryOpsLog from './views/MemoryOpsLog.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
@@ -126,7 +123,6 @@ const I = {
   'anti-injection': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 2l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V5l7-3z" stroke="currentColor" stroke-width="1.5"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   archive: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><rect x="3" y="6" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 4a1 1 0 011-1h14a1 1 0 011 1v2H2V4z" stroke="currentColor" stroke-width="1.5"/><path d="M8 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   backups: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M10 3a5 5 0 00-4.5 2.8A4 4 0 003 10a4 4 0 004 4h1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 3a5 5 0 014.5 2.8A4 4 0 0117 10a4 4 0 01-4 4h-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 10v5M7 12.5l3-2.5 3 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  sync: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M14.5 5.5A6.5 6.5 0 104 10.5M14.5 2v3.5H11M5.5 14.5A6.5 6.5 0 0016 9.5M5.5 18V14.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   'memory-ops-log': '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14v14H3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7h6M7 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="currentColor" opacity="0.6"/></svg>',
   relationships: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M3 17c0-2.2 1.8-4 4-4s4 1.8 4 4M9 17c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.5"/></svg>',
   security: '<svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M3 3h14l-5.5 6.5V16l-3 1.5v-8L3 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
@@ -139,7 +135,6 @@ const loginErr = ref('')
 const currentTab = ref('mind')
 const sidebarOpen = ref(false)
 const appVersion = ref('')
-const buildTime = ref('')
 const isDark = ref(false)
 
 const tabs = [
@@ -165,7 +160,6 @@ const tabs = [
   { id: 'anti-injection', name: '防注入', group: '系统', icon: I['anti-injection'], desc: '安全防护', comp: AntiInjectionView },
   { id: 'archive', name: '归档', group: '系统', icon: I.archive, desc: '数据归档', comp: ArchiveView },
   { id: 'backups', name: '备份', group: '系统', icon: I.backups, desc: '数据备份', comp: BackupsView },
-  { id: 'sync', name: '同步', group: '系统', icon: I.sync, desc: '远程同步', comp: SyncView },
 ]
 
 const navGroups = computed(() => {

@@ -154,29 +154,9 @@ const sections = [
   },
   { id: 'proactive', label: '主动对话', color: 'var(--danger)',
     fields: [
-      { key: 'proactive.enabled', label: '启用', type: 'bool' },
       { key: 'proactive.quiet_start', label: '免打扰开始(时)', type: 'number' },
       { key: 'proactive.quiet_end', label: '免打扰结束(时)', type: 'number' },
-      { key: 'proactive.interval', label: '间隔(秒)', type: 'number' },
-      { key: 'proactive.max_ignore', label: '最大忽略次数', type: 'number' },
-      { key: 'proactive.low_mood_multiplier', label: '低情绪倍率', type: 'number' },
       { key: 'proactive.check_interval', label: '检查间隔(秒)', type: 'number' },
-    ]
-  },
-  { id: 'reflection', label: '自我反思', color: 'var(--info)',
-    fields: [
-      { key: 'self_reflection.interval', label: '反思间隔(秒)', type: 'number' },
-      { key: 'self_reflection.max_thoughts', label: '最大想法数', type: 'number' },
-      { key: 'self_reflection.post_conversation_delay_secs', label: '对话后延迟(秒)', type: 'number' },
-    ]
-  },
-  { id: 'mental', label: '心理状态', color: 'var(--primary)',
-    fields: [
-      { key: 'mental_state.concerns_max', label: '最大担忧数', type: 'number' },
-      { key: 'mental_state.concern_decay_rate', label: '担忧衰减率', type: 'number' },
-      { key: 'mental_state.deliberations_max', label: '最大考量数', type: 'number' },
-      { key: 'mental_state.deliberation_decay_rate', label: '考量衰减率', type: 'number' },
-      { key: 'mental_state.defect_base_probability', label: '缺陷基础概率', type: 'number' },
     ]
   },
   { id: 'vision', label: '识图', color: 'var(--info)',
@@ -231,9 +211,6 @@ const sections = [
       { key: 'humanity.cognitive_biases.confirmation_bias', label: '确认偏误', type: 'number' },
       { key: 'humanity.cognitive_biases.recency_bias', label: '近因效应', type: 'number' },
       { key: 'humanity.attention_enabled', label: '注意力模型', type: 'bool' },
-      { key: 'humanity.satisficing_enabled', label: '满足性决策', type: 'bool' },
-      { key: 'humanity.satisficing_threshold', label: '满足阈值', type: 'number' },
-      { key: 'humanity.satisficing_max_iterations', label: '最大候选数', type: 'number' },
       { key: 'humanity.response_timing_enabled', label: '变速回复', type: 'bool' },
       { key: 'humanity.split_reply_probability', label: '拆分回复概率', type: 'number' },
       { key: 'humanity.follow_up_probability', label: '补充消息概率', type: 'number' },
@@ -248,14 +225,6 @@ const sections = [
       { key: 'humanity.inner_thought_interval_max', label: '独白最大间隔(秒)', type: 'number' },
       { key: 'humanity.circadian_enabled', label: '昼夜节律', type: 'bool' },
       { key: 'humanity.circadian_amplitude', label: '节律振幅', type: 'number' },
-    ]
-  },
-  { id: 'sync', label: '远程同步', color: 'var(--info)',
-    fields: [
-      { key: 'sync.enabled', label: '启用', type: 'bool' },
-      { key: 'sync.api_url', label: 'API 地址', type: 'string' },
-      { key: 'sync.db_name', label: '数据库名', type: 'string' },
-      { key: 'sync.display_name', label: '显示名称', type: 'string' },
     ]
   },
   { id: 'sticker', label: '表情包', color: 'var(--accent)',

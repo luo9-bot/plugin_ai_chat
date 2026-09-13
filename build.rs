@@ -93,7 +93,7 @@ fn main() {
         let html = std::fs::read_to_string(dist).expect("failed to read frontend/dist/index.html");
         let rs = format!("pub const HTML: &str = r##\"{}\"##;\n", html);
         let size = rs.len();
-        std::fs::write(out, &rs).expect("failed to write src/admin_ui.rs");
+        std::fs::write(out, &rs).expect("failed to write src/admin/ui.rs");
         println!(
             "cargo:warning=admin_ui.rs regenerated from dist ({:.1} KB)",
             size as f64 / 1024.0

@@ -93,10 +93,3 @@ pub fn add_task(task: &str) {
         debug!(task, "schedule: task added");
     }
 }
-
-/// 更新今日心情
-pub fn update_mood(mood: &str) {
-    let mut plan = load_today_plan();
-    plan.mood = mood.to_string();
-    save_plan(&plan);
-}

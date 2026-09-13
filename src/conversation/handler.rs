@@ -341,11 +341,11 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
     for (user_id, messages, timestamps) in user_msgs {
         let mut level = crate::emotion::get_state(*user_id).crisis_level;
         if !level.is_crisis()
-            && crate::emotion::detect_crisis(messages).is_crisis()
-            && let Some(detected) = crate::emotion::detect_crisis_ai(messages)
+            && crate::crisis::detect_crisis(messages).is_crisis()
+            && let Some(detected) = crate::crisis::detect_crisis_ai(messages)
         {
             level = detected;
-            crate::emotion::update_crisis(*user_id, level);
+            crate::crisis::update_crisis(*user_id, level);
         }
         if level.is_crisis() {
             warn!(user_id = *user_id, group_id, level = ?level, "crisis: 群聊危机信号，强制回应");
@@ -364,7 +364,6 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
 
     if !crisis_utterances.is_empty() {
         speak_and_deliver_group(group_id, &crisis_utterances, true, false, true);
-        record_group_activity(group_id);
         return;
     }
 
@@ -374,12 +373,10 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         .filter(|(uid, _, _)| !forced_users.contains(uid))
         .collect();
     if remaining.is_empty() {
-        record_group_activity(group_id);
         return;
     }
 
     // ── 配额记账 ──
-    crate::quota::check_and_review_segment(group_id);
     for (uid, msg, _) in &remaining {
         crate::quota::log_segment_message(group_id, *uid, msg);
     }
@@ -409,7 +406,6 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         );
         if !bypass {
             debug!(group_id, "quota: 配额耗尽且优先级不足，跳过");
-            record_group_activity(group_id);
             return;
         }
     }
@@ -417,7 +413,6 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
     // ── 沉默冷却：她刚决定不说话，短期内不再权衡 ──
     if !addressed && silence_cooling(group_id) {
         debug!(group_id, "voice: silence cooldown, skipping");
-        record_group_activity(group_id);
         return;
     }
 
@@ -431,7 +426,6 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         .collect();
 
     speak_and_deliver_group(group_id, &utterances, addressed, quota_available, false);
-    record_group_activity(group_id);
 
     // ── 表达学习：从群聊消息中学习语言风格（后台） ──
     if crate::learner::should_learn(group_id) {
@@ -654,7 +648,7 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
     crate::mind::social::record_bot_speech(group_id, reply);
 
     crate::reply_effect::record_reply(group_id, primary, reply, archive_reply_id);
-    crate::runtime::reply_dedup::record(group_id, primary, reply);
+    crate::runtime::reply_dedup::record(group_id, reply);
     crate::activity::check_bot_message(primary, reply);
 
     // 后处理任务不阻塞，逐用户放入后台线程
@@ -685,11 +679,6 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
             crate::memory::auto_summarize(uid, gid, &history);
         }
     });
-}
-
-/// 记录群活跃时间
-fn record_group_activity(group_id: u64) {
-    with_shared_state(|s| s.record_conversation(group_id, crate::util::now_secs()));
 }
 
 /// 把她在表达里留下的"想起"（plan_next）写进意图堆

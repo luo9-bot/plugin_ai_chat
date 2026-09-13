@@ -643,28 +643,6 @@ pub fn search(query: &[f32], top_k: usize) -> Vec<SearchResult> {
     }
 }
 
-/// 按 content 匹配获取所有向量（已弃用，避免全量克隆）
-#[allow(dead_code)]
-pub fn all_vectors() -> HashMap<String, Vec<f32>> {
-    let guard = STORE.lock().unwrap();
-    let store = guard.as_ref().expect("vector_store not initialized");
-    if store.trained {
-        // 训练后，反量化所有向量（仅用于兼容，不推荐使用）
-        store
-            .quantized_vectors
-            .iter()
-            .filter_map(|(content, qvec)| {
-                store
-                    .quant_params
-                    .as_ref()
-                    .map(|p| (content.clone(), p.dequantize(qvec)))
-            })
-            .collect()
-    } else {
-        store.raw_vectors.clone()
-    }
-}
-
 /// 移除向量
 pub fn remove_vector(content: &str) {
     let mut guard = STORE.lock().unwrap();

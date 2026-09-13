@@ -40,12 +40,12 @@ import { api } from '../api.js'
 
 const types = ref([])
 const counts = ref({})
-const selectedType = ref('self_memory')
+const selectedType = ref('')
 const items = ref([])
 const loading = ref(false)
 
 function typeLabel(t) {
-  const m = { self_memory: '自我记忆', memory: '用户记忆', working_memory: '工作记忆', personality: '人格', emotion: '情绪', mental_state: '心理状态', blocklist: '黑名单', proactive: '主动消息', proactive_config: '主动配置', archive: '归档' }
+  const m = { working_memory: '工作记忆', emotion: '情绪', blocklist: '黑名单', archive: '归档' }
   return m[t] || t
 }
 function fmtSize(s) { if (!s) return '-'; if (s < 1024) return s + 'B'; if (s < 1024*1024) return (s/1024).toFixed(1) + 'KB'; return (s/1024/1024).toFixed(1) + 'MB' }

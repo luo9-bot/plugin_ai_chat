@@ -241,17 +241,3 @@ pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
     crate::emotion::update_state(user_id, state);
     false
 }
-
-// ── 干预指令 ────────────────────────────────────────────────────
-
-pub fn get_crisis_context(crisis: CrisisLevel) -> String {
-    match crisis {
-        CrisisLevel::None => String::new(),
-        CrisisLevel::Mild => crate::prompt::PromptManager::get()
-            .raw("crisis_mild")
-            .to_string(),
-        CrisisLevel::Severe => crate::prompt::PromptManager::get()
-            .raw("crisis_severe")
-            .to_string(),
-    }
-}

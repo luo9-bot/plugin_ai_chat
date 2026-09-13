@@ -91,13 +91,51 @@ pub fn split_segments(normalized_reply: &str) -> Vec<String> {
             .collect()
     };
 
-    // 限制分段数量：超出部分合并到最后一段，避免一次性连发轰炸
+    // 限制分段数量：超出部分并入最后一段（保留换行，避免不同段落粘连）
     if segments.len() > MAX_SEGMENT_COUNT {
-        let overflow: String = segments.split_off(MAX_SEGMENT_COUNT).join("");
+        let overflow: String = segments.split_off(MAX_SEGMENT_COUNT).join("\n");
         if let Some(last) = segments.last_mut() {
+            last.push('\n');
             last.push_str(&overflow);
         }
     }
 
     segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_incomplete_separators() {
+        assert_eq!(normalize_segment_sep("嗯^|好"), "嗯|^|好");
+        assert_eq!(normalize_segment_sep("嗯|^好"), "嗯|^|好");
+        assert_eq!(normalize_segment_sep("嗯|^||^|好"), "嗯|^|好");
+        assert_eq!(normalize_segment_sep("嗯\n\n好"), "嗯\n好");
+        // 单个 ^ 不是分隔符
+        assert_eq!(normalize_segment_sep("a^b"), "a^b");
+    }
+
+    #[test]
+    fn splits_by_separator_and_newline() {
+        assert_eq!(split_segments("嗯|^|好|^|再见"), vec!["嗯", "好", "再见"]);
+        assert_eq!(split_segments("嗯\n好"), vec!["嗯", "好"]);
+        assert_eq!(split_segments("嗯|^|好\n再见"), vec!["嗯", "好", "再见"]);
+        // 空段被剔除
+        assert_eq!(split_segments("嗯|^|\n|^|好"), vec!["嗯", "好"]);
+    }
+
+    #[test]
+    fn overflow_segments_join_with_newline() {
+        let joined = split_segments("一|^|二|^|三|^|四|^|五|^|六");
+        assert_eq!(joined.len(), MAX_SEGMENT_COUNT);
+        assert_eq!(joined[0], "一");
+        assert_eq!(joined[3], "四\n五\n六");
+    }
+
+    #[test]
+    fn within_limit_stays_unmerged() {
+        assert_eq!(split_segments("一|^|二|^|三|^|四").len(), 4);
+    }
 }

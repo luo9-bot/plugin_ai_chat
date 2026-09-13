@@ -24,7 +24,7 @@ pub mod unicode;
 use crate::config::AntiInjectionConfig;
 use tracing::{info, warn};
 
-// ── Re-exports for backward compatibility ──
+// ── 模块公共 API ──────────────────────────────────────────────
 
 pub use behavior::{
     ban_user, enable_vision, get_all_user_statuses, get_penalty_multiplier, get_reputation,
@@ -191,7 +191,7 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 
     // ── 危机豁免（违规已记录，此处仅决定处置动作） ──
     // 注意：危机豁免仅适用于情感危机（自杀/自残），不适用于性/暴力/违法内容
-    let crisis_level = crate::emotion::detect_crisis(message);
+    let crisis_level = crate::crisis::detect_crisis(message);
     let has_content_violation = all_issues.iter().any(|i| {
         matches!(
             i,
@@ -203,11 +203,11 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
     } else if has_content_violation {
         // 明确的性/暴力/违法内容：无论是否 crisis，都要拦截
         decision::determine_action(&final_score, config)
-    } else if crisis_level >= crate::emotion::CrisisLevel::Severe {
+    } else if crisis_level >= crate::crisis::CrisisLevel::Severe {
         // 仅越狱/注入等非内容问题才考虑危机豁免
         warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息豁免 (Severe)，违规已记录");
         Action::CrisisExempt
-    } else if crisis_level >= crate::emotion::CrisisLevel::Mild {
+    } else if crisis_level >= crate::crisis::CrisisLevel::Mild {
         warn!(user_id, issues = ?all_issues, "anti_injection: 危机消息降级 (Mild)，违规已记录");
         Action::Warn
     } else {

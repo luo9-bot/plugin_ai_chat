@@ -7,7 +7,6 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 /// Embedding 向量维度（doubao-embedding-vision 默认输出 2048 维）
-#[allow(dead_code)]
 const EMBEDDING_DIMENSION: usize = 2048;
 
 /// 调用 Embedding API 生成单个文本的向量

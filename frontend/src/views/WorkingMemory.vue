@@ -4,7 +4,6 @@
       <div class="card-header">
         <h3>工作记忆 <span class="badge">群聊消息流</span></h3>
         <div class="header-actions">
-          <input v-model="filterGroup" placeholder="群号过滤..." class="glass-input" />
           <select v-model="groupSelect" @change="loadData" class="glass-select">
             <option value="">全部群</option>
             <option v-for="g in groupIds" :key="g" :value="g">群 {{ g }}</option>
@@ -33,23 +32,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 
 const entries = ref([])
 const groupIds = ref([])
 const groupSelect = ref('')
-const filterGroup = ref('')
 const autoRefresh = ref(false)
 let interval = null
 
 function fmtTime(ts) { if (!ts) return '-'; const d = new Date(ts * 1000); return d.toLocaleTimeString('zh-CN') }
-
-const filtered = computed(() => {
-  let list = entries.value
-  if (filterGroup.value) list = list.filter(e => String(e.group_id).includes(filterGroup.value))
-  return list
-})
 
 async function loadData() {
   try {

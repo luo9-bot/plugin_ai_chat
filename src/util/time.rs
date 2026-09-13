@@ -83,17 +83,6 @@ pub fn today_str() -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-/// 当前 UTC+8 日期字符串 "MM-DD"
-pub fn current_date_mm_dd() -> String {
-    let (_, m, d) = today_ymd();
-    format!("{:02}-{:02}", m, d)
-}
-
-/// 当前 UTC+8 年份
-pub fn current_year() -> u32 {
-    today_ymd().0 as u32
-}
-
 /// 当前 UTC+8 格式化时间 "HH:MM:SS (YYYY年M月D日)"
 pub fn now_formatted_cst() -> String {
     let secs = now_secs() as i64 + 8 * 3600;

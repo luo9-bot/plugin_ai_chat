@@ -14,18 +14,13 @@ thread_local! {
 }
 
 /// 在全局 tracker 中记录一条已发送的回复
-pub fn record(group_id: u64, user_id: u64, text: &str) {
-    GLOBAL_DEDUP.with(|d| d.borrow_mut().record_reply(group_id, user_id, text));
+pub fn record(group_id: u64, text: &str) {
+    GLOBAL_DEDUP.with(|d| d.borrow_mut().record_reply(group_id, text));
 }
 
 /// 检查是否与最近发送的回复重复（精确哈希 + 相似度）
 pub fn is_duplicate(group_id: u64, text: &str) -> bool {
     GLOBAL_DEDUP.with(|d| d.borrow().has_recent_similar_reply(group_id, text, 0.85))
-}
-
-/// 检查是否满足最小回复间隔
-pub fn is_min_interval_met() -> bool {
-    GLOBAL_DEDUP.with(|d| d.borrow().is_min_interval_met())
 }
 
 /// 记录一条已发送的表情包
@@ -45,8 +40,6 @@ pub struct ReplyRecord {
     pub text: String,
     /// 发送时间
     pub sent_at: Instant,
-    /// 目标用户
-    pub target_user: u64,
 }
 
 /// 一条已发送的表情记录
@@ -60,10 +53,6 @@ pub struct StickerRecord {
 const MAX_RECENT_REPLIES: usize = 16;
 /// 最近表情缓存
 const MAX_RECENT_STICKERS: usize = 32;
-/// 冷却时间：同一用户冷却 (秒)
-const USER_COOLDOWN_SECS: u64 = 30;
-/// 最短回复间隔 (秒)
-const MIN_REPLY_INTERVAL_SECS: u64 = 3;
 
 /// 回复去重状态
 pub struct ReplyDedupTracker {
@@ -71,8 +60,6 @@ pub struct ReplyDedupTracker {
     group_replies: HashMap<u64, VecDeque<ReplyRecord>>,
     /// 按群组存最近表情 (group_id -> VecDeque<StickerRecord>)
     group_stickers: HashMap<u64, VecDeque<StickerRecord>>,
-    /// 全局回复节奏：上次回复时间
-    last_global_reply: Instant,
     /// 已发送文本的完全匹配哈希 (用于跨群去重)
     reply_text_hashes: VecDeque<u64>,
 }
@@ -88,13 +75,12 @@ impl ReplyDedupTracker {
         Self {
             group_replies: HashMap::new(),
             group_stickers: HashMap::new(),
-            last_global_reply: Instant::now(),
             reply_text_hashes: VecDeque::with_capacity(MAX_RECENT_REPLIES),
         }
     }
 
     /// 记录一条已发送的回复
-    pub fn record_reply(&mut self, group_id: u64, user_id: u64, text: &str) {
+    pub fn record_reply(&mut self, group_id: u64, text: &str) {
         let hash = text_hash(text);
         self.reply_text_hashes.push_back(hash);
         if self.reply_text_hashes.len() > MAX_RECENT_REPLIES {
@@ -105,12 +91,10 @@ impl ReplyDedupTracker {
         entry.push_back(ReplyRecord {
             text: text.to_string(),
             sent_at: Instant::now(),
-            target_user: user_id,
         });
         if entry.len() > MAX_RECENT_REPLIES {
             entry.pop_front();
         }
-        self.last_global_reply = Instant::now();
     }
 
     /// 记录一条已发送的表情包
@@ -123,16 +107,6 @@ impl ReplyDedupTracker {
         if entry.len() > MAX_RECENT_STICKERS {
             entry.pop_front();
         }
-    }
-
-    /// 检查是否在冷却期（对同一用户的回复间隔）
-    pub fn is_user_on_cooldown(&self, group_id: u64, user_id: u64) -> bool {
-        if let Some(replies) = self.group_replies.get(&group_id)
-            && let Some(last) = replies.iter().rev().find(|r| r.target_user == user_id)
-        {
-            return last.sent_at.elapsed().as_secs() < USER_COOLDOWN_SECS;
-        }
-        false
     }
 
     /// 检查最近是否发过非常相似的回复
@@ -167,11 +141,6 @@ impl ReplyDedupTracker {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    /// 检查是否满足最小回复间隔
-    pub fn is_min_interval_met(&self) -> bool {
-        self.last_global_reply.elapsed().as_secs() >= MIN_REPLY_INTERVAL_SECS
     }
 }
 
@@ -235,17 +204,9 @@ mod tests {
     }
 
     #[test]
-    fn test_cooldown() {
-        let mut tracker = ReplyDedupTracker::new();
-        assert!(!tracker.is_user_on_cooldown(1, 100));
-        tracker.record_reply(1, 100, "你好");
-        assert!(tracker.is_user_on_cooldown(1, 100));
-    }
-
-    #[test]
     fn test_recent_similar() {
         let mut tracker = ReplyDedupTracker::new();
-        tracker.record_reply(1, 100, "好的我知道了");
+        tracker.record_reply(1, "好的我知道了");
         assert!(tracker.has_recent_similar_reply(1, "好的我知道了", 0.9));
     }
 }

@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use tracing::debug;
 
 use super::segment::{check_and_consume, has_quota};
-use super::store::{STORE, SegmentLogEntry, UserInterest, save_store};
+use super::store::{STORE, SegmentLogEntry};
 use crate::config;
 
-// ── 兴趣系统 ─────────────────────────────────────────────────
+// ── 回复优先级 ───────────────────────────────────────────────
 
 /// 计算消息优先级分 (0.0~1.0)
 ///
@@ -50,10 +49,6 @@ pub fn calculate_priority(
         }
     }
 
-    // 兴趣加成 (最多 +0.30)
-    let interest = get_interest_score(user_id);
-    score += interest * 0.30;
-
     score.min(1.00)
 }
 
@@ -91,37 +86,7 @@ pub fn try_reply(
     false
 }
 
-pub fn decay_all_interest() {
-    let mut store_guard = STORE.lock().unwrap();
-    if let Some(store) = store_guard.as_mut() {
-        for interest in store.user_interest.values_mut() {
-            interest.score *= 0.5;
-            if interest.score < 0.01 {
-                interest.score = 0.0;
-            }
-        }
-        save_store(store);
-    }
-}
-
-pub fn get_interest_score(user_id: u64) -> f32 {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .and_then(|s| s.user_interest.get(&user_id))
-        .map(|i| i.score)
-        .unwrap_or(0.0)
-}
-
 // ── Admin API ──────────────────────────────────────────────────
-
-pub fn get_all_interest() -> HashMap<u64, UserInterest> {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .map(|s| s.user_interest.clone())
-        .unwrap_or_default()
-}
 
 pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
     let store_guard = STORE.lock().unwrap();

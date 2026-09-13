@@ -6,7 +6,6 @@ use crate::config;
 fn source_file(data_type: &str) -> Option<std::path::PathBuf> {
     let dir = config::data_dir();
     match data_type {
-        "memory" => Some(dir.join("memory.json")),
         "working_memory" => Some(dir.join("working_memory.json")),
         "emotion" => Some(dir.join("emotion.json")),
         "blocklist" => Some(dir.join("blocklist.json")),
@@ -65,13 +64,7 @@ pub fn list(data_type: &str) -> serde_json::Value {
 }
 
 pub fn list_all_types() -> serde_json::Value {
-    let types = [
-        "memory",
-        "working_memory",
-        "emotion",
-        "blocklist",
-        "archive",
-    ];
+    let types = ["working_memory", "emotion", "blocklist", "archive"];
     let mut counts = serde_json::Map::new();
     for t in &types {
         let dir = config::data_dir().join("backups").join(t);

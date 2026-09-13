@@ -145,27 +145,6 @@ pub fn get_today_weekly_goals() -> Vec<String> {
         .collect()
 }
 
-pub fn complete_weekly_goal(content: &str) {
-    let mut plan = load_weekly_plan();
-    let now = crate::util::now_secs();
-    for goal in &mut plan.goals {
-        if goal.content == content && !goal.completed {
-            goal.completed = true;
-            goal.completed_at = now;
-            save_weekly_plan(&plan);
-            record_push_log("周计划", content);
-            debug!(content, "schedule: weekly goal completed");
-            break;
-        }
-    }
-}
-
-pub fn update_week_reflection(reflection: &str) {
-    let mut plan = load_weekly_plan();
-    plan.week_reflection = reflection.to_string();
-    save_weekly_plan(&plan);
-}
-
 // ── 月计划 CRUD ─────────────────────────────────────────────────
 
 fn get_current_month() -> String {
@@ -201,21 +180,6 @@ pub fn check_and_generate_monthly_plan() -> bool {
         return true;
     }
     false
-}
-
-pub fn complete_monthly_goal(content: &str) {
-    let mut plan = load_monthly_plan();
-    let now = crate::util::now_secs();
-    for goal in &mut plan.goals {
-        if goal.content == content && !goal.completed {
-            goal.completed = true;
-            goal.completed_at = now;
-            save_monthly_plan(&plan);
-            record_push_log("月计划", content);
-            debug!(content, "schedule: monthly goal completed");
-            break;
-        }
-    }
 }
 
 // ── 推动系统 ────────────────────────────────────────────────────
@@ -295,37 +259,4 @@ pub fn load_push_state() -> PushState {
         Ok(c) => serde_json::from_str(&c).unwrap_or_default(),
         Err(_) => PushState::default(),
     }
-}
-
-/// 获取用于上下文展示的周/月计划文本
-pub fn get_plan_context() -> String {
-    let mut parts = Vec::new();
-
-    let weekly = load_weekly_plan();
-    if !weekly.goals.is_empty() {
-        let goals_str: Vec<String> = weekly
-            .goals
-            .iter()
-            .map(|g| {
-                let status = if g.completed { "✓" } else { "○" };
-                format!("  {}[{}] {}", status, g.target_day, g.content)
-            })
-            .collect();
-        parts.push(format!("# 本周计划\n{}", goals_str.join("\n")));
-    }
-
-    let monthly = load_monthly_plan();
-    if !monthly.goals.is_empty() {
-        let goals_str: Vec<String> = monthly
-            .goals
-            .iter()
-            .map(|g| {
-                let status = if g.completed { "✓" } else { "○" };
-                format!("  {} {}", status, g.content)
-            })
-            .collect();
-        parts.push(format!("# 本月目标\n{}", goals_str.join("\n")));
-    }
-
-    parts.join("\n\n")
 }

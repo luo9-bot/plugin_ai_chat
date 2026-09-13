@@ -51,7 +51,6 @@ pub struct PersonalTask {
     pub associated_user: u64,
     pub associated_group: u64,
     pub review_at: u64,
-    pub last_pushed_at: u64,
     pub follow_up_count: u8,
     pub blocker: String,
     pub progress: Vec<String>,
@@ -155,7 +154,6 @@ pub fn add_or_reinforce(
         associated_user,
         associated_group,
         review_at: now,
-        last_pushed_at: 0,
         follow_up_count: 0,
         blocker: String::new(),
         progress: vec![format!("创建：{}", title)],
@@ -236,42 +234,6 @@ pub fn review_due_tasks() {
     }
     if changed {
         retain_finished(&mut store);
-        save(&store);
-    }
-}
-
-/// 返回当前会话可自然跟进的一项社交任务。
-pub fn due_social_follow_up(user_id: u64, group_id: u64) -> Option<PersonalTask> {
-    let now = crate::util::now_secs();
-    load()
-        .tasks
-        .into_iter()
-        .filter(|task| {
-            task.status == TaskStatus::InProgress
-                && task.associated_user == user_id
-                && task.associated_group == group_id
-                && task.review_at <= now
-                && task.follow_up_count < MAX_FOLLOW_UPS
-                && !task.next_action.is_empty()
-        })
-        .max_by_key(|task| (task.priority, std::cmp::Reverse(task.updated_at)))
-}
-
-/// 只有发送成功后才转入等待状态，避免生成失败也消耗一次跟进机会。
-pub fn mark_follow_up_sent(task_id: u64) {
-    let mut store = load();
-    let now = crate::util::now_secs();
-    if let Some(task) = store.tasks.iter_mut().find(|task| task.id == task_id) {
-        if task.status != TaskStatus::InProgress || task.follow_up_count >= MAX_FOLLOW_UPS {
-            return;
-        }
-        task.status = TaskStatus::WaitingForPerson;
-        task.follow_up_count += 1;
-        task.last_pushed_at = now;
-        task.review_at = now + FOLLOW_UP_DELAY_SECS;
-        task.progress.push("已自然跟进，等待回应".to_string());
-        task.progress.truncate(8);
-        task.updated_at = now;
         save(&store);
     }
 }
@@ -424,28 +386,5 @@ mod tests {
     fn matching_titles_are_merged() {
         assert!(titles_similar("明天约小王见面", "约小王见面"));
         assert!(!titles_similar("去吃饭", "整理书架"));
-    }
-
-    #[test]
-    fn only_due_in_progress_social_task_can_follow_up() {
-        let task = PersonalTask {
-            id: 1,
-            title: "确认明天见面".to_string(),
-            source: "test".to_string(),
-            status: TaskStatus::InProgress,
-            next_action: "问问对方时间".to_string(),
-            priority: 1,
-            associated_user: 2,
-            associated_group: 3,
-            review_at: 1,
-            last_pushed_at: 0,
-            follow_up_count: 0,
-            blocker: String::new(),
-            progress: Vec::new(),
-            created_at: 1,
-            updated_at: 1,
-        };
-        assert!(task.status == TaskStatus::InProgress && task.review_at <= crate::util::now_secs());
-        assert!(task.follow_up_count < MAX_FOLLOW_UPS);
     }
 }

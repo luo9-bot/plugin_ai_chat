@@ -23,8 +23,6 @@ pub struct State {
     pub blacklist: HashSet<u64>,
     /// 消息批次缓冲 (按 (group_id, user_id) 隔离)
     pub batches: HashMap<CtxKey, MessageBatch>,
-    /// 各群组最近一次审查时间 (unix秒)
-    pub last_review_times: HashMap<u64, u64>,
 }
 
 impl Default for State {
@@ -40,7 +38,6 @@ impl State {
             active_groups: HashSet::new(),
             blacklist: crate::blocklist::load(),
             batches: HashMap::new(),
-            last_review_times: HashMap::new(),
         }
     }
 
@@ -78,24 +75,6 @@ impl State {
         }
     }
 
-    pub fn take_expired_batch(
-        &mut self,
-        group_id: u64,
-        user_id: u64,
-        timeout_ms: u64,
-    ) -> Option<MessageBatch> {
-        let key: CtxKey = (group_id, user_id);
-        let should_take = self
-            .batches
-            .get(&key)
-            .is_some_and(|batch| batch.last_update.elapsed().as_millis() >= timeout_ms as u128);
-        if should_take {
-            self.batches.remove(&key)
-        } else {
-            None
-        }
-    }
-
     pub fn take_batch_for_processing(
         &mut self,
         group_id: u64,
@@ -105,30 +84,6 @@ impl State {
         self.batches
             .remove(&key)
             .map(|batch| (batch.messages, batch.record_timestamps))
-    }
-
-    pub fn take_new_messages(
-        &mut self,
-        group_id: u64,
-        user_id: u64,
-        timeout_ms: u64,
-    ) -> Option<String> {
-        let key: CtxKey = (group_id, user_id);
-        let should_take = self
-            .batches
-            .get(&key)
-            .is_some_and(|batch| batch.last_update.elapsed().as_millis() >= timeout_ms as u128);
-        if should_take {
-            self.batches.remove(&key).map(|batch| batch.messages)
-        } else {
-            None
-        }
-    }
-
-    /// 遗忘用户在指定上下文中的对话 (本地部分: batches)
-    pub fn forget_context_local(&mut self, group_id: u64, user_id: u64) {
-        let key: CtxKey = (group_id, user_id);
-        self.batches.remove(&key);
     }
 
     /// 遗忘用户的所有对话 (本地部分: batches)

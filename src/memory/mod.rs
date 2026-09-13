@@ -127,7 +127,6 @@ pub fn search_memories(
         metadata_filter: None,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
-        enable_fallback: true,
     };
 
     let mut results = retrieval::dual_path_retrieve(query, &documents, &embeddings, &config);

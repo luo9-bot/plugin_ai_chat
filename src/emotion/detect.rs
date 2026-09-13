@@ -1,10 +1,7 @@
 use tracing::{debug, info};
 
 use super::state::{EmotionType, TriggerType, get_state, update_state};
-
-// 危机检测、状态更新、干预指令已移至 crisis 模块
-// 通过 emotion::detect_crisis 等重新导出保持向后兼容
-pub use crate::crisis::{detect_crisis, detect_crisis_ai, get_crisis_context, update_crisis};
+use crate::crisis::{detect_crisis, update_crisis};
 
 pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");

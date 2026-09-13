@@ -10,6 +10,7 @@
 
 use tracing::debug;
 
+use super::guard::detect_leaked_tool_call;
 use super::provider::{no_error_agent, track_usage};
 use super::types::{ChatMessage, ChatRequest, ChatResponse, Tool, ToolOutcome};
 use crate::config;
@@ -54,6 +55,8 @@ pub fn run_tool_loop(
         tool_calls: None,
         reasoning_content: None,
     });
+
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
 
     for round in 0..max_rounds {
         let req = ChatRequest {
@@ -122,19 +125,39 @@ pub fn run_tool_loop(
             continue;
         }
 
-        // 纯文本响应 = 她要说的话
+        // 纯文本响应 = 她要说的话（先过泄漏守门）
         let mut text = message.content.unwrap_or_default();
         if let Some(pos) = text.find("</think>") {
             text = text[pos + 8..].to_string();
         }
         let text = text.trim().to_string();
-        if !text.is_empty() {
-            return Ok(Some(text));
+        if text.is_empty() {
+            debug!(round, "tool_loop: empty response, staying silent");
+            return Ok(None);
         }
 
-        // 空响应 = 沉默
-        debug!(round, "tool_loop: empty response, staying silent");
-        return Ok(None);
+        // 泄漏守门：模型把工具调用写成了文字（如 finish(reason: ...)）。
+        // 这类文本绝不能当作发言外发：
+        // - finish 形态 = 模型本意就是沉默，按沉默收场
+        // - 其它形态 = 无效输出，回传纠正提示让她重新表达
+        if let Some(leaked) = detect_leaked_tool_call(&text, &tool_names) {
+            if leaked == "finish" {
+                debug!(round, "tool_loop: leaked finish text, treating as silence");
+                return Ok(None);
+            }
+            debug!(round, tool = leaked, "tool_loop: leaked tool call as text");
+            messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: Some(format!(
+                    "（你把 {leaked} 的调用当成文字输出了——工具只能通过系统的工具调用机制使用，永远不能出现在发言文字里。）\n\n请继续：直接输出你要说的话（输出即发言），或通过工具调用机制调用 finish 保持沉默。"
+                )),
+                tool_calls: None,
+                reasoning_content: None,
+            });
+            continue;
+        }
+
+        return Ok(Some(text));
     }
 
     debug!(max_rounds, "tool_loop: max rounds reached, staying silent");

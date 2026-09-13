@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use tracing::info;
 
-// 从 crisis 模块重新导出 CrisisLevel，保持向后兼容
-pub use crate::crisis::CrisisLevel;
+use crate::crisis::CrisisLevel;
 
 /// Severe 降级到 Mild：需要 2 小时
 pub(crate) const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
@@ -351,16 +350,10 @@ pub fn user_count() -> usize {
 
 pub fn get_state(user_id: u64) -> EmotionState {
     let states = load_states();
-    let mut state = states
+    states
         .get(&user_id.to_string())
         .cloned()
-        .unwrap_or_default();
-    // 迁移修复：last_crisis_detected == 0 说明是旧数据，crisis_level 不可信
-    if state.crisis_level != CrisisLevel::None && state.last_crisis_detected == 0 {
-        info!(user_id, from = ?state.crisis_level, "crisis migration: resetting stale crisis_level to None");
-        state.crisis_level = CrisisLevel::None;
-    }
-    state
+        .unwrap_or_default()
 }
 
 pub fn update_state(user_id: u64, state: EmotionState) {
