@@ -873,7 +873,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plugin_ai_chat"
-version = "5.2.2-beta.4"
+version = "5.2.2-beta.5"
 dependencies = [
  "aho-corasick",
  "base64",
