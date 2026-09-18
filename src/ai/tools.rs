@@ -207,6 +207,86 @@ pub fn daily_plan_tool() -> Tool {
     }
 }
 
+/// 看自己当前还没做完的计划（带 id）
+///
+/// 计划清单本身会随场景一起递给她（见 `voice::plan_block`），这个工具用于
+/// 她想再确认一遍、或清单被截断时按需查全。
+pub fn check_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "check_plan".to_string(),
+            description: "看一眼自己今天/本周/本月还没做完的事（带编号）。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+    }
+}
+
+/// 给自己加一件事（当日）
+pub fn add_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "add_plan".to_string(),
+            description: "往今天的计划里加一件事。想做了、答应了、或临时起意都可以加。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "要做的事，一句话，别超过 15 字"}
+                },
+                "required": ["content"]
+            }),
+        },
+    }
+}
+
+/// 记下自己做到了哪一步（不动完成状态）
+pub fn note_progress_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "note_progress".to_string(),
+            description: "给计划里某件事记一笔进展。事情开了个头、做到一半、卡住了都记一下。"
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "清单里那件事的编号，如 d1"},
+                    "progress": {"type": "string", "description": "做到哪一步了，用你自己的话说"}
+                },
+                "required": ["id", "progress"]
+            }),
+        },
+    }
+}
+
+/// 勾掉一件事（完成 / 取消完成）
+///
+/// 判断由她做：她不靠关键词匹配自己有没有做过，而是看完今天发生的事
+/// 之后自己落笔。id 由系统分配，所以"哪一件"没有歧义。
+pub fn finish_plan_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionDef {
+            name: "finish_plan".to_string(),
+            description: "把计划里的一件事勾掉（做完了、或者决定不做了），也可以取消勾选。"
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "清单里那件事的编号，如 d1"},
+                    "done": {"type": "boolean", "description": "true 勾掉，false 取消勾选"},
+                    "note": {"type": "string", "description": "（可选）一句话，比如\"做完了\"\"这次先算了\""}
+                },
+                "required": ["id", "done"]
+            }),
+        },
+    }
+}
+
 /// 从对话中提取 bot 自己需要推进的真实事项。
 pub fn task_progress_tool() -> Tool {
     Tool {

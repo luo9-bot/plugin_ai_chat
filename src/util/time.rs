@@ -143,3 +143,15 @@ pub fn current_weekday_eng() -> String {
     let idx = (current_weekday_cst() - 1) as usize;
     names[idx].to_string()
 }
+
+/// 本周周一的日期字符串 "YYYY-MM-DD"（UTC+8）
+///
+/// 直接在"epoch 天数"上做减法，不经过时间戳：用 `now_secs() - offset*86400`
+/// 会把当天的时分秒一起带进结果，跨零点时容易算错一天。
+pub fn monday_of_week_str() -> String {
+    let secs = now_secs() as i64 + 8 * 3600;
+    let days = (secs / 86400) as u64;
+    let offset = (current_weekday_cst() - 1) as u64;
+    let (y, m, d) = epoch_days_to_ymd(days.saturating_sub(offset));
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}

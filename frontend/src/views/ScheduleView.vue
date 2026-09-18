@@ -1,65 +1,36 @@
 <template>
   <div>
     <div class="stat-grid">
-      <div class="card">
-        <div class="stat-value">{{ weekly.done }}/{{ weekly.total }}</div>
-        <div class="stat-label">周计划完成</div>
-        <div class="bar-wrap"><div class="bar" :style="{ width: weeklyPct + '%' }"></div></div>
+      <div class="card" v-for="tf in ORDER" :key="tf">
+        <div class="stat-value">{{ stat(tf).done }}/{{ stat(tf).total }}</div>
+        <div class="stat-label">{{ stat(tf).label }}完成</div>
+        <div class="bar-wrap"><div class="bar" :style="{ width: pct(tf) + '%' }"></div></div>
       </div>
       <div class="card">
-        <div class="stat-value">{{ monthly.done }}/{{ monthly.total }}</div>
-        <div class="stat-label">月计划完成</div>
-        <div class="bar-wrap"><div class="bar" :style="{ width: monthlyPct + '%' }"></div></div>
-      </div>
-      <div class="card">
-        <div class="stat-value">{{ pushHistory.length }}</div>
-        <div class="stat-label">累计推动</div>
-        <div class="stat-sub">历史推动记录</div>
-      </div>
-      <div class="card">
-        <div class="stat-value">{{ pushes.length }}</div>
-        <div class="stat-label">今日待推进</div>
-        <div class="stat-sub">{{ pushState.pushed_today?.length || 0 }} 项已推送</div>
+        <div class="stat-value">{{ history.length }}</div>
+        <div class="stat-label">状态变更记录</div>
+        <div class="stat-sub">她自己勾选 / 取消的历史</div>
       </div>
     </div>
 
     <div class="plan-grid">
-      <div class="card">
+      <div class="card" v-for="tf in ORDER" :key="tf">
         <div class="card-header">
-          <h3>本周计划 <span class="badge" v-if="weekly.week_start">{{ weekly.week_start }}</span></h3>
+          <h3>{{ data[tf].label }}的事 <span class="badge" v-if="data[tf].period">{{ data[tf].period }}</span></h3>
         </div>
-        <div v-if="!weekly.goals?.length" class="empty">暂无周计划</div>
+        <div v-if="!data[tf].items.length" class="empty">还没有计划</div>
         <div v-else class="goal-list">
-          <div v-for="(g, i) in weekly.goals" :key="i" class="goal-item" :class="{ done: g.completed }">
-            <div class="goal-check" @click="toggleWeekly(i)">
+          <div v-for="(g, i) in data[tf].items" :key="g.id" class="goal-item" :class="{ done: g.completed }">
+            <div class="goal-check" @click="toggle(tf, i)" :title="g.completed ? '取消勾选' : '标记完成'">
               <svg v-if="g.completed" viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--success)"/><path d="M6 10l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
               <svg v-else viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="7" stroke="var(--text-3)" stroke-width="1.5"/></svg>
             </div>
             <div class="goal-body">
-              <div class="goal-content">{{ g.content }}</div>
+              <div class="goal-content"><span class="goal-id">{{ g.id }}</span>{{ g.content }}</div>
               <div class="goal-meta">
-                <span class="day-badge" :class="(g.target_day || '').toLowerCase()">{{ chDay(g.target_day) }}</span>
-                <span v-if="g.completed && g.completed_at" class="done-time">{{ fmtTime(g.completed_at) }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h3>本月目标 <span class="badge" v-if="monthly.month">{{ monthly.month }}</span></h3>
-        </div>
-        <div v-if="!monthly.goals?.length" class="empty">暂无月计划</div>
-        <div v-else class="goal-list">
-          <div v-for="(g, i) in monthly.goals" :key="i" class="goal-item" :class="{ done: g.completed }">
-            <div class="goal-check" @click="toggleMonthly(i)">
-              <svg v-if="g.completed" viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--success)"/><path d="M6 10l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
-              <svg v-else viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="7" stroke="var(--text-3)" stroke-width="1.5"/></svg>
-            </div>
-            <div class="goal-body">
-              <div class="goal-content">{{ g.content }}</div>
-              <div class="goal-meta">
+                <span v-if="g.target_day" class="day-badge" :class="(g.target_day || '').toLowerCase()">{{ chDay(g.target_day) }}</span>
+                <span v-if="g.completion_note" class="done-note">{{ g.completion_note }}</span>
+                <span v-if="g.progress && g.progress.length" class="progress-note">{{ g.progress[g.progress.length - 1] }}</span>
                 <span v-if="g.completed && g.completed_at" class="done-time">{{ fmtTime(g.completed_at) }}</span>
               </div>
             </div>
@@ -68,27 +39,15 @@
       </div>
     </div>
 
-    <div class="card push-card" v-if="pushes.length">
+    <div class="card" v-if="history.length">
       <div class="card-header">
-        <h3>今日推动 <span class="badge">{{ pushes.length }}</span></h3>
-      </div>
-      <div class="push-list">
-        <div v-for="(p, i) in pushes" :key="i" class="push-item">
-          <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M10 3a7 7 0 017 7v3l2 2H3l2-2v-3a7 7 0 017-7z" stroke="var(--warning)" stroke-width="1.5"/></svg>
-          <span>{{ p }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" v-if="pushHistory.length">
-      <div class="card-header">
-        <h3>推动历史 <span class="badge">{{ pushHistory.length }} 条</span></h3>
+        <h3>状态变更历史 <span class="badge">{{ history.length }} 条</span></h3>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>时间</th><th>类型</th><th>内容</th></tr></thead>
           <tbody>
-            <tr v-for="(h, i) in pushHistory.slice().reverse()" :key="i">
+            <tr v-for="(h, i) in history.slice().reverse()" :key="i">
               <td class="mono">{{ fmtTime(h.time) }}</td>
               <td><span class="tag-kind">{{ h.kind }}</span></td>
               <td>{{ h.content }}</td>
@@ -101,10 +60,12 @@
     <div class="card">
       <div class="card-header"><h3>计划系统说明</h3></div>
       <div class="info-list">
-        <div class="info-item">每日计划：每天早上自动生成当日任务</div>
-        <div class="info-item">每周计划：每周一自动生成周目标，分配到各天</div>
-        <div class="info-item">每月计划：每月1号自动生成月目标</div>
-        <div class="info-item">推动系统：每天自动检查计划执行情况并提醒</div>
+        <div class="info-item">日/周/月共用一套模型：每条计划有稳定编号（d/w/m 前缀），她通过编号指认要动哪一条。</div>
+        <div class="info-item">每日计划：跨天时自动生成当日的 2-4 件事。</div>
+        <div class="info-item">每周计划：跨周时生成周目标并分配到具体某天。</div>
+        <div class="info-item">每月计划：跨月时生成本月目标。</div>
+        <div class="info-item">完成判定由她自己做：未完成清单会随场景递给她，她用 finish_plan 勾掉、用 note_progress 记进展、用 add_plan 临时加事。</div>
+        <div class="info-item">这里的勾选框与她走同一条落笔路径，所以两边看到的状态始终一致。</div>
         <div class="info-item">数据存储于 data/plugin_ai_chat/</div>
       </div>
     </div>
@@ -112,17 +73,30 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
 
-const weekly = ref({ goals: [], week_start: '', total: 0, done: 0 })
-const monthly = ref({ goals: [], month: '', total: 0, done: 0 })
-const pushes = ref([])
-const pushState = ref({})
-const pushHistory = ref([])
+/** 展示顺序：越近的跨度越靠前 */
+const ORDER = ['day', 'week', 'month']
 
-const weeklyPct = computed(() => weekly.value.total > 0 ? Math.round(weekly.value.done / weekly.value.total * 100) : 0)
-const monthlyPct = computed(() => monthly.value.total > 0 ? Math.round(monthly.value.done / monthly.value.total * 100) : 0)
+function emptyFrame(label) {
+  return { label, period: '', items: [], total: 0, done: 0 }
+}
+
+const data = ref({
+  day: emptyFrame('今日'),
+  week: emptyFrame('本周'),
+  month: emptyFrame('本月'),
+})
+const history = ref([])
+
+function stat(tf) {
+  return data.value[tf] || emptyFrame('')
+}
+function pct(tf) {
+  const s = stat(tf)
+  return s.total > 0 ? Math.round((s.done / s.total) * 100) : 0
+}
 
 function chDay(en) {
   const map = { Monday: '周一', Tuesday: '周二', Wednesday: '周三', Thursday: '周四', Friday: '周五', Saturday: '周六', Sunday: '周日' }
@@ -133,47 +107,32 @@ function fmtTime(ts) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleS
 async function load() {
   try {
     const d = await api('/api/schedule')
-    weekly.value = d.weekly || { goals: [] }
-    monthly.value = d.monthly || { goals: [] }
-    pushes.value = d.pushes || []
-    pushState.value = d.push_state || {}
-    pushHistory.value = d.push_history || []
+    const frames = d.timeframes || {}
+    for (const tf of ORDER) {
+      data.value[tf] = frames[tf] || emptyFrame('')
+    }
+    history.value = d.history || []
   } catch {}
 }
 
-async function toggleWeekly(i) {
-  const goal = weekly.value.goals[i]
-  if (!goal) return
+async function toggle(tf, index) {
+  const item = data.value[tf]?.items?.[index]
+  if (!item) return
   try {
     const res = await api('/api/schedule', {
       method: 'POST',
-      body: JSON.stringify({ action: 'toggle', kind: 'weekly', index: i })
+      body: JSON.stringify({ action: 'toggle', kind: tf, index })
     })
-    if (res.ok !== undefined) {
-      goal.completed = res.completed
-      if (res.completed) goal.completed_at = Math.floor(Date.now() / 1000)
-      else goal.completed_at = 0
+    if (res && res.ok !== undefined) {
+      // 以服务端返回为准，避免本地状态与落盘不一致
+      item.completed = res.completed
+      item.completed_at = res.completed ? Math.floor(Date.now() / 1000) : 0
+      const frame = data.value[tf]
+      frame.done = frame.items.filter(g => g.completed).length
+      load()
     }
   } catch (e) {
-    console.error('toggle weekly failed:', e)
-  }
-}
-
-async function toggleMonthly(i) {
-  const goal = monthly.value.goals[i]
-  if (!goal) return
-  try {
-    const res = await api('/api/schedule', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'toggle', kind: 'monthly', index: i })
-    })
-    if (res.ok !== undefined) {
-      goal.completed = res.completed
-      if (res.completed) goal.completed_at = Math.floor(Date.now() / 1000)
-      else goal.completed_at = 0
-    }
-  } catch (e) {
-    console.error('toggle monthly failed:', e)
+    console.error('toggle plan item failed:', e)
   }
 }
 
@@ -197,13 +156,13 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .goal-check { cursor: pointer; flex-shrink: 0; margin-top: 1px; }
 .goal-body { flex: 1; }
 .goal-content { font-size: 13px; line-height: 1.4; }
+.goal-id { font-family: monospace; font-size: 10px; color: var(--text-3); margin-right: 6px; padding: 1px 4px; border-radius: 3px; background: var(--surface); }
 .goal-item.done .goal-content { color: var(--text-3); text-decoration: line-through; }
-.goal-meta { margin-top: 2px; display: flex; gap: 8px; align-items: center; }
+.goal-meta { margin-top: 2px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .day-badge { font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 4px; background: var(--primary-glow); color: var(--primary); }
 .done-time { font-size: 10px; color: var(--success); }
-.push-card { border-left: 3px solid var(--warning); }
-.push-list { display: flex; flex-direction: column; gap: 6px; }
-.push-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.done-note { font-size: 10px; color: var(--success); }
+.progress-note { font-size: 10px; color: var(--text-3); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 12px; font-weight: 600; font-size: 11px; color: var(--text-3); text-transform: uppercase; border-bottom: 1px solid var(--border); }

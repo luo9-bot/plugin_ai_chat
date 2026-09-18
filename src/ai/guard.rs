@@ -39,6 +39,11 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     "memory_review",
     "decide_reply",
     "batch_decide",
+    // 她自己的计划（表达与回神两条路径共用）
+    "check_plan",
+    "add_plan",
+    "note_progress",
+    "finish_plan",
 ];
 
 /// 判断字符是否为中日韩文字或全角标点

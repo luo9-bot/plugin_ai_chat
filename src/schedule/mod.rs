@@ -1,16 +1,14 @@
+//! 日程计划：她自己的事
+//!
+//! 一条权威路径：生成（日/周/月各一次）→ 她看见带 id 的清单 → 她判断并落笔。
+//! `config` 管作息时间表，`store` 管计划本身的模型与存储。
+
 pub mod config;
-pub mod context;
-pub mod plan;
-pub mod planner;
+pub mod store;
 
 pub use config::{DailySchedule, ScheduleConfig, ScheduledEvent};
-pub use context::get_today_plan;
-pub use plan::{
-    DailyPlan, add_task, check_and_generate_plan, complete_task, generate_plan,
-    get_plan_generation_prompt,
-};
-pub use planner::{
-    MonthlyGoal, MonthlyPlan, PushState, WeeklyGoal, WeeklyPlan, check_and_generate_monthly_plan,
-    check_and_generate_weekly_plan, check_plan_push, get_today_weekly_goals, load_monthly_plan,
-    load_weekly_plan, record_push_log, save_monthly_plan, save_weekly_plan,
+pub use store::{
+    GeneratedItem, Plan, PlanItem, SetStatusOutcome, Timeframe, add_own_item, ensure_plan, find,
+    open_items, open_items_all, plan_of, push_history, render_open_items, replace_items,
+    set_status, today_week_items,
 };

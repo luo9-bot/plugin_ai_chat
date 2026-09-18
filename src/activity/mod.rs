@@ -131,6 +131,11 @@ const DARLING_ACTIVITY_DURATION_RATIO: f64 = 0.3;
 // ── 公开 API ────────────────────────────────────────────────────
 
 /// 检测 bot 自己的消息是否包含活动声明，并记录
+///
+/// 这里**不**再顺带判定"她是不是完成了某条计划"。早先的实现把她说的话
+/// 与计划文本做整句字面包含匹配来判定完成，三天日志里 0 次命中——
+/// 判断该由她自己在工具的帮助下做（见 `schedule::set_status`），
+/// 而不是靠猜文本。
 pub fn check_bot_message(user_id: u64, message: &str) {
     if let Some(activity) = detect_activity(message) {
         let now = crate::util::now_secs();
@@ -140,12 +145,6 @@ pub fn check_bot_message(user_id: u64, message: &str) {
             started_at: now,
             expires_at: now + duration,
         };
-
-        if let ActivityType::Custom(ref desc) = activity
-            && let Some(task) = desc.strip_prefix("执行计划：")
-        {
-            crate::schedule::complete_task(task);
-        }
 
         let mut guard = ACTIVITY_STATE.lock().unwrap();
         let map = guard.get_or_insert_with(HashMap::new);
@@ -319,13 +318,10 @@ pub fn check_activity_progress() {
 }
 
 /// 活动关键词检测
+///
+/// 只认"她在做什么"这类通用活动，不再把计划文本拿来做匹配：
+/// 计划是否完成由她自己用 `finish_plan` 落笔。
 fn detect_activity(message: &str) -> Option<ActivityType> {
-    let plan = crate::schedule::get_today_plan();
-    for goal in &plan.goals {
-        if !plan.completed.contains(goal) && message.contains(goal.as_str()) {
-            return Some(ActivityType::Custom(format!("执行计划：{}", goal)));
-        }
-    }
     if message.contains("训练")
         || message.contains("健身")
         || message.contains("跑步")

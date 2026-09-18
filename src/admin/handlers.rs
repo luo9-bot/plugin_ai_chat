@@ -917,88 +917,70 @@ pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor
         let index = body_val.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         match (action, kind) {
-            ("toggle", "weekly") => {
-                let mut plan = crate::schedule::load_weekly_plan();
-                if index >= plan.goals.len() {
-                    return err(404, "goal not found");
+            ("toggle", "day" | "week" | "month") => {
+                let timeframe = match kind {
+                    "day" => crate::schedule::Timeframe::Day,
+                    "week" => crate::schedule::Timeframe::Week,
+                    _ => crate::schedule::Timeframe::Month,
+                };
+                let plan = crate::schedule::plan_of(timeframe);
+                let Some(item) = plan.items.get(index) else {
+                    return err(404, "plan item not found");
+                };
+                // 管理页与她自己走同一条落笔路径，只是判定由人来做
+                match crate::schedule::set_status(&item.id, Some(!item.completed), "", "") {
+                    crate::schedule::SetStatusOutcome::Applied {
+                        id,
+                        content,
+                        completed,
+                    } => {
+                        return ok(serde_json::json!({
+                            "ok": true,
+                            "id": id,
+                            "content": content,
+                            "completed": completed,
+                        }));
+                    }
+                    crate::schedule::SetStatusOutcome::UnknownId => {
+                        return err(404, "plan item not found");
+                    }
                 }
-                let goal = &mut plan.goals[index];
-                goal.completed = !goal.completed;
-                let completed = goal.completed;
-                let content = goal.content.clone();
-                if completed {
-                    goal.completed_at = crate::util::now_secs();
-                    crate::schedule::record_push_log("周计划完成", &content);
-                } else {
-                    goal.completed_at = 0;
-                }
-                crate::schedule::save_weekly_plan(&plan);
-                return ok(serde_json::json!({"ok": true, "completed": completed}));
-            }
-            ("toggle", "monthly") => {
-                let mut plan = crate::schedule::load_monthly_plan();
-                if index >= plan.goals.len() {
-                    return err(404, "goal not found");
-                }
-                let goal = &mut plan.goals[index];
-                goal.completed = !goal.completed;
-                let completed = goal.completed;
-                let content = goal.content.clone();
-                if completed {
-                    goal.completed_at = crate::util::now_secs();
-                    crate::schedule::record_push_log("月计划完成", &content);
-                } else {
-                    goal.completed_at = 0;
-                }
-                crate::schedule::save_monthly_plan(&plan);
-                return ok(serde_json::json!({"ok": true, "completed": completed}));
             }
             _ => return err(400, "invalid action or kind"),
         }
     }
 
     // GET: 返回计划数据
-    let weekly = crate::schedule::load_weekly_plan();
-    let monthly = crate::schedule::load_monthly_plan();
-    let pushes = crate::schedule::check_plan_push();
-
-    // 推动状态
-    let push_state_path = crate::config::data_dir().join("plan_push_state.json");
-    let push_state: serde_json::Value = std::fs::read_to_string(&push_state_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(serde_json::json!({"pushed_today": [], "date": ""}));
-
-    // 推动历史日志（从 push_history.json 读取）
-    let history_path = crate::config::data_dir().join("push_history.json");
-    let history: Vec<serde_json::Value> = std::fs::read_to_string(&history_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-
-    // 统计
-    let total_weekly = weekly.goals.len();
-    let done_weekly = weekly.goals.iter().filter(|g| g.completed).count();
-    let total_monthly = monthly.goals.len();
-    let done_monthly = monthly.goals.iter().filter(|g| g.completed).count();
+    //
+    // 这里**绝不能**调用会写状态的推动逻辑：早先版本在 GET 里调了
+    // `check_plan_push()`（它会把当天内容标记成"已推送"），于是每打开
+    // 一次日程页面就替她消耗掉一次推动，bot 再也收不到。
+    let mut timeframes = serde_json::Map::new();
+    for timeframe in crate::schedule::Timeframe::ALL {
+        let plan = crate::schedule::plan_of(timeframe);
+        let total = plan.items.len();
+        let done = plan.items.iter().filter(|i| i.completed).count();
+        let key = match timeframe {
+            crate::schedule::Timeframe::Day => "day",
+            crate::schedule::Timeframe::Week => "week",
+            crate::schedule::Timeframe::Month => "month",
+        };
+        timeframes.insert(
+            key.to_string(),
+            serde_json::json!({
+                "label": timeframe.label(),
+                "period": plan.period,
+                "items": plan.items,
+                "total": total,
+                "done": done,
+                "reflection": plan.reflection,
+            }),
+        );
+    }
 
     ok(serde_json::json!({
-        "weekly": {
-            "week_start": weekly.week_start,
-            "goals": weekly.goals,
-            "week_reflection": weekly.week_reflection,
-            "total": total_weekly,
-            "done": done_weekly,
-        },
-        "monthly": {
-            "month": monthly.month,
-            "goals": monthly.goals,
-            "total": total_monthly,
-            "done": done_monthly,
-        },
-        "pushes": pushes,
-        "push_state": push_state,
-        "push_history": history,
+        "timeframes": timeframes,
+        "history": crate::schedule::push_history(),
     }))
 }
 

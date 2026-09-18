@@ -632,147 +632,138 @@ fn check_periodic() {
     // 检查活动进度（完成的活动会记录，供生命事件路径触发）
     activity::check_activity_progress();
 
-    // 每日计划检查 (每天早上生成新计划)
-    if schedule::check_and_generate_plan() {
+    // 计划：跨周期就开一份新的，需要时让 AI 生成内容
+    //
+    // 三个阶段各自独立判断，因为周期长度不同（日/周/月）。生成完的条目
+    // 由 schedule 统一存储，她随后会以带编号的清单形式看到它们，
+    // 并且自己用 finish_plan 勾选——不再有任何文本匹配式的"完成检测"。
+    if schedule::ensure_plan(schedule::Timeframe::Day) {
         do_daily_plan_generation();
     }
-
-    // 周计划检查 (每周一自动生成)
-    if schedule::check_and_generate_weekly_plan() {
+    if schedule::ensure_plan(schedule::Timeframe::Week) {
         do_weekly_plan_generation();
     }
-
-    // 月计划检查 (每月1号自动生成)
-    if schedule::check_and_generate_monthly_plan() {
+    if schedule::ensure_plan(schedule::Timeframe::Month) {
         do_monthly_plan_generation();
-    }
-
-    // 计划推动：检查今天有没有该做的任务
-    let pushes = schedule::check_plan_push();
-    for push in &pushes {
-        debug!(content = %push, "schedule: plan push");
-        // 推动内容以感官形式进入她的意识流，由她自己决定是否提起
-        mind::push_sensation(format!("今天计划里有：{push}"));
     }
 }
 
-/// 生成每日计划
+/// 计划生成的三条路径共用：调 AI、取条目数组
+///
+/// 三种计划用的工具 schema 形状不同（`tasks`/`goals`，字符串或带字段的对象），
+/// 但"调一次模型、拿到条目数组"这一步是一样的，集中在这里。
+fn generate_plan_entries(
+    context: &str,
+    instruction: &str,
+    tool: ai::Tool,
+    timeframe: schedule::Timeframe,
+) -> Vec<schedule::GeneratedItem> {
+    let parsed = match ai::analyze_with_tools(
+        context,
+        instruction,
+        &[tool],
+        Some(serde_json::json!("auto")),
+    ) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            debug!(error = %e, timeframe = timeframe.label(), "schedule: 计划生成失败");
+            return Vec::new();
+        }
+    };
+
+    // 兼容三种形状：字符串数组、带 content 的对象数组、单层对象
+    let array = ["tasks", "goals"]
+        .iter()
+        .find_map(|key| parsed.get(*key).and_then(|v| v.as_array()).cloned())
+        .unwrap_or_default();
+
+    let items: Vec<schedule::GeneratedItem> = array
+        .iter()
+        .filter_map(|entry| {
+            if let Some(text) = entry.as_str() {
+                return Some(schedule::GeneratedItem {
+                    content: text.to_string(),
+                    target_day: None,
+                });
+            }
+            let content = entry.get("content")?.as_str()?.to_string();
+            Some(schedule::GeneratedItem {
+                content,
+                target_day: entry
+                    .get("target_day")
+                    .and_then(|d| d.as_str())
+                    .map(str::to_string),
+            })
+        })
+        .collect();
+
+    if items.is_empty() {
+        debug!(
+            timeframe = timeframe.label(),
+            "schedule: 生成结果为空，保持空计划"
+        );
+    }
+    items
+}
+
+/// 生成每日计划：`{"tasks": ["…"]}`
 fn do_daily_plan_generation() {
     let user_prompt = config::prompt();
     if user_prompt.is_empty() {
         return;
     }
-
-    // 构建上下文
     let context = format!(
         "{}\n\n{}",
         user_prompt,
-        schedule::get_plan_generation_prompt()
+        crate::prompt::PromptManager::get().raw("daily_plan")
     );
-
-    // 调用 AI 生成计划
-    match ai::analyze_with_tools(
+    let items = generate_plan_entries(
         &context,
         "根据你的人设，为自己制定今天的计划。",
-        &[ai::daily_plan_tool()],
-        Some(serde_json::json!("auto")),
-    ) {
-        Ok(parsed) => {
-            if let Some(tasks) = parsed.get("tasks").and_then(|t| t.as_array()) {
-                for task in tasks {
-                    if let Some(task_str) = task.as_str() {
-                        schedule::add_task(task_str);
-                    }
-                }
-                debug!(count = tasks.len(), "daily plan generated");
-            }
-        }
-        Err(e) => {
-            debug!(error = %e, "daily plan generation failed");
-        }
-    }
+        ai::daily_plan_tool(),
+        schedule::Timeframe::Day,
+    );
+    schedule::replace_items(schedule::Timeframe::Day, items);
 }
 
-/// 生成周计划
+/// 生成周计划：`{"goals": [{"content", "target_day"}]}`
 fn do_weekly_plan_generation() {
     let user_prompt = config::prompt();
     if user_prompt.is_empty() {
         return;
     }
-
     let context = format!(
         "{}\n\n{}",
         user_prompt,
-        crate::prompt::PromptManager::get().raw("weekly_plan"),
+        crate::prompt::PromptManager::get().raw("weekly_plan")
     );
-
-    match ai::analyze_with_tools(
+    let items = generate_plan_entries(
         &context,
         "制定本周计划",
-        &[ai::weekly_plan_tool()],
-        Some(serde_json::json!("auto")),
-    ) {
-        Ok(parsed) => {
-            if let Some(goals) = parsed.get("goals").and_then(|g| g.as_array()) {
-                let mut plan = schedule::load_weekly_plan();
-                for goal in goals {
-                    if let (Some(content), Some(target_day)) = (
-                        goal.get("content").and_then(|c| c.as_str()),
-                        goal.get("target_day").and_then(|d| d.as_str()),
-                    ) {
-                        plan.goals.push(schedule::WeeklyGoal {
-                            content: content.to_string(),
-                            target_day: target_day.to_string(),
-                            completed: false,
-                            completed_at: 0,
-                        });
-                    }
-                }
-                schedule::save_weekly_plan(&plan);
-                debug!(count = plan.goals.len(), "weekly plan generated");
-            }
-        }
-        Err(e) => debug!(error = %e, "weekly plan generation failed"),
-    }
+        ai::weekly_plan_tool(),
+        schedule::Timeframe::Week,
+    );
+    schedule::replace_items(schedule::Timeframe::Week, items);
 }
 
-/// 生成月计划
+/// 生成月计划：`{"goals": ["…"]}`
 fn do_monthly_plan_generation() {
     let user_prompt = config::prompt();
     if user_prompt.is_empty() {
         return;
     }
-
     let context = format!(
         "{}\n\n{}",
         user_prompt,
-        crate::prompt::PromptManager::get().raw("monthly_plan"),
+        crate::prompt::PromptManager::get().raw("monthly_plan")
     );
-
-    match ai::analyze_with_tools(
+    let items = generate_plan_entries(
         &context,
         "制定本月计划",
-        &[ai::monthly_plan_tool()],
-        Some(serde_json::json!("auto")),
-    ) {
-        Ok(parsed) => {
-            if let Some(goals) = parsed.get("goals").and_then(|g| g.as_array()) {
-                let mut plan = schedule::load_monthly_plan();
-                for goal in goals {
-                    if let Some(content) = goal.as_str() {
-                        plan.goals.push(schedule::MonthlyGoal {
-                            content: content.to_string(),
-                            completed: false,
-                            completed_at: 0,
-                        });
-                    }
-                }
-                schedule::save_monthly_plan(&plan);
-                debug!(count = plan.goals.len(), "monthly plan generated");
-            }
-        }
-        Err(e) => debug!(error = %e, "monthly plan generation failed"),
-    }
+        ai::monthly_plan_tool(),
+        schedule::Timeframe::Month,
+    );
+    schedule::replace_items(schedule::Timeframe::Month, items);
 }
 
 // ── 对话管理 API（供 admin.rs 调用） ──────────────────────────

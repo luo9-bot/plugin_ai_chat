@@ -216,6 +216,19 @@ fn search_web_tool() -> Tool {
     }
 }
 
+/// 计划工具集（她自己看清单、记进展、勾掉完成）
+///
+/// 抽取出来是因为表达与回神两条路径都要给她同一套：
+/// 她在聊天里顺手勾一下，和独处时回看今天做了什么，用的是同一批工具。
+pub fn plan_tools() -> Vec<Tool> {
+    vec![
+        crate::ai::check_plan_tool(),
+        crate::ai::add_plan_tool(),
+        crate::ai::note_progress_tool(),
+        crate::ai::finish_plan_tool(),
+    ]
+}
+
 /// 表达工具集（联网搜索按配置启用）
 fn voice_tools() -> Vec<Tool> {
     let mut tools = vec![
@@ -224,6 +237,7 @@ fn voice_tools() -> Vec<Tool> {
         finish_tool(),
         plan_next_tool(),
     ];
+    tools.extend(plan_tools());
     if config::get().search.enabled {
         tools.push(search_web_tool());
     }
@@ -316,6 +330,83 @@ fn execute_search(query: &str) -> ToolOutcome {
 
 // ── 工具执行 ────────────────────────────────────────────────────
 
+/// 执行计划类工具；`args` 不是这四个工具时返回 None
+///
+/// 表达路径与回神路径共用同一套实现：她在聊天里勾一下、独处时回看今天
+/// 做了什么，落的是同一份数据、走同一段代码。
+fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome> {
+    match name {
+        "check_plan" => Some(ToolOutcome::Continue(
+            match plan_block(PLAN_IN_TOOL_LINES) {
+                Some(list) => format!("你还没做完的事：\n{list}"),
+                None => "你手上的事都做完了，没有挂着的。".to_string(),
+            },
+        )),
+        "add_plan" => {
+            let content = args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            Some(match crate::schedule::add_own_item(content) {
+                Some(item) => ToolOutcome::Continue(format!(
+                    "记下了：{} [{}]。可以继续说话，也可以不说。",
+                    item.content, item.id
+                )),
+                None => ToolOutcome::Continue(
+                    "这条没记下来（空的或太长，也可能已经有一模一样的了）。".into(),
+                ),
+            })
+        }
+        "note_progress" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let progress = args
+                .get("progress")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if progress.is_empty() {
+                return Some(ToolOutcome::Continue(
+                    "note_progress 需要 progress。".into(),
+                ));
+            }
+            Some(match crate::schedule::set_status(id, None, "", progress) {
+                crate::schedule::SetStatusOutcome::Applied { id, content, .. } => {
+                    ToolOutcome::Continue(format!("记下了：[{id}] {content} —— {progress}"))
+                }
+                crate::schedule::SetStatusOutcome::UnknownId => {
+                    ToolOutcome::Continue(format!("清单里没有编号 {id}。用 check_plan 看一下。"))
+                }
+            })
+        }
+        "finish_plan" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let done = args
+                .get("done")
+                .and_then(crate::ai::parse_bool)
+                .unwrap_or(false);
+            let note = args.get("note").and_then(|v| v.as_str()).unwrap_or("");
+            Some(
+                match crate::schedule::set_status(id, Some(done), note, "") {
+                    crate::schedule::SetStatusOutcome::Applied {
+                        id,
+                        content,
+                        completed,
+                    } => ToolOutcome::Continue(if completed {
+                        format!("已勾掉：[{id}] {content}")
+                    } else {
+                        format!("已取消勾选：[{id}] {content}")
+                    }),
+                    crate::schedule::SetStatusOutcome::UnknownId => ToolOutcome::Continue(format!(
+                        "清单里没有编号 {id}。用 check_plan 看一下。"
+                    )),
+                },
+            )
+        }
+        _ => None,
+    }
+}
+
 fn execute_tool(
     name: &str,
     args: &serde_json::Value,
@@ -324,6 +415,9 @@ fn execute_tool(
     present_users: &[u64],
     transcript_tail: &[String],
 ) -> ToolOutcome {
+    if let Some(outcome) = execute_plan_tool(name, args) {
+        return outcome;
+    }
     match name {
         "query_memory" => {
             let uid = args.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -430,7 +524,7 @@ fn execute_tool(
             ToolOutcome::Continue("已记下这个安排。你可以继续说话，或调用 finish。".into())
         }
         _ => ToolOutcome::Continue(
-            "未知工具，可用工具：query_memory、send_sticker、finish、plan_next。".into(),
+            "未知工具，可用工具：query_memory、send_sticker、finish、plan_next、check_plan、add_plan、note_progress、finish_plan。".into(),
         ),
     }
 }
@@ -552,8 +646,29 @@ fn stream_user_content(new_perceptions: &str) -> String {
         sections.push(format!("# 刚刚发生（需要你回应/决定）\n{new_perceptions}"));
     }
 
+    // 她自己手上的事：随场景递给她，让她在聊天里顺手就能勾一下。
+    // 判断（做没做完）由她做，id 消除"哪一件"的歧义。
+    if let Some(plan) = plan_block(PLAN_IN_PROMPT_LINES) {
+        sections.push(format!(
+            "# 你手上还没做完的事\n{plan}\n（做完了或决定不做了，用 finish_plan 勾掉；开了个头就 note_progress 记一句）"
+        ));
+    }
+
     sections.push("回神。".to_string());
     sections.join("\n\n")
+}
+
+/// 随场景一起递给她、或 `check_plan` 按需取的计划清单
+///
+/// 只列未完成的：已勾掉的再列一遍会让她重新决定"要不要做"。
+/// 上限是为了计划变长后不把 prompt 撑爆。
+const PLAN_IN_PROMPT_LINES: usize = 10;
+/// `check_plan` 工具输出给得更宽一些（她主动要看的时候）
+const PLAN_IN_TOOL_LINES: usize = 20;
+
+/// 渲染未完成的计划清单
+fn plan_block(max_lines: usize) -> Option<String> {
+    crate::schedule::render_open_items(max_lines)
 }
 
 /// 风格神经元手感块（有训练产物时才出现）
@@ -785,6 +900,8 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
 
     // 阶段二：决定行动
     let mut decision_tools: Vec<Tool> = vec![say_tool(true), finish_tool(), plan_next_tool()];
+    // 回神是她回看自己一天的时刻，也是她勾掉计划最自然的时机
+    decision_tools.extend(plan_tools());
     if config::get().humanity.foraging_enabled {
         decision_tools.push(catch_up_tool());
     }
@@ -792,7 +909,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     let captured_wake: RefCell<Option<(u64, String)>> = RefCell::new(None);
 
     let decision_content = format!(
-        "{input}\n\n（刚才你心里想的是：{}）\n\n现在收尾这轮回神：有话就说（say），不想说就 finish（finish）。之后还想想想/做点什么，再调 plan_next 留个想起。",
+        "{input}\n\n（刚才你心里想的是：{}）\n\n现在收尾这轮回神：有话就说（say），不想说就 finish（finish）。之后还想想想/做点什么，再调 plan_next 留个想起。手上有做完的事就用 finish_plan 勾掉。",
         if inner.is_empty() {
             "没什么特别的".to_string()
         } else {
@@ -807,7 +924,13 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
         &decision_content,
         &decision_tools,
         4,
-        |name, args| match name {
+        |name, args| {
+            match name {
+            // 计划类工具与表达路径共用同一实现
+            "check_plan" | "add_plan" | "note_progress" | "finish_plan" => {
+                execute_plan_tool(name, args)
+                    .unwrap_or_else(|| ToolOutcome::Continue("计划操作失败。".into()))
+            }
             "say" => {
                 let text = args
                     .get("text")
@@ -851,7 +974,10 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
                 }
                 ToolOutcome::Continue(crate::mind::foraging::catch_up(gid))
             }
-            _ => ToolOutcome::Continue("未知工具，可用：say、finish、plan_next、catch_up。".into()),
+            _ => ToolOutcome::Continue(
+                "未知工具，可用：say、finish、plan_next、catch_up、check_plan、add_plan、note_progress、finish_plan。".into(),
+            ),
+        }
         },
     );
     // 决策阶段失败且她什么都没留下 = 这次回神没有完成，不是她的沉默
