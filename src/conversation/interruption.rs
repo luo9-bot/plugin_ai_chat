@@ -26,7 +26,14 @@ const MAX_PROCESSING_MS: u128 = 30_000;
 
 /// 纯函数决策：处理期间新到 `new_messages` 条、已处理 `processing_ms` 毫秒、
 /// 随机数 `rand`（0~1）——要不要打断
+///
+/// 处理期没有新消息时永不打断：没有新信息，"话题可能已经变了"这个前提
+/// 就不成立。旧实现只看时长，于是模型慢（或超时重试）超过 30 秒就会把
+/// 一句本来完全正确的话咽回去——慢的是她自己的网络，不是群里的对话。
 pub fn should_interrupt(new_messages: u32, processing_ms: u128, rand: f32) -> bool {
+    if new_messages == 0 {
+        return false;
+    }
     if processing_ms < MIN_PROCESSING_MS {
         return false;
     }
@@ -115,7 +122,15 @@ mod tests {
     #[test]
     fn very_long_processes_always_interrupt() {
         assert!(should_interrupt(1, 30_001, 0.99));
-        assert!(should_interrupt(0, 60_000, 0.99));
+        assert!(should_interrupt(3, 60_000, 0.99));
+    }
+
+    #[test]
+    fn silence_during_generation_never_interrupts() {
+        // 没有新消息 = 没有新信息。慢是她自己的网络慢，不是话题变了。
+        assert!(!should_interrupt(0, 30_001, 0.0));
+        assert!(!should_interrupt(0, 60_000, 0.0));
+        assert!(!should_interrupt(0, 10 * 60_000, 0.0));
     }
 
     #[test]
