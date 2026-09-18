@@ -224,6 +224,81 @@ mod tests {
         );
     }
 
+    /// 反方向：结构体有的字段，模板也必须有。
+    ///
+    /// 上面那个测试只钉住"模板不撒谎"的那一侧。这一侧不会让解析失败（缺键会
+    /// 拿到代码内建默认值），代价是模板对新装用户**少给一个旋钮**——而
+    /// CLAUDE.md 把"字段变更必须同步 `config.example.yaml`"写成了人工纪律。
+    /// 靠人记得住的约定正是本项目记录过的一类代价（设计文档 §13.3 结尾），
+    /// 所以让测试替人记这一条。它第一次运行就抓到了整个 `sticker:` 段缺失。
+    ///
+    /// 判定按**键名**而不是路径，并且把注释放行也算数：`whitelist` /
+    /// `blacklist` / `auto_start_*` 这类列表就是有意写成注释示例的
+    /// （模板里写死一份假名单比不写更糟），只比解析结果会把它们误判成缺失。
+    #[test]
+    fn template_covers_every_config_field() {
+        let known: serde_yaml::Value =
+            serde_yaml::to_value(reference_config()).expect("配置必须可序列化");
+        let template: serde_yaml::Value =
+            serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法 YAML");
+        let documented = documented_key_names();
+
+        let mut expected = Vec::new();
+        collect_non_null_paths(&known, String::new(), &mut expected);
+
+        let missing: Vec<String> = expected
+            .into_iter()
+            .filter(|path| resolve_config_path(&template, path).is_none())
+            .filter(|path| !documented.contains(leaf_name(path)))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "config.example.yaml 缺少这些字段（新装用户看不到这个旋钮）：{missing:?}"
+        );
+    }
+
+    /// 模板里出现过的键名，**包括被注释掉的示例行**（`# whitelist: [...]`）
+    fn documented_key_names() -> std::collections::HashSet<String> {
+        DEFAULT_CONFIG_YAML
+            .lines()
+            .filter_map(|line| {
+                let after_hash = line.trim_start().trim_start_matches('#').trim_start();
+                after_hash
+                    .split_once(':')
+                    .map(|(name, _)| name.trim().to_string())
+            })
+            .filter(|name| !name.is_empty() && !name.contains(' '))
+            .collect()
+    }
+
+    fn leaf_name(path: &str) -> &str {
+        path.rsplit('.').next().unwrap_or(path)
+    }
+
+    /// 收集非 `null` 叶子字段的点分路径（映射一律继续下钻）
+    fn collect_non_null_paths(value: &serde_yaml::Value, prefix: String, paths: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                for (key, child) in map {
+                    let Some(name) = key.as_str() else { continue };
+                    let path = if prefix.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{prefix}.{name}")
+                    };
+                    collect_non_null_paths(child, path, paths);
+                }
+            }
+            serde_yaml::Value::Null => {}
+            _ => {
+                if !prefix.is_empty() {
+                    paths.push(prefix);
+                }
+            }
+        }
+    }
+
     /// 收集叶子字段的点分路径（非空映射继续下钻，其余算叶子）
     fn collect_leaf_paths(value: &serde_yaml::Value, prefix: String, paths: &mut Vec<String>) {
         match value {
