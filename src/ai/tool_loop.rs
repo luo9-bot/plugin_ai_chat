@@ -10,7 +10,7 @@
 
 use tracing::debug;
 
-use super::guard::detect_leaked_tool_call;
+use super::guard::{ALL_TOOL_NAMES, detect_leaked_tool_call};
 use super::provider::{no_error_agent, track_usage};
 use super::types::{ChatMessage, ChatRequest, ChatResponse, Tool, ToolOutcome};
 use crate::config;
@@ -56,7 +56,9 @@ pub fn run_tool_loop(
         reasoning_content: None,
     });
 
-    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    // 泄漏守门用全局工具清单：模型可能把本次没提供给它的工具名
+    // （回神阶段的 say/catch_up、睡前整理的 write_diary…）写成文字
+    let tool_names: &[&str] = ALL_TOOL_NAMES;
 
     for round in 0..max_rounds {
         let req = ChatRequest {
@@ -102,10 +104,36 @@ pub fn run_tool_loop(
         let message = choice.message;
 
         // 工具调用：执行并回传结果，继续下一轮
+        //
+        // 一次响应只处理第一个工具调用，这是有意的：管线的语义是
+        // "一个动作 + 一次发言"，`say`/`finish` 都是终止性动作，多调用
+        // 并存本身就说明模型没想清楚。丢弃同批的其它调用，避免把
+        // 自相矛盾的一轮（既 say 又 finish）当成合法决策。
+        //
+        // 同一响应里带 content 时同样丢弃：那是模型的"旁白"（真实案例
+        // "然后呢?你要干嘛|^|say 内容"），不是发言。发言只能走 text 分支。
         if let Some(tool_calls) = &message.tool_calls
             && let Some(first) = tool_calls.first()
         {
             let name = first.function.name.clone();
+            if message
+                .content
+                .as_ref()
+                .is_some_and(|c| !c.trim().is_empty())
+            {
+                debug!(
+                    round,
+                    tool = %name,
+                    "tool_loop: 丢弃与工具调用同时出现的旁白文本"
+                );
+            }
+            if tool_calls.len() > 1 {
+                debug!(
+                    round,
+                    count = tool_calls.len(),
+                    "tool_loop: 一次响应含多个工具调用，只执行第一个"
+                );
+            }
             let args = serde_json::from_str::<serde_json::Value>(&first.function.arguments)
                 .unwrap_or(serde_json::json!({}));
             debug!(round, tool = %name, "tool_loop: tool call");
@@ -140,7 +168,7 @@ pub fn run_tool_loop(
         // 这类文本绝不能当作发言外发：
         // - finish 形态 = 模型本意就是沉默，按沉默收场
         // - 其它形态 = 无效输出，回传纠正提示让她重新表达
-        if let Some(leaked) = detect_leaked_tool_call(&text, &tool_names) {
+        if let Some(leaked) = detect_leaked_tool_call(&text, tool_names) {
             if leaked == "finish" {
                 debug!(round, "tool_loop: leaked finish text, treating as silence");
                 return Ok(None);

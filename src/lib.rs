@@ -45,9 +45,9 @@ mod cron {
 #[cfg(not(feature = "plugin"))]
 mod sender {
     pub fn send_msg(_group_id: u64, _user_id: u64, _text: &str) {}
-    pub fn send_with_typing(_group_id: u64, _user_id: u64, _text: &str) {}
+    pub fn send_with_typing(_group_id: u64, _user_id: u64, _text: &str, _incoming: &str) {}
     pub fn send_at_msg(_group_id: u64, _user_id: u64, _text: &str) {}
-    pub fn safe_send(_group_id: u64, _user_id: u64, _reply: &str) -> bool {
+    pub fn safe_send(_group_id: u64, _user_id: u64, _reply: &str, _incoming: &str) -> bool {
         true
     }
     pub fn safe_send_quiet(_group_id: u64, _user_id: u64, _reply: &str) -> bool {
@@ -82,7 +82,7 @@ pub(crate) struct MessageQueue {
 
 pub(crate) struct ProcessingTask {
     pub(crate) group_id: u64,
-    pub(crate) user_msgs: Vec<(u64, String, Vec<u64>)>,
+    pub(crate) user_msgs: Vec<conversation::handler::GroupBatch>,
 }
 
 pub(crate) static MESSAGE_QUEUE: OnceLock<MessageQueue> = OnceLock::new();
@@ -434,11 +434,16 @@ fn check_periodic() {
                         }
                     }
                     if let Some((in_secs, reason)) = turn.wake {
-                        let due_at = util::now_secs() + in_secs.max(60);
-                        let mut follow = mind::WakePlan::new(plan.kind, due_at, reason);
-                        follow.target_group = plan.target_group;
-                        follow.target_user = plan.target_user;
-                        mind::add_wake_plan(follow);
+                        // 与内心/日记同级滤壳：这条 reason 会落盘并反复回灌 prompt
+                        if !anti_injection::check_memory_entry(&reason).passed {
+                            mind::security::log_event(0, "wake_plan", "rejected", &reason);
+                        } else {
+                            let due_at = util::now_secs() + in_secs.max(60);
+                            let mut follow = mind::WakePlan::new(plan.kind, due_at, reason);
+                            follow.target_group = plan.target_group;
+                            follow.target_user = plan.target_user;
+                            mind::add_wake_plan(follow);
+                        }
                     }
                 }
                 mind::wake::WakeProduct::Digest(outcome) => {

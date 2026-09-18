@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use tracing::{debug, info, warn};
 
-use crate::ai::{Tool, ToolOutcome, run_tool_loop};
+use crate::ai::{ALL_TOOL_NAMES, Tool, ToolOutcome, run_tool_loop};
 use crate::config;
 use crate::mind::{self, SensoryPacket};
 
@@ -30,9 +30,21 @@ pub enum VoiceAction {
 /// 群聊里一条待处理的发言
 pub struct GroupUtterance {
     pub user_id: u64,
+    /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
     /// 消息到达时间（unix 秒，转译入流用）
     pub ts: u64,
+    /// 到达时刻（毫秒）——排序用，同一秒内的先后靠它区分
+    pub ts_ms: u64,
+}
+
+/// 按真实到达顺序排好一批发言
+///
+/// 批次是按 (群, 用户) 切出来的，合并后输入顺序不反映群里谁先谁后——
+/// 不排序就会出现"接着甲的话、回给乙"的错位。同一毫秒的并列由
+/// 用户号兜底，保证顺序确定。
+pub fn order_by_arrival(utterances: &mut [GroupUtterance]) {
+    utterances.sort_by_key(|u| (u.ts_ms, u.user_id));
 }
 
 // ── 回神协议 ────────────────────────────────────────────────────
@@ -91,16 +103,23 @@ fn send_sticker_tool() -> Tool {
     }
 }
 
+/// 沉默工具：没有任何参数
+///
+/// 曾经要求 `reason` 必填，结果是模型每次不说话都要写一段社会推理
+/// （真实日志：`finish (silence) reason="群友@的是机器人弄运势，跟我不
+/// 相关，豆那边也在装睡"`）。这既烧 token，又把"要不要说"变成一个
+/// 需要论证的决策——沉默本该是默认动作，不是要交作业的结论。
+///
+/// 现在它只是一个无参数信号：调用即本轮结束，不产出任何文本。
 fn finish_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: crate::ai::FunctionDef {
             name: "finish".to_string(),
-            description: "决定什么都不说。沉默是正常且常常正确的选择。".to_string(),
+            description: "这一轮不说话了。沉默是默认选择，不需要理由。".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "properties": {"reason": {"type": "string", "description": "为什么不说话"}},
-                "required": ["reason"]
+                "properties": {}
             }),
         },
     }
@@ -302,6 +321,7 @@ fn execute_tool(
     args: &serde_json::Value,
     group_id: u64,
     primary_user_id: u64,
+    present_users: &[u64],
     transcript_tail: &[String],
 ) -> ToolOutcome {
     match name {
@@ -311,14 +331,35 @@ fn execute_tool(
             if uid == 0 || query.is_empty() {
                 return ToolOutcome::Continue("参数不完整，需要 user_id 和 query。".into());
             }
+            // 只能查眼前在场的人：模型给的 user_id 没有约束时，它可以
+            // 拿任意 QQ 号去翻别人的长期记忆——这既越权，也让"她认识的
+            // 人"这个概念失效（她只记得与她有过来往的人）。
+            if uid != primary_user_id && !present_users.contains(&uid) {
+                return ToolOutcome::Continue(format!(
+                    "你只记得眼前这几个人（{}）。换个问法，或者想不起来就算了。",
+                    present_users
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ));
+            }
             let results = crate::memory::search_memories(uid, group_id, query, 10);
             if results.is_empty() {
                 ToolOutcome::Continue(format!(
                     "关于用户 {uid} 没有查到相关记忆（查询: {query}）。凭眼前所见的继续就好。"
                 ))
             } else {
-                let lines: Vec<String> =
-                    results.iter().map(|r| format!("- {}", r.content)).collect();
+                let lines: Vec<String> = results
+                    .iter()
+                    .filter(|r| crate::anti_injection::check_memory_entry(&r.content).passed)
+                    .map(|r| format!("- {}", r.content))
+                    .collect();
+                if lines.is_empty() {
+                    return ToolOutcome::Continue(
+                        "查到的记忆内容不合适，当作没查到。凭眼前所见的继续。".into(),
+                    );
+                }
                 ToolOutcome::Continue(format!("查到的记忆：\n{}", lines.join("\n")))
             }
         }
@@ -352,11 +393,9 @@ fn execute_tool(
             execute_search(&query)
         }
         "finish" => {
-            let reason = args.get("reason").and_then(|v| v.as_str()).unwrap_or("");
             debug!(
                 group_id,
                 user_id = primary_user_id,
-                reason,
                 "voice: finish (silence)"
             );
             ToolOutcome::Abort
@@ -375,6 +414,17 @@ fn execute_tool(
                 .to_string();
             if reason.is_empty() {
                 return ToolOutcome::Continue("plan_next 需要 reason。".into());
+            }
+            // 这是她留给未来自己的话，会被原样拼回回神与私聊的 prompt，
+            // 而且落盘、跨重启。因此必须与内心独白/日记同级过滤：
+            // 没有这道滤壳，一次诱导就能写进一条"持久化指令"，
+            // 在之后每一轮里反复回到她眼前。
+            if !crate::anti_injection::check_memory_entry(&reason).passed {
+                crate::mind::security::log_event(0, "plan_next", "rejected", &reason);
+                warn!("voice: plan_next 的想起未通过滤壳，丢弃");
+                return ToolOutcome::Continue(
+                    "这个想起写不下来（内容不合适）。换个说法，或者不安排。".into(),
+                );
             }
             LAST_PLAN.with(|cell| *cell.borrow_mut() = Some((secs, reason)));
             ToolOutcome::Continue("已记下这个安排。你可以继续说话，或调用 finish。".into())
@@ -422,8 +472,17 @@ fn display_name(user_id: u64, group_id: u64) -> String {
     crate::person_info::get_display_name(user_id, group_id).unwrap_or_else(|| "群友".to_string())
 }
 
-/// 场景一句话 + darl­ing/强制回应备注
-fn scene_line(group_id: u64, involved: &[u64], force_reply: bool) -> String {
+/// 场景一句话 + darling/强制回应备注
+///
+/// 群聊场景不只罗列在场者，还要说清"这条是冲谁来的"：谁点了她的名、
+/// 谁在等回答、有几个不同的人在说话。这些是结构事实，不是形容，
+/// 让她不必靠猜来决定接谁的话。
+fn scene_line(
+    group_id: u64,
+    involved: &[u64],
+    focus: &crate::conversation::turn::TurnFocus,
+    force_reply: bool,
+) -> String {
     let cfg = config::get();
     let mut text = if group_id == 0 {
         let name = involved
@@ -434,15 +493,32 @@ fn scene_line(group_id: u64, involved: &[u64], force_reply: bool) -> String {
             "# 现在的场景\n你和{name}在一对一私聊，只有你们两个人。这是你们之间的事，不需要@任何人。"
         )
     } else {
-        let names: Vec<String> = involved
+        let named: Vec<(u64, String)> = involved
             .iter()
-            .map(|&uid| display_name(uid, group_id))
+            .map(|&uid| (uid, display_name(uid, group_id)))
             .collect();
-        format!(
-            "# 现在的场景\n你在群 {} 里。这轮说话的人：{}。先看清谁在跟谁说话、有没有人在等你，再决定接不接。",
-            group_id,
+        let names: Vec<&str> = named.iter().map(|(_, n)| n.as_str()).collect();
+        let mut text = format!(
+            "# 现在的场景\n你在群 {group_id} 里。这轮说话的人：{}。",
             names.join("、")
-        )
+        );
+        let callers: Vec<&str> = focus
+            .called_by
+            .iter()
+            .filter_map(|uid| {
+                named
+                    .iter()
+                    .find(|(id, _)| id == uid)
+                    .map(|(_, n)| n.as_str())
+            })
+            .collect();
+        if !callers.is_empty() {
+            text.push_str(&format!("\n{}点名找你了，在等你回。", callers.join("、")));
+        }
+        if focus.has_other_speakers() {
+            text.push_str("\n这批不止一个人在说话，各自的话分开看。");
+        }
+        text
     };
     if cfg.darling_qq > 0 && involved.contains(&cfg.darling_qq) {
         text.push_str("\n在场有你是认定的人——在他面前你不用想那么多。");
@@ -488,14 +564,26 @@ fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
 // ── 群聊 ────────────────────────────────────────────────────────
 
 /// 群聊开口：她读完整个群的场面，决定说什么、对谁说，或者不说
-pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bool) -> VoiceAction {
-    let mut involved: Vec<u64> = Vec::new();
-    for u in utterances {
-        if !involved.contains(&u.user_id) {
-            involved.push(u.user_id);
+///
+/// `focus` 是这一批消息的焦点判定（谁在跟她说话、该回谁），
+/// 由 [`crate::conversation::turn`] 依确定性规则算出——回复目标不再
+/// 取决于"哪个用户的批次先到期"。
+pub fn speak_group(
+    group_id: u64,
+    utterances: &[GroupUtterance],
+    focus: &crate::conversation::turn::TurnFocus,
+    force_reply: bool,
+) -> VoiceAction {
+    let primary = focus.primary;
+    let involved: Vec<u64> = {
+        let mut ids: Vec<u64> = Vec::new();
+        for u in utterances {
+            if !ids.contains(&u.user_id) {
+                ids.push(u.user_id);
+            }
         }
-    }
-    let primary = involved.first().copied().unwrap_or(0);
+        ids
+    };
 
     let new_lines: Vec<String> = utterances
         .iter()
@@ -504,7 +592,10 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
 
     let cfg = config::get();
     let identity = crate::mind::self_model::identity_text();
-    let mut system = build_system(&scene_line(group_id, &involved, force_reply), &identity);
+    let mut system = build_system(
+        &scene_line(group_id, &involved, focus, force_reply),
+        &identity,
+    );
     // 认识的人：在场的人 + 创作者播种的人，她本来就认得
     if let Some(block) = mind::persons::context_block(&involved) {
         system.push_str("\n\n");
@@ -535,7 +626,6 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
         .collect();
 
     let tools = voice_tools();
-    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
 
     let result = run_tool_loop(
         &system,
@@ -543,11 +633,11 @@ pub fn speak_group(group_id: u64, utterances: &[GroupUtterance], force_reply: bo
         &user_content,
         &tools,
         cfg.conversation.voice_max_rounds,
-        |name, args| execute_tool(name, args, group_id, primary, &transcript_tail),
+        |name, args| execute_tool(name, args, group_id, primary, &involved, &transcript_tail),
     );
 
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, &tool_names) {
+        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Silent,
         },
@@ -574,7 +664,16 @@ pub fn speak_private(
     let cfg = config::get();
     let involved = [user_id];
     let identity = crate::mind::self_model::identity_text();
-    let mut system = build_system(&scene_line(0, &involved, false), &identity);
+    // 私聊不需要焦点判定：场景里只有对面这一个人
+    let mut system = build_system(
+        &scene_line(
+            0,
+            &involved,
+            &crate::conversation::turn::TurnFocus::default(),
+            false,
+        ),
+        &identity,
+    );
     // 认识的人：创作者播种的名单，她本来就认得对面是谁
     if let Some(block) = mind::persons::context_block(&involved) {
         system.push_str("\n\n");
@@ -585,8 +684,8 @@ pub fn speak_private(
         system.push_str(extra);
     }
 
-    // 她惦记这个人的心事进入感官
-    let loops = mind::wake::pending_reasons_for(user_id);
+    // 她惦记这个人的心事进入感官（读取侧滤壳：这些 reason 落盘且反复回灌）
+    let loops = mind::wake::sanitize_reasons(mind::wake::pending_reasons_for(user_id));
     let packet = SensoryPacket {
         loops,
         ..Default::default()
@@ -619,7 +718,6 @@ pub fn speak_private(
         .collect();
 
     let tools = voice_tools();
-    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
 
     let result = run_tool_loop(
         &system,
@@ -627,11 +725,11 @@ pub fn speak_private(
         &user_content,
         &tools,
         cfg.conversation.voice_max_rounds,
-        |name, args| execute_tool(name, args, 0, user_id, &transcript_tail),
+        |name, args| execute_tool(name, args, 0, user_id, &[user_id], &transcript_tail),
     );
 
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, &tool_names) {
+        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Silent,
         },
@@ -1240,10 +1338,31 @@ fn clean_voice_reply(reply: &str, bot_name: &str) -> String {
 /// - 工具调用语法泄漏（finish(reason: ...) 之类被当成文字输出）
 /// - 记忆流转写格式的复读（土豆：[土豆 15:16] “finish”）
 ///
-/// 全部段落被剔除时返回 None（= 这一轮视为沉默）。
+/// 工具泄漏是**整轮污染**：模型一旦把工具调用写进正文，同一轮的
+/// 其它段落也都在同一种错乱状态里（真实案例：`然后呢?你要干嘛|^|say 内容|^|
+/// 那个人机的梗玩过好几轮了`）。此时不能只剔坏段——把剩下的话发出去
+/// 等于把她半句内心独白当成发言。整轮按沉默收场，比发错话更像人。
+///
+/// 转写复读是**分段污染**：只剔掉复读段，同一轮的正常发言保留。
 fn guard_voice_reply(reply: &str, bot_name: &str, tool_names: &[&str]) -> Option<String> {
     let cleaned = clean_voice_reply(reply, bot_name);
     if cleaned.is_empty() {
+        return None;
+    }
+
+    // 逐段检查：一段工具泄漏 ⇒ 整轮不可信（判定与剔除的范围不同）
+    if let Some(leaked) = cleaned
+        .split("|^|")
+        .flat_map(|s| s.split('\n'))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .find_map(|s| crate::ai::detect_leaked_tool_call(s, tool_names))
+    {
+        warn!(
+            tool = leaked,
+            reply = %cleaned,
+            "voice: blocked leaked tool call, whole turn treated as silence"
+        );
         return None;
     }
 
@@ -1253,14 +1372,12 @@ fn guard_voice_reply(reply: &str, bot_name: &str, tool_names: &[&str]) -> Option
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .filter(|s| {
-            let tool_leak = crate::ai::detect_leaked_tool_call(s, tool_names).is_some();
-            let echo = crate::ai::is_transcribed_echo(s);
-            if tool_leak {
-                warn!(segment = %s, "voice: blocked leaked tool call in reply");
-            } else if echo {
+            if crate::ai::is_transcribed_echo(s) {
                 warn!(segment = %s, "voice: blocked transcribed echo in reply");
+                false
+            } else {
+                true
             }
-            !tool_leak && !echo
         })
         .collect();
 
@@ -1274,7 +1391,7 @@ fn guard_voice_reply(reply: &str, bot_name: &str, tool_names: &[&str]) -> Option
 mod tests {
     use super::*;
 
-    const TOOLS: &[&str] = &["query_memory", "send_sticker", "finish", "plan_next"];
+    const TOOLS: &[&str] = &["query_memory", "send_sticker", "finish", "plan_next", "say"];
 
     #[test]
     fn strips_wrapping_quotes() {
@@ -1321,8 +1438,8 @@ mod tests {
     }
 
     #[test]
-    fn guard_drops_only_bad_segments() {
-        // 真实泄漏案例：正常段 + 复读段混合，只剔坏段
+    fn guard_drops_only_the_echo_segment() {
+        // 转写复读是分段污染：正常段保留，复读段剔掉
         let reply =
             "这你也学|^|土豆：[土豆 15:16] “finish”|^|你突然发个finish 干什么 我这不是才说过吗";
         assert_eq!(
@@ -1337,6 +1454,24 @@ mod tests {
         assert_eq!(
             guard_voice_reply("你突然发个finish 干什么", "洛玖", TOOLS),
             Some("你突然发个finish 干什么".to_string())
+        );
+    }
+
+    #[test]
+    fn guard_rejects_whole_turn_when_one_segment_leaks_a_tool_call() {
+        // 真实泄漏案例（2026-09-17 11:13:20）：模型把 `say 内容` 当正文夹在中间。
+        // 工具泄漏是整轮污染——不能只剔坏段，把剩下的半句内心独白发出去。
+        let reply = "然后呢?你要干嘛|^|say 内容|^|那个人机的梗玩过好几轮了 我这回不想接";
+        assert_eq!(guard_voice_reply(reply, "洛玖", TOOLS), None);
+
+        // 真实泄漏案例（2026-09-16 08:41:27）：工具名后面直接粘中文
+        assert_eq!(
+            guard_voice_reply(
+                "finish那个@的号不是我，神签的事跟我没关系，刚说过话就别急着插嘴了",
+                "洛玖",
+                TOOLS
+            ),
+            None
         );
     }
 }
