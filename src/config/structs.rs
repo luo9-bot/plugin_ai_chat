@@ -638,6 +638,13 @@ pub struct HumanityConfig {
     // 信息觅食：群消息全量入流，但"坐下来细看"是回神时她自己的动作
     #[serde(default = "default_true")]
     pub foraging_enabled: bool,
+
+    /// 开口门限：批次"开口势"低于它就不叫醒她（@/叫名字/危机不受此限）
+    ///
+    /// 默认值由 2026-09-16~18 的真实分数分布标定（见 mind/social.rs）。
+    /// 调高 → 更安静、更省调用；调低 → 更容易插话。
+    #[serde(default = "default_speak_gate")]
+    pub speak_gate: f32,
 }
 
 impl Default for HumanityConfig {
@@ -670,6 +677,7 @@ impl Default for HumanityConfig {
             flashback_impact_threshold: default_flashback_impact_threshold(),
             wish_enabled: true,
             foraging_enabled: true,
+            speak_gate: default_speak_gate(),
         }
     }
 }
@@ -980,6 +988,10 @@ fn default_forgetting_rate() -> f32 {
 }
 fn default_association_jump_probability() -> f32 {
     0.05
+}
+/// 开口门限默认值——与 `mind::social::DEFAULT_SPEAK_GATE` 同源
+fn default_speak_gate() -> f32 {
+    crate::mind::social::DEFAULT_SPEAK_GATE
 }
 fn default_inner_thought_interval_min() -> u64 {
     300

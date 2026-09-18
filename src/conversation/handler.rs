@@ -70,6 +70,11 @@ fn perceive_images(user_id: u64, message: &str) -> (Vec<String>, String) {
 }
 
 /// 把图片描述和文字组装成给她的感知内容
+///
+/// 图片描述来自 VLM，是对**不可信图片**的转述（表情包里可以写任何
+/// 字样），因此与网页搜索结果同级：拼进感知之前先过滤壳，命中即替换成
+/// 中性的 `[图片]` 并留一条安全日志。没有这道过滤，一张图片就能把指令
+/// 送进她的 prompt——`check_input` 只看文本消息，看不到图像描述。
 fn compose_perception(descriptions: &[String], text: &str) -> String {
     if descriptions.is_empty() {
         if text.is_empty() {
@@ -81,7 +86,14 @@ fn compose_perception(descriptions: &[String], text: &str) -> String {
         let img_ctx: Vec<String> = descriptions
             .iter()
             .enumerate()
-            .map(|(i, d)| format!("[图片{}: {}]", i + 1, d))
+            .map(|(i, d)| {
+                if crate::anti_injection::check_memory_entry(d).passed {
+                    format!("[图片{}: {}]", i + 1, d)
+                } else {
+                    crate::mind::security::log_event(0, "vision_perception", "rejected", d);
+                    format!("[图片{}]", i + 1)
+                }
+            })
             .collect();
         if text.is_empty() {
             img_ctx.join("\n")
@@ -289,7 +301,7 @@ pub fn process_message(user_id: u64, message: &str) {
 
 /// 私聊回复落地：发送 + 簿记
 fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
-    if !crate::sender::safe_send(0, user_id, reply) {
+    if !crate::sender::safe_send(0, user_id, reply, user_message) {
         return;
     }
     info!(user_id, reply, "voice: private reply sent");
@@ -319,7 +331,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
     let rep = reply.to_string();
     std::thread::spawn(move || {
         crate::personal_tasks::note_user_message(user_id, 0, &msg);
-        crate::personal_tasks::extract_from_conversation(user_id, 0, &msg, &rep);
+        crate::personal_tasks::extract_from_conversation(user_id, 0, &msg);
         crate::person_info::extract_facts_from_conversation(user_id, &msg, &rep);
         let history = read_shared_state(|s| s.get_history_clone(0, user_id));
         crate::memory::ai_extract(user_id, 0, &msg, &rep, &history);
@@ -329,8 +341,33 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
 
 // ── 群聊 ────────────────────────────────────────────────────────
 
+/// 一批待处理的群消息：某个用户在一个批次窗口里说的话
+///
+/// 结构化而不是元组：字段多了以后 `(u64, String, Vec<u64>, Vec<u64>)`
+/// 在调用点完全读不出含义，传参顺序写错编译器也帮不上忙。
+#[derive(Debug, Clone)]
+pub struct GroupBatch {
+    /// 群号（私聊为 0）
+    pub group_id: u64,
+    pub user_id: u64,
+    /// 消息本体与时间信息
+    pub taken: crate::state::TakenBatch,
+}
+
+impl GroupBatch {
+    /// 这批消息最早到达的时刻（秒）
+    pub fn first_arrival(&self) -> u64 {
+        self.taken.first_arrival()
+    }
+
+    /// 排序用的到达时刻（毫秒）
+    pub fn sort_key_ms(&self) -> u64 {
+        self.taken.sort_key_ms()
+    }
+}
+
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
-pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)]) {
+pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
     let self_qq = cfg.self_qq;
 
@@ -338,7 +375,10 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
     let mut forced_users: Vec<u64> = Vec::new();
     let mut crisis_utterances: Vec<GroupUtterance> = Vec::new();
 
-    for (user_id, messages, timestamps) in user_msgs {
+    for batch in user_msgs {
+        let user_id = &batch.user_id;
+        let messages = &batch.taken.messages;
+        let timestamps = &batch.taken.record_timestamps;
         let mut level = crate::emotion::get_state(*user_id).crisis_level;
         if !level.is_crisis()
             && crate::crisis::detect_crisis(messages).is_crisis()
@@ -353,32 +393,44 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
             crisis_utterances.push(GroupUtterance {
                 user_id: *user_id,
                 text: perceived,
-                ts: timestamps
-                    .first()
-                    .copied()
-                    .unwrap_or_else(crate::util::now_secs),
+                ts: batch.first_arrival(),
+                ts_ms: batch.sort_key_ms(),
             });
             forced_users.push(*user_id);
         }
     }
 
     if !crisis_utterances.is_empty() {
-        speak_and_deliver_group(group_id, &crisis_utterances, true, false, true);
+        // 危机路径必然回应，焦点只用来定"回给谁"
+        let crisis_focus = crate::conversation::turn::focus_batch(
+            &crisis_utterances,
+            self_qq,
+            &cfg.bot_name,
+            &|_| false,
+        );
+        speak_and_deliver_group(
+            group_id,
+            &crisis_utterances,
+            &crisis_focus,
+            true,
+            false,
+            true,
+        );
         return;
     }
 
     // ── 剩余消息 ──
-    let remaining: Vec<&(u64, String, Vec<u64>)> = user_msgs
+    let remaining: Vec<&GroupBatch> = user_msgs
         .iter()
-        .filter(|(uid, _, _)| !forced_users.contains(uid))
+        .filter(|batch| !forced_users.contains(&batch.user_id))
         .collect();
     if remaining.is_empty() {
         return;
     }
 
     // ── 配额记账 ──
-    for (uid, msg, _) in &remaining {
-        crate::quota::log_segment_message(group_id, *uid, msg);
+    for batch in &remaining {
+        crate::quota::log_segment_message(group_id, batch.user_id, &batch.taken.messages);
     }
 
     let at_pattern = if self_qq > 0 {
@@ -388,18 +440,20 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
     };
     let joined: String = remaining
         .iter()
-        .map(|(_, m, _)| m.as_str())
+        .map(|batch| batch.taken.messages.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let addressed =
-        !at_pattern.is_empty() && remaining.iter().any(|(_, m, _)| m.contains(&at_pattern));
+    let addressed = !at_pattern.is_empty()
+        && remaining
+            .iter()
+            .any(|batch| batch.taken.messages.contains(&at_pattern));
 
     // ── 配额门槛：有余量先说话后扣账；耗尽时只有高优先级（@/darling）能突破 ──
     let quota_available = crate::quota::has_quota(group_id);
     if !quota_available {
         let bypass = crate::quota::try_reply(
             group_id,
-            remaining[0].0,
+            remaining[0].user_id,
             &joined,
             &at_pattern,
             cfg.darling_qq,
@@ -410,28 +464,56 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
         }
     }
 
-    // ── 沉默冷却：她刚决定不说话，短期内不再权衡 ──
-    if !addressed && silence_cooling(group_id) {
+    // 沉默冷却的判定放在轮次焦点之后（见下）——被点名时冷却不能挡
+
+    let utterances: Vec<GroupUtterance> = remaining
+        .iter()
+        .map(|batch| GroupUtterance {
+            user_id: batch.user_id,
+            text: crate::conversation::turn::strip_cq_codes(&perceive_batch_message(
+                group_id,
+                batch.user_id,
+                &batch.taken.messages,
+                &batch.taken.record_timestamps,
+            )),
+            // 用真实到达时刻排序：工作记忆时间戳只有秒级精度，
+            // 同一秒内两个人的话谁先谁后会退化成哈希顺序
+            ts: batch.first_arrival(),
+            ts_ms: batch.sort_key_ms(),
+        })
+        .collect();
+
+    // 轮次焦点：这批消息在跟谁说话（确定性判定，只用 @ / 名字 / 跟进关系）。
+    // 回复目标由这里定，而不是"哪个用户的批次先到期"——批次是按
+    // (群, 用户) 切出来的，取 first() 会答错人（实测 15.1% 的回复对象
+    // 不是最后一位发文字的人）。
+    let focus =
+        crate::conversation::turn::focus_batch(&utterances, self_qq, &cfg.bot_name, &|uid| {
+            read_shared_state(|s| {
+                s.is_in_follow_up(group_id, uid, cfg.conversation.reply_follow_up_secs)
+            })
+        });
+
+    // 冷却是"这会儿不太想插话"，不是"听不见"：点名/叫名字必须能穿透
+    if silence_cooling(group_id) && !focus.is_called() && !addressed {
         debug!(group_id, "voice: silence cooldown, skipping");
         return;
     }
 
-    let utterances: Vec<GroupUtterance> = remaining
-        .iter()
-        .map(|(uid, msg, ts)| GroupUtterance {
-            user_id: *uid,
-            text: perceive_batch_message(group_id, *uid, msg, ts),
-            ts: ts.first().copied().unwrap_or_else(crate::util::now_secs),
-        })
-        .collect();
-
-    speak_and_deliver_group(group_id, &utterances, addressed, quota_available, false);
+    speak_and_deliver_group(
+        group_id,
+        &utterances,
+        &focus,
+        addressed,
+        quota_available,
+        false,
+    );
 
     // ── 表达学习：从群聊消息中学习语言风格（后台） ──
     if crate::learner::should_learn(group_id) {
         let learn_msgs: Vec<(u64, String)> = remaining
             .iter()
-            .map(|(uid, msg, _)| (*uid, msg.clone()))
+            .map(|batch| (batch.user_id, batch.taken.messages.clone()))
             .collect();
         std::thread::spawn(move || {
             crate::learner::learn_from_messages(group_id, &learn_msgs);
@@ -445,13 +527,14 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[(u64, String, Vec<u64>)])
 fn speak_and_deliver_group(
     group_id: u64,
     utterances: &[GroupUtterance],
+    focus: &crate::conversation::turn::TurnFocus,
     force_reply: bool,
     consume_quota_on_reply: bool,
     crisis: bool,
 ) {
     let cfg = config::get();
     let max_history = cfg.conversation.max_history;
-    let primary = utterances.first().map(|u| u.user_id).unwrap_or(0);
+    let primary = focus.primary;
 
     // 概率式中断记账：从这里到开口，期间新到的消息都可能让话题变掉
     crate::conversation::interruption::begin(group_id);
@@ -479,21 +562,39 @@ fn speak_and_deliver_group(
         return;
     }
 
-    // ── SpeakScore 门控：开口势低于阈值 → 这轮她没注意到（批次已照常入流，
-    //    下次回神翻流时依然看得见；@/危机等 forced 路径不会走到这里） ──
-    if !force_reply {
+    // ── SpeakScore 门控：只在"完全没被点到"时才用来省 API ──
+    //
+    // 被 @、被叫名字（`focus.is_called()`）与危机一样直接叫醒她：这类
+    // 消息必须由她自己决定说什么或不说，不能由一个分数替她拒绝。
+    //
+    // 实测标定：被拦样本最高分 0.2948，而门限是 0.30——裕度几乎为零。
+    // 分数被"刚说过话"的两个惩罚项主导，导致密集群里越是聊得热闹越
+    // 说不上话。现在被点名加成进入评分，门限下调到只挡真正的噪声。
+    if !force_reply && !focus.is_called() {
         let utterance_refs: Vec<(u64, &str)> = utterances
             .iter()
             .map(|u| (u.user_id, u.text.as_str()))
             .collect();
-        let score = crate::mind::social::speak_score(group_id, &utterance_refs, primary);
-        if score < crate::mind::social::SPEAK_GATE {
-            debug!(
-                group_id,
-                score,
-                gate = crate::mind::social::SPEAK_GATE,
-                "voice: speak score below gate, staying quiet"
-            );
+        let breakdown = crate::mind::social::speak_score(
+            group_id,
+            &utterance_refs,
+            primary,
+            focus.addressing_strength(),
+        );
+        let gate = crate::mind::social::speak_gate();
+        // 结构化单行：门限该定在哪，只能靠真实分布回答，不能靠猜。
+        // 这一行带全部评分分量，可直接从日志回放复算（方案 §4 要求）。
+        debug!(
+            group_id,
+            primary,
+            utterances = utterances.len(),
+            gate,
+            called = focus.is_called(),
+            result = if breakdown.total >= gate { "pass" } else { "silent" },
+            detail = %breakdown.log_line(),
+            "voice: gate decision"
+        );
+        if breakdown.total < gate {
             mark_silence(group_id);
             if cfg.humanity.social_battery_enabled {
                 let mut battery = crate::social_battery::load();
@@ -547,7 +648,7 @@ fn speak_and_deliver_group(
         crate::conversation::attention::save_attention(&attn);
     }
 
-    match voice::speak_group(group_id, utterances, force_reply) {
+    match voice::speak_group(group_id, utterances, focus, force_reply) {
         VoiceAction::Reply(reply) => {
             // 概率式中断：生成完、开口前的最后一刻，若处理期间涌进大量新消息，
             // 话题可能已经变了——把到嘴边的话咽回去，带着最新消息重新看一眼
@@ -596,8 +697,16 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
         info!(group_id, "dedup: 检测到重复回复，跳过发送");
         return;
     }
+    // 先登记再排队发送：发送现在是异步的（不阻塞决策线程），
+    // 若等到发完才登记，相邻两轮可能都通过去重检查、把同一句话发两遍。
+    crate::runtime::reply_dedup::record(group_id, reply);
 
-    if !crate::sender::safe_send(group_id, primary, reply) {
+    let incoming: String = utterances
+        .iter()
+        .map(|u| u.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !crate::sender::safe_send(group_id, primary, reply, &incoming) {
         return;
     }
     info!(
@@ -648,7 +757,6 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
     crate::mind::social::record_bot_speech(group_id, reply);
 
     crate::reply_effect::record_reply(group_id, primary, reply, archive_reply_id);
-    crate::runtime::reply_dedup::record(group_id, reply);
     crate::activity::check_bot_message(primary, reply);
 
     // 后处理任务不阻塞，逐用户放入后台线程
@@ -672,7 +780,7 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
     std::thread::spawn(move || {
         for (uid, msg) in batch {
             crate::personal_tasks::note_user_message(uid, gid, &msg);
-            crate::personal_tasks::extract_from_conversation(uid, gid, &msg, &rep);
+            crate::personal_tasks::extract_from_conversation(uid, gid, &msg);
             crate::person_info::extract_facts_from_conversation(uid, &msg, &rep);
             let history = read_shared_state(|s| s.get_history_clone(gid, uid));
             crate::memory::ai_extract(uid, gid, &msg, &rep, &history);

@@ -64,19 +64,35 @@ const INTENSITY_SPAWN: f32 = 0.3;
 /// 感官渲染的"活跃"阈值：全部线程低于此值视为无事发生
 const CONTEXT_MIN_INTENSITY: f32 = 0.15;
 
-// ── SpeakScore 权重（可调）──────────────────────────────────────
+// ── SpeakScore 权重 ─────────────────────────────────────────────
 
+/// 标定依据（2026-09-16~18 真实群聊回放）：旧权重下被门控拦下的 78 个
+/// 批次最高分只有 0.2948，而门限是 0.30——裕度几乎为零，沉默与否由
+/// 常量取整决定。根因是"刚说过话"的两个惩罚项（0.20 + 0.15）在密集群
+/// 里长期全额生效：越热闹越说不上话。
+///
+/// 现在把这两个惩罚减半、时间尺度拉开（社交风险 10 分钟；连续发言按
+/// 指数衰减而非布尔），并给"她在跟进一段对话"一个正项——被回应时说话
+/// 是自然的，不该只被惩罚。
 const W_TOPIC_RELEVANCE: f32 = 0.30;
 const W_ATTENTION_MAX: f32 = 0.20;
 const W_UNANSWERED: f32 = 0.15;
 const W_INTIMACY: f32 = 0.15;
 const W_FRESHNESS: f32 = 0.10;
+/// 被点名/被跟进：由轮次焦点给出，是"该她说话"最硬的信号
+const W_ADDRESSING: f32 = 0.25;
 const W_FATIGUE: f32 = 0.15;
-const W_SOCIAL_RISK: f32 = 0.20;
-const W_RECENT_REPLY: f32 = 0.15;
+const W_SOCIAL_RISK: f32 = 0.10;
+const W_RECENT_REPLY: f32 = 0.08;
 
-/// 低于此分不唤醒（她这轮没注意到）
-pub const SPEAK_GATE: f32 = 0.30;
+/// 门限默认值。刻意落在评分分布的低分位，而不是压在"最该说的话"上：
+/// 说不说最终由她自己在表达里决定，门控只用来挡明显不值得叫醒她的噪声。
+pub const DEFAULT_SPEAK_GATE: f32 = 0.18;
+
+/// 当前生效的开口门限（配置可覆盖默认值）
+pub fn speak_gate() -> f32 {
+    crate::config::get().humanity.speak_gate
+}
 
 /// 话题相关度的饱和分母：命中数达到它即记满分
 const RELEVANCE_SATURATION: f32 = 6.0;
@@ -84,8 +100,13 @@ const RELEVANCE_SATURATION: f32 = 6.0;
 const FRESH_WINDOW_SECS: u64 = 300;
 /// 社交风险窗口：她该时长内说过话，再插话有风险
 const SOCIAL_RISK_WINDOW_SECS: u64 = 600;
-/// 连续发言惩罚窗口
-const RECENT_REPLY_WINDOW_SECS: u64 = 180;
+/// 连续发言窗口与衰减时间常数
+///
+/// 旧实现只有一个布尔（180 秒内说过就扣满），"1 分钟前回过"与
+/// "2 分 59 秒前回过"惩罚完全相同，3 分钟一到又突然清零。
+/// 改成随时间连续衰减："刚回完"扣得多、"聊了一会儿"扣得少。
+const RECENT_REPLY_WINDOW_SECS: u64 = 600;
+const RECENT_REPLY_TAU_SECS: f32 = 180.0;
 /// 她发言后对方继续说话算"被回应"的窗口
 const ANSWERED_WINDOW_SECS: u64 = 300;
 /// PairBond 相邻一问一答的窗口
@@ -663,8 +684,12 @@ pub struct SpeakScoreInput<'a> {
     pub battery_ratio: f32,
     /// 她与主要发言人的亲密度（0~1）
     pub intimacy: f32,
+    /// 被点名/被跟进的强度（0.0 / 0.5 / 1.0），见 TurnFocus::addressing_strength
+    pub addressing: f32,
     /// 她 N 秒内是否在本群说过话（由 SharedState 提供）
     pub spoke_within: Box<dyn Fn(u64) -> bool + 'a>,
+    /// 她上次在本群说话距今多少秒（None = 从未或不可知）
+    pub secs_since_spoke: Box<dyn Fn() -> Option<u64> + 'a>,
 }
 
 // ── 感官注入 ───────────────────────────────────────────────────
@@ -928,8 +953,67 @@ pub fn context_block(group_id: u64) -> Option<String> {
     })
 }
 
-/// 门控打分（speak_and_deliver_group 调用；forced 路径不会进来）
-pub fn speak_score(group_id: u64, utterances: &[(u64, &str)], primary: u64) -> f32 {
+/// 一次门控打分的完整分解
+///
+/// 打分本身是个加权和，但只有总分对调参毫无用处：门限该定在哪、
+/// 哪个权重在真实群里长期压分，都必须看得见每一项。方案要求记录
+/// `score_before_gate / gate_reason / selected_thread`，这里把"分数
+/// 从哪来"一并留下——出问题时能直接回放复算，而不是猜。
+#[derive(Debug, Clone, Copy)]
+pub struct SpeakScoreBreakdown {
+    /// 最终总分（用于与门限比较）
+    pub total: f32,
+    /// 话题相关度（0~1）
+    pub topic_relevance: f32,
+    /// 在场注意力最大值（0~1）
+    pub attention_max: f32,
+    /// 有人在等她的提问（0 或 1）
+    pub unanswered_bonus: f32,
+    /// 最热线程是否新鲜（0 或 1）
+    pub thread_freshness: f32,
+    /// 被点名/被跟进强度（0 / 0.5 / 1）
+    pub addressing: f32,
+    /// 疲劳（1 - 电量比例）
+    pub fatigue: f32,
+    /// 社交风险：她近期说过话（0 或 1）
+    pub social_risk: f32,
+    /// 连续发言惩罚（指数衰减后）
+    pub recent_reply: f32,
+    /// 她上次开口距今秒数（None = 从未或不可知）
+    pub secs_since_spoke: Option<u64>,
+}
+
+impl SpeakScoreBreakdown {
+    /// 单行可解析形态，便于从日志回放标定门限
+    pub fn log_line(&self) -> String {
+        format!(
+            "total={:.4} relevance={:.3} attention={:.3} unanswered={:.0} fresh={:.0} addressing={:.2} fatigue={:.3} risk={:.0} recent={:.3} since_spoke={}",
+            self.total,
+            self.topic_relevance,
+            self.attention_max,
+            self.unanswered_bonus,
+            self.thread_freshness,
+            self.addressing,
+            self.fatigue,
+            self.social_risk,
+            self.recent_reply,
+            self.secs_since_spoke
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        )
+    }
+}
+
+/// 门控打分（`speak_and_deliver_group` 调用；被点名与危机路径不会进来）
+///
+/// `addressing` 来自 [`crate::conversation::turn::TurnFocus`]：1.0 = 有人
+/// 点名找她，0.5 = 她刚回过的人在继续，0.0 = 谁也没冲她说话。
+pub fn speak_score(
+    group_id: u64,
+    utterances: &[(u64, &str)],
+    primary: u64,
+    addressing: f32,
+) -> SpeakScoreBreakdown {
     let cfg = config::get();
     let battery_ratio = if cfg.humanity.social_battery_enabled {
         crate::social_battery::level_percentage(&crate::social_battery::load())
@@ -941,14 +1025,22 @@ pub fn speak_score(group_id: u64, utterances: &[(u64, &str)], primary: u64) -> f
         utterances,
         battery_ratio,
         intimacy,
+        addressing,
         spoke_within: Box::new(move |window| {
             crate::read_shared_state(|s| s.is_in_follow_up(group_id, 0, window))
+        }),
+        secs_since_spoke: Box::new(move || {
+            crate::read_shared_state(|s| s.last_reply_ago(group_id))
         }),
     };
     let (bot_name, self_qq) = (cfg.bot_name.clone(), cfg.self_qq);
     let now = util::now_secs();
+    let intimacy_component = W_INTIMACY * intimacy;
     with_state(group_id, |state| {
-        speak_score_with(state, now, &input, &bot_name, self_qq)
+        let mut breakdown = speak_score_breakdown(state, now, &input, &bot_name, self_qq);
+        // 亲密度不单独成项暴露（它是关系系统的输出），并入总分说明
+        breakdown.total += intimacy_component;
+        breakdown
     })
 }
 
@@ -1003,19 +1095,21 @@ pub fn purge_user(user_id: u64) {
 
 // speak_score_of 里 unanswered 判定需要 bot_name/self_qq：
 // 把它们并入打分上下文而不是塞进 Input（Input 只承载她的内在状态）
-/// 计算这批消息对她的"开口势"（speak_score ∈ 约 [-0.5, 1.0]）。
+/// 计算这批消息对她的"开口势"及其分解（speak_score ∈ 约 [-0.5, 1.0]）。
 ///
-/// 正项：话题相关、在场注意力、有人在等她、亲密度、线程正热。
+/// 正项：话题相关、在场注意力、有人在等她、线程正热、被点名/被跟进。
 /// 负项：疲惫、刚说过话（社交风险 / 连续发言）。
-/// unanswered 判定需要 bot_name/self_qq 环境值，故它们作独立参数传入，
-/// [`SpeakScoreInput`] 只承载她的内在状态。
-fn speak_score_with(
+///
+/// 亲密度项不在这里加：它由关系系统提供，调用点单独并入总分，
+/// 这样本函数只依赖 `SocialState` + `SpeakScoreInput`，仍然纯粹可测。
+/// unanswered 判定需要 bot_name/self_qq 环境值，故它们作独立参数传入。
+fn speak_score_breakdown(
     state: &SocialState,
     now: u64,
     input: &SpeakScoreInput,
     bot_name: &str,
     self_qq: u64,
-) -> f32 {
+) -> SpeakScoreBreakdown {
     let hottest = state
         .topics
         .iter()
@@ -1066,17 +1160,39 @@ fn speak_score_with(
         .unwrap_or(false) as i32 as f32;
 
     let fatigue = (1.0 - input.battery_ratio).clamp(0.0, 1.0);
+    // 社交风险仍是布尔式（10 分钟内说过话 = 有插话风险），
+    // 但连续发言改成随时间连续衰减：刚回完扣满，越久越轻。
     let social_risk = (input.spoke_within)(SOCIAL_RISK_WINDOW_SECS) as i32 as f32;
-    let recent_reply = (input.spoke_within)(RECENT_REPLY_WINDOW_SECS) as i32 as f32;
+    let secs_since_spoke = (input.secs_since_spoke)();
+    let recent_reply = match secs_since_spoke {
+        Some(secs) if secs <= RECENT_REPLY_WINDOW_SECS => {
+            (-(secs as f32) / RECENT_REPLY_TAU_SECS).exp()
+        }
+        _ => 0.0,
+    };
+    let addressing = input.addressing.clamp(0.0, 1.0);
 
-    W_TOPIC_RELEVANCE * topic_relevance
+    let total = W_TOPIC_RELEVANCE * topic_relevance
         + W_ATTENTION_MAX * attention_max
         + W_UNANSWERED * unanswered_bonus
-        + W_INTIMACY * input.intimacy
         + W_FRESHNESS * thread_freshness
+        + W_ADDRESSING * addressing
         - W_FATIGUE * fatigue
         - W_SOCIAL_RISK * social_risk
-        - W_RECENT_REPLY * recent_reply
+        - W_RECENT_REPLY * recent_reply;
+
+    SpeakScoreBreakdown {
+        total,
+        topic_relevance,
+        attention_max,
+        unanswered_bonus,
+        thread_freshness,
+        addressing,
+        fatigue,
+        social_risk,
+        recent_reply,
+        secs_since_spoke,
+    }
 }
 
 // ── 测试 ───────────────────────────────────────────────────────
@@ -1092,6 +1208,18 @@ mod tests {
             display_name: None,
             is_follow_up: Box::new(|_, _| false),
         }
+    }
+
+    /// 测试用的完整总分：分解 + 亲密度项（与生产 `speak_score` 同口径）
+    fn score_of(
+        state: &SocialState,
+        now: u64,
+        input: &SpeakScoreInput,
+        bot_name: &str,
+        self_qq: u64,
+    ) -> f32 {
+        speak_score_breakdown(state, now, input, bot_name, self_qq).total
+            + W_INTIMACY * input.intimacy
     }
 
     #[test]
@@ -1304,22 +1432,179 @@ mod tests {
         let c = ctx();
         observe_event(&mut s, &c, 100, "[CQ:at,qq=999] 你到底玩不玩", 1_000);
 
+        // spoke = 她刚刚说过话（连续发言惩罚拉满）
         let input = |spoke: bool| SpeakScoreInput {
             utterances: &[(100, "随便说点什么")],
             battery_ratio: 1.0,
             intimacy: 0.0,
+            addressing: 0.0,
             spoke_within: Box::new(move |_| spoke),
+            secs_since_spoke: Box::new(move || spoke.then_some(0)),
         };
-        let waiting = speak_score_with(&s, 1_100, &input(false), "洛玖", 999);
+        let waiting = score_of(&s, 1_100, &input(false), "洛玖", 999);
         assert!(
             waiting >= W_UNANSWERED - 1e-6,
             "在等她的提问应抬分：{waiting}"
         );
 
-        let penalized = speak_score_with(&s, 1_100, &input(true), "洛玖", 999);
+        let penalized = score_of(&s, 1_100, &input(true), "洛玖", 999);
         assert!(
             penalized < waiting - W_SOCIAL_RISK - W_RECENT_REPLY + 1e-6,
             "刚说过话应明显压分：{penalized} vs {waiting}"
+        );
+    }
+
+    #[test]
+    fn recent_reply_penalty_decays_continuously() {
+        // 旧实现只有布尔：180 秒内扣满、之后突然清零。现在应当连续衰减，
+        // 使得"刚回完"与"聊了三分钟"得到不同的分数。
+        let s = SocialState::default();
+        let at = |secs: u64| SpeakScoreInput {
+            utterances: &[(100, "在吗")],
+            battery_ratio: 1.0,
+            intimacy: 0.5,
+            addressing: 0.0,
+            spoke_within: Box::new(|_| true),
+            secs_since_spoke: Box::new(move || Some(secs)),
+        };
+        let just_now = score_of(&s, 1_100, &at(0), "洛玖", 999);
+        let a_while = score_of(&s, 1_100, &at(300), "洛玖", 999);
+        assert!(
+            a_while > just_now,
+            "越久没说话惩罚越轻：{a_while} vs {just_now}"
+        );
+    }
+
+    #[test]
+    fn addressing_raises_the_score() {
+        let s = SocialState::default();
+        let with = |addressing: f32| SpeakScoreInput {
+            utterances: &[(100, "在吗")],
+            battery_ratio: 1.0,
+            intimacy: 0.5,
+            addressing,
+            spoke_within: Box::new(|_| false),
+            secs_since_spoke: Box::new(|| None),
+        };
+        let called = score_of(&s, 1_100, &with(1.0), "洛玖", 999);
+        let ignored = score_of(&s, 1_100, &with(0.0), "洛玖", 999);
+        assert!(
+            (called - ignored - W_ADDRESSING).abs() < 1e-6,
+            "被点名应精确抬升 W_ADDRESSING：{called} vs {ignored}"
+        );
+    }
+
+    /// 门限回归：标定前门限 0.30 距最高被拦分只差 0.005，
+    /// 密集群里"刚说过话"的两个惩罚长期全额生效，越热闹越说不上话。
+    /// 这组用例把标定结论钉住——不是"应该差不多"，是"必须过线"。
+    #[test]
+    fn calibrated_gate_does_not_starve_a_live_conversation() {
+        let now = 1_000_000;
+        let mut s = SocialState::default();
+        let c = ctx();
+        // 一条活跃线程，参与者刚说过话（注意力高），她自己在等一个提问
+        observe_event(&mut s, &c, 100, "洛玖 你觉得今晚吃火锅还是烧烤", now - 60);
+        observe_event(&mut s, &c, 200, "我也想知道", now - 30);
+        // 参与者注意力已累积
+        for uid in [100u64, 200] {
+            if let Some(p) = s.participants.get_mut(&uid) {
+                p.attention = 0.85;
+            }
+        }
+
+        // 最不利情形：她 5 分钟前刚说过话（社交风险 + 连续发言都在罚），
+        // 电量也只剩六成。这仍然是她该接的话。
+        let input = SpeakScoreInput {
+            utterances: &[(100, "洛玖 你觉得今晚吃火锅还是烧烤")],
+            battery_ratio: 0.6,
+            intimacy: 1.0,
+            addressing: 1.0,
+            spoke_within: Box::new(|_| true),
+            secs_since_spoke: Box::new(|| Some(300)),
+        };
+        let breakdown = speak_score_breakdown(&s, now, &input, "洛玖", 999);
+        let total = breakdown.total + W_INTIMACY * input.intimacy;
+        // 不只"过线"，还要有裕度：门限 0.30 时代最该说的话只有 0.005 裕度，
+        // 沉默与否由常量取整决定。这里要求至少 0.10 裕度，
+        // 门限若被调回 0.30 以上（或惩罚项被调回旧值）就会失败。
+        assert!(
+            total >= DEFAULT_SPEAK_GATE + 0.10,
+            "有人点名、线程正热时不该被门控拦下：{total} 裕度不足（{}）",
+            breakdown.log_line()
+        );
+    }
+
+    #[test]
+    fn gate_still_filters_pure_noise() {
+        // 另一个极端：没有任何线程、没有相关度、没有注意力，
+        // 只有她自己的疲劳与刚说过话——这一批不值得叫醒她。
+        let state = SocialState::default();
+        let input = SpeakScoreInput {
+            utterances: &[(100, "[图片]")],
+            battery_ratio: 0.3,
+            intimacy: 0.0,
+            addressing: 0.0,
+            spoke_within: Box::new(|_| true),
+            secs_since_spoke: Box::new(|| Some(0)),
+        };
+        let total = speak_score_breakdown(&state, 1_000_000, &input, "洛玖", 999).total;
+        assert!(
+            total < DEFAULT_SPEAK_GATE,
+            "无话题无相关的噪声不该通过门控：{total}"
+        );
+    }
+
+    /// 标定必须在"接得上的话"和"该挡的噪声"之间同时成立，用真实被拦分数回放验证。
+    ///
+    /// 2026-09-16~18 日志记录了被旧门限（0.30）拦下的分数，最高 0.2948——
+    /// 距离门限只差 0.005，那 9% 的沉默完全由常量取整决定。
+    ///
+    /// 新标定把两个"刚说过话"的惩罚从 0.20+0.15 减到 0.10+0.08，并让连续
+    /// 发言项指数衰减、门限降到 0.18。两项惩罚都只可能**抬分**，且抬升
+    /// 有上界（旧值减新值 = 0.17）。于是有一个可验证的界：
+    /// - 任何正分的被拦批次抬升后必然过 0.18（旧门限想接却接不上的话，新门限接得上）
+    /// - 任何负分的被拦批次抬升后仍在门限之下（噪声过滤没有被削弱）
+    ///
+    /// 注意这是**上界推理**，不是逐条重算：日志只记录了最终总分，没有
+    /// 记录各分量，无法真的逐条复算。部署后的 `voice: gate decision`
+    /// 会带上全部分量，那时才能做真正的回放标定。
+    #[test]
+    fn recalibration_bounds_hold_on_recorded_blocked_scores() {
+        const OLD_GATE: f32 = 0.30;
+        // 抬升上界：两项惩罚都曾全额生效、都减半
+        const MAX_UPLIFT: f32 = (0.20 + 0.15) - (0.10 + 0.08);
+        // 真实被拦分数分布（含最高分 0.2948 与全部负分样本）
+        const RECORDED_BLOCKED: &[f32] = &[
+            -0.1305, -0.1192, 0.0204, 0.0247, 0.0266, 0.0412, 0.0616, 0.0681, 0.0699, 0.0887,
+            0.0905, 0.1000, 0.1164, 0.1180, 0.1586, 0.1792, 0.1798, 0.2012, 0.2056, 0.2128, 0.2129,
+            0.2149, 0.2187, 0.2277, 0.2511, 0.2681, 0.2853, 0.2869, 0.2937, 0.2948,
+        ];
+
+        let positives = RECORDED_BLOCKED.iter().filter(|&&s| s > 0.0).count();
+        let negatives = RECORDED_BLOCKED.iter().filter(|&&s| s < 0.0).count();
+        let rescued = RECORDED_BLOCKED
+            .iter()
+            .filter(|&&s| s > 0.0 && s + MAX_UPLIFT > DEFAULT_SPEAK_GATE)
+            .count();
+        let still_noise = RECORDED_BLOCKED
+            .iter()
+            .filter(|&&s| s < 0.0 && s + MAX_UPLIFT < DEFAULT_SPEAK_GATE)
+            .count();
+
+        assert_eq!(
+            rescued, positives,
+            "所有正分被拦批次抬升后都应过线（{rescued}/{positives}）"
+        );
+        assert_eq!(
+            still_noise, negatives,
+            "负分批次仍应低于门限，噪声过滤未被削弱"
+        );
+
+        let worst = RECORDED_BLOCKED.iter().copied().fold(f32::MIN, f32::max);
+        assert!(worst < OLD_GATE, "样本本身确实是旧门限拦下的：{worst}");
+        assert!(
+            worst + MAX_UPLIFT >= DEFAULT_SPEAK_GATE + 0.10,
+            "最该接的那一批现在应当有充足裕度：{worst}"
         );
     }
 
