@@ -14,6 +14,8 @@ pub(super) static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// 配置解析错误信息，为空表示正常
 pub(super) static CONFIG_ERROR: RwLock<String> = RwLock::new(String::new());
 
+/// 把相对路径解析成绝对路径（只有生产数据目录需要：测试用临时目录）
+#[cfg(not(test))]
 fn to_absolute(p: &PathBuf) -> PathBuf {
     if p.is_absolute() {
         p.clone()
@@ -40,8 +42,29 @@ pub(super) const DEFAULT_PROMPT_TXT: &str = r#"# 人设
 
 // ── 初始化 ──────────────────────────────────────────────────────
 
+/// 这个构建用哪个数据目录
+///
+/// 测试构建落在**进程独占的临时目录**里，而不是真实的
+/// `data/plugin_ai_chat/`：`init()` 会写 `config.yaml`，测试还散布着
+/// `daily_plan.json`、`push_history.json`、`event_log.db` 等文件。落在真实
+/// 目录里意味着跑一次 `cargo test` 就可能覆盖用户正在用的配置，而且上一次
+/// 测试留下的状态会参与下一次（代码里记为"约每十几次一次"的偶发红灯）。
+///
+/// 生产构建仍然用真实目录：`data_dir()` 是启动契约，不能猜。
+#[cfg(test)]
+fn default_data_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("plugin_ai_chat_test")
+        .join(format!("pid{}", std::process::id()))
+}
+
+#[cfg(not(test))]
+fn default_data_path() -> PathBuf {
+    to_absolute(&PathBuf::from("data").join("plugin_ai_chat"))
+}
+
 pub fn init() {
-    let data_path = to_absolute(&PathBuf::from("data").join("plugin_ai_chat"));
+    let data_path = default_data_path();
     fs::create_dir_all(&data_path).ok();
     fs::create_dir_all(data_path.join("prompts")).ok();
     let _ = DATA_DIR.set(data_path.clone());
