@@ -3,7 +3,7 @@
 use std::ffi::CString;
 
 /// 解析管理员命令的 QQ 号参数
-pub fn parse_uid_arg(msg: &str, prefix: &str) -> Option<Result<u64, String>> {
+pub(crate) fn parse_uid_arg(msg: &str, prefix: &str) -> Option<Result<u64, String>> {
     let rest = msg.strip_prefix(prefix)?;
     match rest.trim().parse::<u64>() {
         Ok(uid) => Some(Ok(uid)),
@@ -19,7 +19,7 @@ pub fn parse_uid_arg(msg: &str, prefix: &str) -> Option<Result<u64, String>> {
 ///
 /// 返回 `CString` 而不是 `Result`：调用方没有"处理发送失败"的余地，
 /// 而这里已经保证不会失败。
-pub fn to_c_string(text: impl AsRef<str>) -> CString {
+pub(crate) fn to_c_string(text: impl AsRef<str>) -> CString {
     let text = text.as_ref();
     match CString::new(text) {
         Ok(message) => message,
@@ -46,7 +46,7 @@ pub fn to_c_string(text: impl AsRef<str>) -> CString {
 /// 放在 `util` 而不是 `conversation`：它是纯字符串函数，而检索层也需要它
 /// （查询向量的缓存键必须先去掉 CQ 噪声，否则同一条消息的两种形态
 /// 会各占一个缓存项）。
-pub fn strip_cq_codes(text: &str) -> String {
+pub(crate) fn strip_cq_codes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("[CQ:") {
@@ -66,7 +66,7 @@ pub fn strip_cq_codes(text: &str) -> String {
 ///
 /// 目的：同一件事的不同写法应当命中同一个缓存项——去掉 CQ 码、折叠空白、
 /// 转小写。它只用于缓存键，**不能**用于真正参与匹配的文本（那会改变语义）。
-pub fn normalize_cache_key(text: &str) -> String {
+pub(crate) fn normalize_cache_key(text: &str) -> String {
     strip_cq_codes(text)
         .split_whitespace()
         .collect::<Vec<_>>()

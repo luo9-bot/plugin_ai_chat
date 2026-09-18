@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use super::fusion::RetrievalResult;
 
 /// 后置图门控配置
-pub struct PosteriorGraphConfig {
+pub(crate) struct PosteriorGraphConfig {
     pub enabled: bool,
     /// 丢弃比例（丢弃分数最低的多少结果）
     pub drop_ratio: f64,
@@ -36,7 +36,7 @@ impl Default for PosteriorGraphConfig {
 }
 
 /// 应用后置图门控
-pub fn apply_posterior_graph_gate(
+pub(crate) fn apply_posterior_graph_gate(
     results: &mut Vec<RetrievalResult>,
     config: &PosteriorGraphConfig,
 ) {

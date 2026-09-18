@@ -101,7 +101,7 @@ fn is_contradictory(user_id: u64, content: &str) -> bool {
 }
 
 /// AI 驱动的记忆提取（MaiBot 风格）
-pub fn ai_extract(
+pub(crate) fn ai_extract(
     user_id: u64,
     group_id: u64,
     user_message: &str,

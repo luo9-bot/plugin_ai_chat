@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 /// 一个评测用例
-pub struct EvalCase {
+pub(crate) struct EvalCase {
     pub query: String,
     /// 该查询下真正相关的记忆 id
     pub relevant: Vec<String>,
@@ -23,7 +23,7 @@ pub struct EvalCase {
 
 /// 检索质量指标
 #[derive(Debug, Clone, PartialEq)]
-pub struct RecallMetrics {
+pub(crate) struct RecallMetrics {
     /// 前 k 条里命中了多少比例的相关项（对每个查询取平均）
     pub recall_at_k: f64,
     /// 第一个相关项排名的倒数（对每个查询取平均）
@@ -32,7 +32,7 @@ pub struct RecallMetrics {
 }
 
 impl RecallMetrics {
-    pub fn describe(&self, k: usize) -> String {
+    pub(crate) fn describe(&self, k: usize) -> String {
         format!(
             "recall@{k}={:.3} mrr={:.3} ndcg@{k}={:.3}",
             self.recall_at_k, self.mrr, self.ndcg_at_k
@@ -43,7 +43,7 @@ impl RecallMetrics {
 /// 对一批用例求指标
 ///
 /// `retrieve` 返回**按相关性降序**的 id 列表（就是检索管线的输出顺序）。
-pub fn evaluate(
+pub(crate) fn evaluate(
     cases: &[EvalCase],
     k: usize,
     retrieve: impl Fn(&str) -> Vec<String>,

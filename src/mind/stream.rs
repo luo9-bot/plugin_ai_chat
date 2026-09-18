@@ -18,13 +18,13 @@ use crate::config;
 use crate::util;
 
 /// 天文件的保留天数：72 小时后消亡
-pub const KEEP_DAYS: u64 = 3;
+pub(crate) const KEEP_DAYS: u64 = 3;
 
 // ── 事件模型 ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StreamKind {
+pub(crate) enum StreamKind {
     Sensation,
     Inner,
     Acted,
@@ -33,14 +33,14 @@ pub enum StreamKind {
 
 /// 身体信号：数值存在，解释不存在（由她诠释）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BodySignal {
+pub(crate) struct BodySignal {
     pub name: String,
     /// 0.0 ~ 1.0
     pub level: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StreamEvent {
+pub(crate) struct StreamEvent {
     pub kind: StreamKind,
     /// 第一人称内容。Sensation 必须是转述；Inner 必须是她自己的话
     pub content: String,
@@ -53,7 +53,7 @@ pub struct StreamEvent {
 }
 
 impl StreamEvent {
-    pub fn new(kind: StreamKind, content: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: StreamKind, content: impl Into<String>) -> Self {
         StreamEvent {
             kind,
             content: content.into(),
@@ -63,7 +63,7 @@ impl StreamEvent {
         }
     }
 
-    pub fn with_about(mut self, user_id: u64) -> Self {
+    pub(crate) fn with_about(mut self, user_id: u64) -> Self {
         self.about = Some(user_id);
         self
     }
@@ -76,22 +76,22 @@ impl StreamEvent {
 /// # 纪律
 /// 只允许回神路径（`mind::wake`）调用——她的内心只能由她此刻写出。
 /// 任何模板、任何定时器、任何"体验发射器"都不得调用本函数。
-pub fn push_inner(content: impl Into<String>) {
+pub(crate) fn push_inner(content: impl Into<String>) {
     push(StreamEvent::new(StreamKind::Inner, content));
 }
 
 /// 写入一次她的行动（说出口的话、发表情包、一次被记录的沉默）
-pub fn push_acted(content: impl Into<String>) {
+pub(crate) fn push_acted(content: impl Into<String>) {
     push(StreamEvent::new(StreamKind::Acted, content));
 }
 
 /// 写入一条睡前整理的沉淀摘要
-pub fn push_digested(summary: impl Into<String>) {
+pub(crate) fn push_digested(summary: impl Into<String>) {
     push(StreamEvent::new(StreamKind::Digested, summary));
 }
 
 /// 追加一条事件到对应日期的 jsonl（append-only）
-pub fn push(event: StreamEvent) {
+pub(crate) fn push(event: StreamEvent) {
     let path = day_file(event.time);
     let line = match serde_json::to_string(&event) {
         Ok(json) => json,
@@ -129,7 +129,7 @@ fn read_day(secs: u64) -> Vec<StreamEvent> {
 }
 
 /// 读取指定日期（"YYYY-MM-DD"）的全部事件（admin API 用）
-pub fn events_on_date(date: &str) -> Vec<StreamEvent> {
+pub(crate) fn events_on_date(date: &str) -> Vec<StreamEvent> {
     let path = stream_dir().join(format!("{date}.jsonl"));
     let Ok(content) = fs::read_to_string(&path) else {
         return Vec::new();
@@ -148,7 +148,7 @@ pub fn events_on_date(date: &str) -> Vec<StreamEvent> {
 }
 
 /// 列出意识流目录下已有的日期（旧在前，admin API 用）
-pub fn known_dates() -> Vec<String> {
+pub(crate) fn known_dates() -> Vec<String> {
     let Ok(entries) = fs::read_dir(stream_dir()) else {
         return Vec::new();
     };
@@ -165,7 +165,7 @@ pub fn known_dates() -> Vec<String> {
 }
 
 /// 最近一段时间窗口内的事件（自动跨午夜读取昨天与今天，旧在上）
-pub fn recent(window_secs: u64, max: usize) -> Vec<StreamEvent> {
+pub(crate) fn recent(window_secs: u64, max: usize) -> Vec<StreamEvent> {
     let now = util::now_secs();
     let window_start = now.saturating_sub(window_secs);
 
@@ -187,7 +187,7 @@ pub fn recent(window_secs: u64, max: usize) -> Vec<StreamEvent> {
 }
 
 /// 最近事件的文本形态（"[HH:MM] 内容"，旧在上），供回神感官包直接使用
-pub fn recent_text(window_secs: u64, max: usize) -> String {
+pub(crate) fn recent_text(window_secs: u64, max: usize) -> String {
     recent(window_secs, max)
         .iter()
         .map(|e| format!("[{}] {}", util::hh_mm(e.time), e.content))
@@ -198,7 +198,7 @@ pub fn recent_text(window_secs: u64, max: usize) -> String {
 // ── 清理 ────────────────────────────────────────────────────────
 
 /// 删除超过保留期的天文件
-pub fn cleanup(keep_days: u64) {
+pub(crate) fn cleanup(keep_days: u64) {
     let dir = stream_dir();
     let Ok(entries) = fs::read_dir(&dir) else {
         return;

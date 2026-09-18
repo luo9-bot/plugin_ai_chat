@@ -63,7 +63,7 @@ fn default_data_path() -> PathBuf {
     to_absolute(&PathBuf::from("data").join("plugin_ai_chat"))
 }
 
-pub fn init() {
+pub(crate) fn init() {
     let data_path = default_data_path();
     fs::create_dir_all(&data_path).ok();
     fs::create_dir_all(data_path.join("prompts")).ok();

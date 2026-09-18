@@ -22,7 +22,7 @@ use super::vector::VectorResult;
 
 /// 融合后的检索结果
 #[derive(Debug, Clone)]
-pub struct RetrievalResult {
+pub(crate) struct RetrievalResult {
     pub id: String,
     pub content: String,
     /// 归一化到 [0,1] 的相关性：1.0 = 两条路都排第一

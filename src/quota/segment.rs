@@ -6,7 +6,7 @@ use tracing::debug;
 // ── 核心 API ────────────────────────────────────────────────
 
 /// 检查当前配额段是否还有余量（不扣减）
-pub fn has_quota(group_id: u64) -> bool {
+pub(crate) fn has_quota(group_id: u64) -> bool {
     if !config::get().quota.enabled {
         return true;
     }
@@ -41,7 +41,7 @@ fn resolve_max_replies() -> Option<u32> {
 ///
 /// 检查与扣减在状态库里是一个事务：否则两个线程同时看到"还剩一个名额"
 /// 会都放行（原先靠进程内锁保证，迁到库之后必须靠事务）。
-pub fn check_and_consume(group_id: u64) -> bool {
+pub(crate) fn check_and_consume(group_id: u64) -> bool {
     if !config::get().quota.enabled {
         return true;
     }
@@ -60,7 +60,7 @@ pub fn check_and_consume(group_id: u64) -> bool {
 
 // ── 段日志记录 ────────────────────────────────────────────────
 
-pub fn log_segment_message(group_id: u64, user_id: u64, message: &str) {
+pub(crate) fn log_segment_message(group_id: u64, user_id: u64, message: &str) {
     let segment_start = current_segment_start();
     if let Err(error) = crate::db::db().quota_log_message(
         group_id,

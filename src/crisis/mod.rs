@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 /// 危机等级
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd, Default)]
-pub enum CrisisLevel {
+pub(crate) enum CrisisLevel {
     #[default]
     None,
     Mild,
@@ -19,7 +19,7 @@ pub enum CrisisLevel {
 }
 
 impl CrisisLevel {
-    pub fn is_crisis(&self) -> bool {
+    pub(crate) fn is_crisis(&self) -> bool {
         *self >= CrisisLevel::Mild
     }
 }
@@ -38,7 +38,7 @@ const MILD_CLEAN_MSG: u32 = 3;
 ///
 /// 关键词只作为候选信号，是否真正触发由 AI 判断。
 /// 返回的等级表示"疑似"，`update_crisis` 中会结合 AI 评估做最终决定。
-pub fn detect_crisis(message: &str) -> CrisisLevel {
+pub(crate) fn detect_crisis(message: &str) -> CrisisLevel {
     let severe: &[&str] = &[
         "自杀",
         "自残",
@@ -92,7 +92,7 @@ pub fn detect_crisis(message: &str) -> CrisisLevel {
 ///
 /// 关键词匹配后调用此函数，让 AI 判断是否为真正的危机信号。
 /// 返回 `(等级, 置信度)`，置信度 ≥ 0.6 才触发干预。
-pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
+pub(crate) fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
     let prompt = crate::prompt::PromptManager::get().raw("crisis_ai_detect");
     let result = crate::ai::analyze(prompt, message);
     match result {
@@ -143,7 +143,7 @@ pub fn detect_crisis_ai(message: &str) -> Option<CrisisLevel> {
 /// 2. AI 判断 → 按置信度决定是否升级
 /// 3. AI 不可用时（API 失败）→ 降级到关键词判断，但 Mild 不触发干预
 /// 4. 无频率限制——对每个消息独立判断，不因历史触发而忽略
-pub fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
+pub(crate) fn update_crisis(user_id: u64, level: CrisisLevel) -> bool {
     let mut state = crate::emotion::get_state(user_id);
     let now = crate::util::now_secs();
 

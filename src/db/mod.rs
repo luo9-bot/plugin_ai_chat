@@ -21,7 +21,7 @@ use crate::util::MutexExt;
 
 /// 状态行的作用域
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
+pub(crate) enum Scope {
     /// 私聊：`id` 是 user_id
     Private,
     /// 群聊：`id` 是 group_id
@@ -29,7 +29,7 @@ pub enum Scope {
 }
 
 impl Scope {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Scope::Private => "private",
             Scope::Group => "group",
@@ -60,7 +60,7 @@ impl Actor {
 
 /// 存储层错误
 #[derive(Debug)]
-pub enum DbError {
+pub(crate) enum DbError {
     /// 打不开库（路径、权限、磁盘）
     Open(String),
     /// SQL 执行失败
@@ -84,7 +84,7 @@ impl From<rusqlite::Error> for DbError {
 
 /// 一条后台操作审计
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuditEntry {
+pub(crate) struct AuditEntry {
     pub actor: String,
     pub command: String,
     pub detail: String,
@@ -104,7 +104,7 @@ static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 
 /// 一条工作记忆
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkingMemoryRow {
+pub(crate) struct WorkingMemoryRow {
     /// 稳定身份：取代了以前"用写入时间戳认条目"的做法
     pub id: i64,
     pub user_id: u64,
@@ -115,7 +115,7 @@ pub struct WorkingMemoryRow {
 
 /// 按群内下标删除的结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeleteAtOutcome {
+pub(crate) enum DeleteAtOutcome {
     Removed,
     /// 该群没有这一条（下标越界）
     OutOfRange,
@@ -161,7 +161,7 @@ fn insert_working_memory(
 /// [`SingletonState::table`] 一处出现（因此拼进 SQL 的是固定字面量，
 /// 不存在注入面）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SingletonState {
+pub(crate) enum SingletonState {
     /// 认知偏差（`memory::cognitive_biases`）
     CognitiveBiases,
     /// 注意力模型（`conversation::attention`）
@@ -182,7 +182,7 @@ impl SingletonState {
 /// 与 [`SingletonState`] 的区别是基数：这里是每人一行，因此读写都是
 /// 主键操作，而不是"读整份 / 写整份"。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PerUserState {
+pub(crate) enum PerUserState {
     /// 人物档案（`person_info`）
     Person,
     /// 关系（`person_info::relationship`）
@@ -200,7 +200,7 @@ impl PerUserState {
 
 /// 一条配额段内消息
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuotaMessage {
+pub(crate) struct QuotaMessage {
     pub segment_start: u64,
     pub user_id: u64,
     pub message: String,
@@ -209,7 +209,7 @@ pub struct QuotaMessage {
 
 /// 影子观测的一个形态
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnShadowStat {
+pub(crate) struct TurnShadowStat {
     pub shape: String,
     pub total: u64,
     /// 其中在严格 Turn 契约下会被判为不合法的次数
@@ -218,7 +218,7 @@ pub struct TurnShadowStat {
 
 /// 一次模型调用的用量
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiUsage {
+pub(crate) struct ApiUsage {
     pub ts: i64,
     pub model: String,
     pub prompt_name: String,
@@ -231,7 +231,7 @@ pub struct ApiUsage {
 
 /// 终身累计（不受明细裁剪影响）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ApiUsageTotals {
+pub(crate) struct ApiUsageTotals {
     pub calls: u64,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
@@ -241,7 +241,7 @@ pub struct ApiUsageTotals {
 
 /// 按 prompt 分组的终身累计
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiUsageByPrompt {
+pub(crate) struct ApiUsageByPrompt {
     pub prompt_name: String,
     pub calls: u64,
     pub prompt_tokens: u64,
@@ -266,13 +266,13 @@ fn read_working_memory_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkingM
 }
 
 /// 状态库句柄：进程内唯一的写连接
-pub struct Db {
+pub(crate) struct Db {
     conn: Mutex<Connection>,
 }
 
 impl Db {
     /// 打开（或创建）状态库
-    pub fn open(path: &Path) -> Result<Self, DbError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, DbError> {
         if let Some(parent) = path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
@@ -283,7 +283,7 @@ impl Db {
     }
 
     /// 内存库（测试用）：schema 与生产完全一致，避免测试与线上分叉
-    pub fn open_in_memory() -> Result<Self, DbError> {
+    pub(crate) fn open_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory().map_err(|e| DbError::Open(e.to_string()))?;
         Self::prepare(conn)
     }
@@ -317,7 +317,12 @@ impl Db {
     // ── 激活状态 ────────────────────────────────────────────────
 
     /// 开启/关闭一个会话；返回状态是否真的变化
-    pub fn set_activation(&self, scope: Scope, id: u64, enabled: bool) -> Result<bool, DbError> {
+    pub(crate) fn set_activation(
+        &self,
+        scope: Scope,
+        id: u64,
+        enabled: bool,
+    ) -> Result<bool, DbError> {
         self.with_conn(|conn| {
             if enabled {
                 let changed = conn.execute(
@@ -335,7 +340,7 @@ impl Db {
         })
     }
 
-    pub fn activations(&self, scope: Scope) -> Result<Vec<u64>, DbError> {
+    pub(crate) fn activations(&self, scope: Scope) -> Result<Vec<u64>, DbError> {
         self.with_conn(|conn| {
             let mut statement =
                 conn.prepare("SELECT id FROM activation WHERE scope = ?1 ORDER BY enabled_at, id")?;
@@ -351,7 +356,7 @@ impl Db {
     // ── 黑名单 ──────────────────────────────────────────────────
 
     /// 拉黑；重复拉黑不覆盖原有原因与时间
-    pub fn add_blocked(&self, user_id: u64, reason: &str) -> Result<bool, DbError> {
+    pub(crate) fn add_blocked(&self, user_id: u64, reason: &str) -> Result<bool, DbError> {
         self.with_conn(|conn| {
             let changed = conn.execute(
                 "INSERT OR IGNORE INTO blocklist (user_id, reason, created_at) VALUES (?1, ?2, ?3)",
@@ -361,7 +366,7 @@ impl Db {
         })
     }
 
-    pub fn remove_blocked(&self, user_id: u64) -> Result<bool, DbError> {
+    pub(crate) fn remove_blocked(&self, user_id: u64) -> Result<bool, DbError> {
         self.with_conn(|conn| {
             let changed = conn.execute(
                 "DELETE FROM blocklist WHERE user_id = ?1",
@@ -371,7 +376,7 @@ impl Db {
         })
     }
 
-    pub fn blocked_users(&self) -> Result<Vec<u64>, DbError> {
+    pub(crate) fn blocked_users(&self) -> Result<Vec<u64>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare("SELECT user_id FROM blocklist ORDER BY user_id")?;
             let rows = statement.query_map([], |row| row.get(0))?;
@@ -383,7 +388,7 @@ impl Db {
         })
     }
 
-    pub fn blocked_count(&self) -> Result<usize, DbError> {
+    pub(crate) fn blocked_count(&self) -> Result<usize, DbError> {
         self.with_conn(|conn| {
             let count: i64 =
                 conn.query_row("SELECT COUNT(*) FROM blocklist", [], |row| row.get(0))?;
@@ -396,7 +401,7 @@ impl Db {
     /// 读一个用户的情绪状态原始 JSON；没有记录时返回 `None`
     ///
     /// 主键查询：这一步取代了"为了一个用户解析整份 `emotion.json`"。
-    pub fn emotion_state(&self, user_id: u64) -> Result<Option<String>, DbError> {
+    pub(crate) fn emotion_state(&self, user_id: u64) -> Result<Option<String>, DbError> {
         self.with_conn(|conn| {
             let found = conn
                 .query_row(
@@ -410,7 +415,7 @@ impl Db {
     }
 
     /// 写入一个用户的情绪状态
-    pub fn set_emotion_state(&self, user_id: u64, state: &str) -> Result<(), DbError> {
+    pub(crate) fn set_emotion_state(&self, user_id: u64, state: &str) -> Result<(), DbError> {
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO emotion (user_id, state, updated_at) VALUES (?1, ?2, ?3)
@@ -425,7 +430,7 @@ impl Db {
     ///
     /// 放在一个事务里：一批 N 个用户要么全落盘，要么一个都不落，
     /// 不会留下"衰减了一半"的状态。
-    pub fn set_emotion_states(&self, states: &[(u64, String)]) -> Result<(), DbError> {
+    pub(crate) fn set_emotion_states(&self, states: &[(u64, String)]) -> Result<(), DbError> {
         if states.is_empty() {
             return Ok(());
         }
@@ -446,7 +451,7 @@ impl Db {
         })
     }
 
-    pub fn emotion_user_count(&self) -> Result<usize, DbError> {
+    pub(crate) fn emotion_user_count(&self) -> Result<usize, DbError> {
         self.with_conn(|conn| {
             let count: i64 =
                 conn.query_row("SELECT COUNT(*) FROM emotion", [], |row| row.get(0))?;
@@ -455,7 +460,7 @@ impl Db {
     }
 
     /// 所有用户的情绪状态（供后台列表视图）
-    pub fn all_emotion_states(&self) -> Result<Vec<(u64, String)>, DbError> {
+    pub(crate) fn all_emotion_states(&self) -> Result<Vec<(u64, String)>, DbError> {
         self.with_conn(|conn| {
             let mut statement =
                 conn.prepare("SELECT user_id, state FROM emotion ORDER BY user_id")?;
@@ -473,7 +478,7 @@ impl Db {
     /// 用 SQLite 自己的 `VACUUM INTO`，**不要**直接复制 `.db` 文件：
     /// WAL 里可能还有尚未合并的已提交数据，复制出来的快照会缺东西。
     /// 目标路径必须不存在（这是 `VACUUM INTO` 的约束）。
-    pub fn snapshot_into(&self, path: &Path) -> Result<(), DbError> {
+    pub(crate) fn snapshot_into(&self, path: &Path) -> Result<(), DbError> {
         if path.exists() {
             std::fs::remove_file(path)
                 .map_err(|e| DbError::Open(format!("清理旧快照 {}: {e}", path.display())))?;
@@ -492,7 +497,7 @@ impl Db {
     /// 追加一条工作记忆，并把该群裁剪到最多 `keep` 条；返回新条目的 id
     ///
     /// 插入与裁剪在同一个事务里：并发写入不会让某个群短暂超过上限。
-    pub fn working_memory_push(
+    pub(crate) fn working_memory_push(
         &self,
         group_id: u64,
         user_id: u64,
@@ -517,7 +522,7 @@ impl Db {
     }
 
     /// 把某用户最近一条未回复的条目标记为已回复；返回是否有条目被标记
-    pub fn working_memory_mark_replied(
+    pub(crate) fn working_memory_mark_replied(
         &self,
         group_id: u64,
         user_id: u64,
@@ -537,7 +542,7 @@ impl Db {
     }
 
     /// 取 `after` 时间戳之后的条目（按 id 升序，最多 `limit` 条）
-    pub fn working_memory_since(
+    pub(crate) fn working_memory_since(
         &self,
         group_id: u64,
         after: i64,
@@ -561,7 +566,10 @@ impl Db {
     }
 
     /// 取某个群的全部条目（按 id 升序）
-    pub fn working_memory_of_group(&self, group_id: u64) -> Result<Vec<WorkingMemoryRow>, DbError> {
+    pub(crate) fn working_memory_of_group(
+        &self,
+        group_id: u64,
+    ) -> Result<Vec<WorkingMemoryRow>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT id, user_id, content, created_at, bot_replied FROM working_memory
@@ -577,7 +585,7 @@ impl Db {
     }
 
     /// 该群是否还有工作记忆
-    pub fn working_memory_group_exists(&self, group_id: u64) -> Result<bool, DbError> {
+    pub(crate) fn working_memory_group_exists(&self, group_id: u64) -> Result<bool, DbError> {
         self.with_conn(|conn| {
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM working_memory WHERE group_id = ?1",
@@ -589,7 +597,7 @@ impl Db {
     }
 
     /// 取陈旧条目（`created_at <= cutoff`），连同其群号，供归档
-    pub fn working_memory_expired(
+    pub(crate) fn working_memory_expired(
         &self,
         cutoff: i64,
     ) -> Result<Vec<(u64, WorkingMemoryRow)>, DbError> {
@@ -611,7 +619,7 @@ impl Db {
     }
 
     /// 按 id 删除条目；返回删除的行数
-    pub fn working_memory_delete_ids(&self, ids: &[i64]) -> Result<usize, DbError> {
+    pub(crate) fn working_memory_delete_ids(&self, ids: &[i64]) -> Result<usize, DbError> {
         if ids.is_empty() {
             return Ok(0);
         }
@@ -631,7 +639,7 @@ impl Db {
     }
 
     /// 按群内下标删除（下标按 id 升序，与后台列表的顺序一致）
-    pub fn working_memory_delete_at(
+    pub(crate) fn working_memory_delete_at(
         &self,
         group_id: u64,
         index: usize,
@@ -653,7 +661,7 @@ impl Db {
     }
 
     /// 覆盖某条目的正文
-    pub fn working_memory_set_content(&self, id: i64, content: &str) -> Result<(), DbError> {
+    pub(crate) fn working_memory_set_content(&self, id: i64, content: &str) -> Result<(), DbError> {
         self.with_conn(|conn| {
             conn.execute(
                 "UPDATE working_memory SET content = ?2 WHERE id = ?1",
@@ -664,7 +672,9 @@ impl Db {
     }
 
     /// 按群分组返回全部工作记忆（供后台列表视图）
-    pub fn working_memory_groups(&self) -> Result<Vec<(u64, Vec<WorkingMemoryRow>)>, DbError> {
+    pub(crate) fn working_memory_groups(
+        &self,
+    ) -> Result<Vec<(u64, Vec<WorkingMemoryRow>)>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT group_id, id, user_id, content, created_at, bot_replied FROM working_memory
@@ -688,7 +698,7 @@ impl Db {
     }
 
     /// 有工作记忆的群数量（用于启动日志）
-    pub fn working_memory_group_count(&self) -> Result<usize, DbError> {
+    pub(crate) fn working_memory_group_count(&self) -> Result<usize, DbError> {
         self.with_conn(|conn| {
             let count: i64 = conn.query_row(
                 "SELECT COUNT(DISTINCT group_id) FROM working_memory",
@@ -705,7 +715,7 @@ impl Db {
     ///
     /// 两条语句都是 O(1)：一条 INSERT，一条 UPSERT。旧实现是"读整份
     /// 10,000 条记录 + 改 + 写回整份文件"，而它在**每次模型调用后**执行。
-    pub fn record_api_usage(&self, usage: &ApiUsage, keep: i64) -> Result<(), DbError> {
+    pub(crate) fn record_api_usage(&self, usage: &ApiUsage, keep: i64) -> Result<(), DbError> {
         self.with_conn(|conn| {
             let transaction = conn.unchecked_transaction()?;
             transaction.execute(
@@ -755,7 +765,7 @@ impl Db {
     }
 
     /// 终身累计（各 prompt 求和）
-    pub fn api_usage_totals(&self) -> Result<ApiUsageTotals, DbError> {
+    pub(crate) fn api_usage_totals(&self) -> Result<ApiUsageTotals, DbError> {
         self.with_conn(|conn| {
             let totals = conn.query_row(
                 "SELECT COALESCE(SUM(calls), 0), COALESCE(SUM(prompt_tokens), 0),
@@ -778,7 +788,7 @@ impl Db {
     }
 
     /// 按 prompt 分组的终身累计（按 total_tokens 降序）
-    pub fn api_usage_by_prompt(&self) -> Result<Vec<ApiUsageByPrompt>, DbError> {
+    pub(crate) fn api_usage_by_prompt(&self) -> Result<Vec<ApiUsageByPrompt>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT prompt_name, calls, prompt_tokens, completion_tokens, total_tokens,
@@ -805,7 +815,7 @@ impl Db {
     }
 
     /// 最近的用量明细（最新在前）
-    pub fn api_usage_recent(&self, limit: usize) -> Result<Vec<ApiUsage>, DbError> {
+    pub(crate) fn api_usage_recent(&self, limit: usize) -> Result<Vec<ApiUsage>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT ts, model, prompt_name, prompt_tokens, completion_tokens, total_tokens,
@@ -863,7 +873,7 @@ impl Db {
     // ── 进程级单例状态 ──────────────────────────────────────────
 
     /// 读某个子系统的单例状态；没有记录时返回 `None`
-    pub fn singleton_state(&self, which: SingletonState) -> Result<Option<String>, DbError> {
+    pub(crate) fn singleton_state(&self, which: SingletonState) -> Result<Option<String>, DbError> {
         // 表名来自 `SingletonState::table()` 的固定字面量，不含外部输入
         let sql = format!("SELECT state FROM {} WHERE id = 1", which.table());
         self.with_conn(|conn| {
@@ -878,7 +888,11 @@ impl Db {
     ///
     /// 只 UPSERT 自己那一行：另一个子系统的行不会被本次写入触碰，
     /// 这正是原先把两部分塞进同一个 JSON 时丢失更新的根因。
-    pub fn set_singleton_state(&self, which: SingletonState, state: &str) -> Result<(), DbError> {
+    pub(crate) fn set_singleton_state(
+        &self,
+        which: SingletonState,
+        state: &str,
+    ) -> Result<(), DbError> {
         let sql = format!(
             "INSERT INTO {} (id, state, updated_at) VALUES (1, ?1, ?2)
              ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
@@ -893,7 +907,7 @@ impl Db {
     // ── 配额 ────────────────────────────────────────────────────
 
     /// 跨天重置：日期不同则清空计数与段日志，返回是否发生了重置
-    pub fn quota_roll_day(&self, day: &str) -> Result<bool, DbError> {
+    pub(crate) fn quota_roll_day(&self, day: &str) -> Result<bool, DbError> {
         self.with_conn(|conn| {
             let stored: Option<String> = conn
                 .query_row("SELECT day FROM quota_meta WHERE id = 1", [], |row| {
@@ -916,7 +930,11 @@ impl Db {
         })
     }
 
-    pub fn quota_segment_count(&self, group_id: u64, segment_start: u64) -> Result<u32, DbError> {
+    pub(crate) fn quota_segment_count(
+        &self,
+        group_id: u64,
+        segment_start: u64,
+    ) -> Result<u32, DbError> {
         self.with_conn(|conn| {
             let count: Option<i64> = conn
                 .query_row(
@@ -933,7 +951,7 @@ impl Db {
     ///
     /// "读计数 → 比较 → 加一"必须在**一个事务**里：否则两个线程同时看到
     /// "还剩一个名额"就会都放行。
-    pub fn quota_consume(
+    pub(crate) fn quota_consume(
         &self,
         group_id: u64,
         segment_start: u64,
@@ -963,7 +981,7 @@ impl Db {
     }
 
     /// 记录一条段内消息
-    pub fn quota_log_message(
+    pub(crate) fn quota_log_message(
         &self,
         group_id: u64,
         segment_start: u64,
@@ -982,7 +1000,7 @@ impl Db {
     }
 
     /// 删除 `cutoff` 之前的段内消息；返回删除条数
-    pub fn quota_prune_messages(&self, cutoff: i64) -> Result<usize, DbError> {
+    pub(crate) fn quota_prune_messages(&self, cutoff: i64) -> Result<usize, DbError> {
         self.with_conn(|conn| {
             let removed = conn.execute(
                 "DELETE FROM quota_segment_message WHERE ts < ?1",
@@ -993,7 +1011,7 @@ impl Db {
     }
 
     /// 某个群最近的若干段消息（段起始时间倒序）
-    pub fn quota_messages(
+    pub(crate) fn quota_messages(
         &self,
         group_id: u64,
         limit_segments: usize,
@@ -1026,7 +1044,7 @@ impl Db {
     }
 
     /// 有段日志的群
-    pub fn quota_groups_with_messages(&self) -> Result<Vec<u64>, DbError> {
+    pub(crate) fn quota_groups_with_messages(&self) -> Result<Vec<u64>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn
                 .prepare("SELECT DISTINCT group_id FROM quota_segment_message ORDER BY group_id")?;
@@ -1040,7 +1058,7 @@ impl Db {
     }
 
     /// 迁移用：直接写入一个段的计数（不做 +1）
-    pub fn quota_set_segment_count(
+    pub(crate) fn quota_set_segment_count(
         &self,
         group_id: u64,
         segment_start: u64,
@@ -1059,7 +1077,7 @@ impl Db {
     // ── 按用户一行的状态 ────────────────────────────────────────
 
     /// 读某个用户的记录；没有则 `None`
-    pub fn per_user_state(
+    pub(crate) fn per_user_state(
         &self,
         which: PerUserState,
         user_id: u64,
@@ -1077,7 +1095,7 @@ impl Db {
     }
 
     /// 写某个用户的记录（单行 UPSERT）
-    pub fn set_per_user_state(
+    pub(crate) fn set_per_user_state(
         &self,
         which: PerUserState,
         user_id: u64,
@@ -1098,7 +1116,10 @@ impl Db {
     }
 
     /// 全部记录（供后台列表视图）
-    pub fn all_per_user_states(&self, which: PerUserState) -> Result<Vec<(u64, String)>, DbError> {
+    pub(crate) fn all_per_user_states(
+        &self,
+        which: PerUserState,
+    ) -> Result<Vec<(u64, String)>, DbError> {
         let sql = format!(
             "SELECT user_id, state FROM {} ORDER BY user_id",
             which.table()
@@ -1114,7 +1135,7 @@ impl Db {
         })
     }
 
-    pub fn per_user_count(&self, which: PerUserState) -> Result<usize, DbError> {
+    pub(crate) fn per_user_count(&self, which: PerUserState) -> Result<usize, DbError> {
         let sql = format!("SELECT COUNT(*) FROM {}", which.table());
         self.with_conn(|conn| {
             let count: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
@@ -1127,7 +1148,7 @@ impl Db {
     /// 记录一次模型输出在**严格 Turn 契约**下会怎样
     ///
     /// 只观测、不干预：写入失败也不影响表达路径。
-    pub fn record_turn_shadow(
+    pub(crate) fn record_turn_shadow(
         &self,
         shape: &str,
         valid_under_turn: bool,
@@ -1149,7 +1170,10 @@ impl Db {
     }
 
     /// 影子观测汇总：每个形态的次数与其中在严格契约下非法的次数
-    pub fn turn_shadow_summary(&self, since_ts: i64) -> Result<Vec<TurnShadowStat>, DbError> {
+    pub(crate) fn turn_shadow_summary(
+        &self,
+        since_ts: i64,
+    ) -> Result<Vec<TurnShadowStat>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT shape,
@@ -1174,7 +1198,7 @@ impl Db {
     }
 
     /// 裁剪过期的影子观测
-    pub fn prune_turn_shadow(&self, before_ts: i64) -> Result<usize, DbError> {
+    pub(crate) fn prune_turn_shadow(&self, before_ts: i64) -> Result<usize, DbError> {
         self.with_conn(|conn| {
             let removed = conn.execute(
                 "DELETE FROM turn_shadow WHERE ts < ?1",
@@ -1189,7 +1213,12 @@ impl Db {
     ///
     /// 审计是"后台没有独立写路径"这句话的凭据：任何一次状态改动都能回答
     /// "谁在什么时候改了什么"。
-    pub fn record_audit(&self, actor: Actor, command: &str, detail: &str) -> Result<(), DbError> {
+    pub(crate) fn record_audit(
+        &self,
+        actor: Actor,
+        command: &str,
+        detail: &str,
+    ) -> Result<(), DbError> {
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO admin_audit (actor, command, detail, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -1199,7 +1228,7 @@ impl Db {
         })
     }
 
-    pub fn recent_audit(&self, limit: usize) -> Result<Vec<AuditEntry>, DbError> {
+    pub(crate) fn recent_audit(&self, limit: usize) -> Result<Vec<AuditEntry>, DbError> {
         self.with_conn(|conn| {
             let mut statement = conn.prepare(
                 "SELECT actor, command, detail, created_at FROM admin_audit
@@ -1227,7 +1256,7 @@ impl Db {
 /// 这不是为了"兼容旧格式"而背负担，而是**保住真实数据**：跳过它会让
 /// 先前被拉黑的人静默恢复发言，而用户不会收到任何提示。
 /// 导入成功后把文件改名为 `.migrated`，因此不会重复执行。
-pub fn migrate_legacy_blocklist() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_blocklist() -> Result<usize, DbError> {
     let Some(dir) = crate::config::try_data_dir() else {
         return Ok(0);
     };
@@ -1266,7 +1295,7 @@ pub fn migrate_legacy_blocklist() -> Result<usize, DbError> {
 /// 与黑名单迁移同理：不导入会让所有用户的情绪状态在升级后**一起归零**，
 /// 而情绪是她"此刻的心情"，不是可以随手丢的缓存。
 /// 导入后把文件改名为 `.migrated`，因此不会重复执行。
-pub fn migrate_legacy_emotion() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_emotion() -> Result<usize, DbError> {
     let Some(dir) = crate::config::try_data_dir() else {
         return Ok(0);
     };
@@ -1314,7 +1343,7 @@ pub fn migrate_legacy_emotion() -> Result<usize, DbError> {
 /// 她此刻的短期上下文，也是 `catch_up` 深读的来源。
 /// 迁移**保留原始时间戳**：否则旧条目会看起来像刚写的，
 /// 而过期清理与深读游标都依赖时间。
-pub fn migrate_legacy_working_memory() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_working_memory() -> Result<usize, DbError> {
     #[derive(serde::Deserialize)]
     struct LegacyEntry {
         user_id: u64,
@@ -1390,7 +1419,7 @@ pub fn migrate_legacy_working_memory() -> Result<usize, DbError> {
 /// - `aggregated.by_prompt` → `api_usage_total`（**终身累计**。旧文件里
 ///   明细早已被裁到 10,000 条，只导明细会让历史总量缩水）；
 /// - `records` → `api_usage`（保留原始时间戳的明细）。
-pub fn migrate_legacy_api_usage() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_api_usage() -> Result<usize, DbError> {
     #[derive(serde::Deserialize)]
     struct LegacyRecord {
         #[serde(default)]
@@ -1493,7 +1522,7 @@ pub fn migrate_legacy_api_usage() -> Result<usize, DbError> {
 ///
 /// 旧文件把两个子系统塞在一起（`biases` + `attention_json`）。导入时
 /// **两部分都要导**：只导一边等于静默丢掉另一边。
-pub fn migrate_legacy_cognitive_state() -> Result<(), DbError> {
+pub(crate) fn migrate_legacy_cognitive_state() -> Result<(), DbError> {
     let Some(dir) = crate::config::try_data_dir() else {
         return Ok(());
     };
@@ -1537,7 +1566,7 @@ pub fn migrate_legacy_cognitive_state() -> Result<(), DbError> {
 ///
 /// 段计数本身会在下一个 5 分钟段自愈，但段日志是后台可查看的 48 小时
 /// 历史；不导会让那个页面直接空掉。计数与日志都保留原始时间。
-pub fn migrate_legacy_quota() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_quota() -> Result<usize, DbError> {
     #[derive(serde::Deserialize)]
     struct LegacyCount {
         segment_start: u64,
@@ -1634,7 +1663,7 @@ pub fn migrate_legacy_quota() -> Result<usize, DbError> {
 ///
 /// 两者形状相同（`{"<集合名>": {"<uid>": {...}}}`），因此共用一条迁移路径。
 /// 不导会让「她认识谁、和谁多熟」整体归零——那是她认人与人设的基础。
-pub fn migrate_legacy_per_user_files() -> Result<usize, DbError> {
+pub(crate) fn migrate_legacy_per_user_files() -> Result<usize, DbError> {
     let Some(dir) = crate::config::try_data_dir() else {
         return Ok(0);
     };
@@ -1697,7 +1726,7 @@ fn default_path() -> std::path::PathBuf {
 }
 
 /// 初始化（幂等）。启动流程调用一次，其它地方用 [`db`]。
-pub fn init() -> Result<(), DbError> {
+pub(crate) fn init() -> Result<(), DbError> {
     let db = Db::open(&default_path())?;
     // 已经初始化过就沿用既有的（重复调用不是错误）
     let _ = DB.set(db);
@@ -1716,7 +1745,7 @@ pub fn init() -> Result<(), DbError> {
 /// 往仓库的 `data/` 目录里写状态库。文件路径由 `opens_a_file_backed_db`
 /// 单独覆盖。
 #[allow(clippy::expect_used)]
-pub fn db() -> &'static Db {
+pub(crate) fn db() -> &'static Db {
     DB.get_or_init(|| {
         #[cfg(test)]
         {

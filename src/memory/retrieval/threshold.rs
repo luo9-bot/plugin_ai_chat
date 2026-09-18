@@ -11,7 +11,7 @@
 use super::fusion::RetrievalResult;
 
 /// 自适应阈值配置
-pub struct ThresholdConfig {
+pub(crate) struct ThresholdConfig {
     /// 最小分数阈值（绝对下限）
     pub min_score: f64,
     /// 是否启用自适应
@@ -34,7 +34,10 @@ impl Default for ThresholdConfig {
 ///
 /// 计算分数分布的均值和标准差，
 /// 过滤掉低于 `mean - multiplier * std` 的结果。
-pub fn adaptive_threshold_filter(results: &mut Vec<RetrievalResult>, config: &ThresholdConfig) {
+pub(crate) fn adaptive_threshold_filter(
+    results: &mut Vec<RetrievalResult>,
+    config: &ThresholdConfig,
+) {
     if results.is_empty() {
         return;
     }

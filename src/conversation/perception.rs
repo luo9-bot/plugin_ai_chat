@@ -25,7 +25,7 @@ const MAX_PERCEIVED_CHARS: usize = 220;
 ///
 /// 只处理会被转义进消息正文的那几个（方括号与 & 是 markdown 提及的定界符，
 /// 所以出现频率最高）。数字实体一并支持，因为实体会以 `&#91;` 形式出现。
-pub fn decode_entities(text: &str) -> String {
+pub(crate) fn decode_entities(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(pos) = rest.find('&') {
@@ -245,7 +245,7 @@ fn remove_markdown_links(text: &str) -> String {
 /// 顺序很重要：**先解提及，再剥 CQ 外壳**。反过来的话
 /// `[CQ:at,qq=N]` 会被当成"非文本 CQ 码"整块丢掉，她就再也看不到
 /// 谁 @ 了谁——那正是"@的人都不认识"的成因。
-pub fn normalize(raw: &str, lookup: &dyn Fn(u64) -> Option<String>) -> String {
+pub(crate) fn normalize(raw: &str, lookup: &dyn Fn(u64) -> Option<String>) -> String {
     let decoded = decode_entities(raw);
     let with_mentions = resolve_mentions(&decoded, lookup);
     let unwrapped = strip_non_text_cq(&with_mentions);

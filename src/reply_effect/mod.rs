@@ -4,11 +4,11 @@ mod scoring;
 mod store;
 
 use scoring::{calculate_asi, should_finalize};
-pub use store::*;
+pub(crate) use store::*;
 
 use tracing::{debug, info};
 
-pub fn record_reply(
+pub(crate) fn record_reply(
     group_id: u64,
     target_user: u64,
     reply_text: &str,
@@ -36,7 +36,7 @@ pub fn record_reply(
     debug!(group_id, target_user, "reply_effect: recorded");
 }
 
-pub fn observe_message(group_id: u64, user_id: u64, message: &str) {
+pub(crate) fn observe_message(group_id: u64, user_id: u64, message: &str) {
     let mut s = load_store();
     let now = crate::util::now_secs();
     let mut changed = false;

@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 // ── Function Call (Tool Use) 相关结构体 ────────────────────────
 
 #[derive(Serialize, Clone)]
-pub struct Tool {
+pub(crate) struct Tool {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub function: FunctionDef,
 }
 
 #[derive(Serialize, Clone)]
-pub struct FunctionDef {
+pub(crate) struct FunctionDef {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,

@@ -1,11 +1,11 @@
 //! 对话处理模块：消息入口、批次处理、回复生成
 
-pub mod attention;
-pub mod batch;
-pub mod handler;
-pub mod interruption;
-pub mod perception;
-pub mod turn;
+pub(crate) mod attention;
+pub(crate) mod batch;
+pub(crate) mod handler;
+pub(crate) mod interruption;
+pub(crate) mod perception;
+pub(crate) mod turn;
 
 use crate::{batches, config, gate_read, is_admin, mind, read_shared_state, with_shared_state};
 use tracing::{debug, info, warn};
@@ -38,7 +38,7 @@ fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, 
     warn!(user_id, "零容忍：确认注入，永久拉黑并清洗残留");
 }
 
-pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
+pub(crate) fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, group_id, content = trimmed, "recv: group msg");
 
@@ -235,7 +235,7 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     batches(|b| b.append(group_id, user_id, trimmed, entry_id));
 }
 
-pub fn handle_private_msg(user_id: u64, msg: &str) {
+pub(crate) fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, content = trimmed, "recv: private msg");
 
@@ -368,7 +368,7 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
 
 // ── 控制命令 ────────────────────────────────────────────────────
 
-pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<String> {
+pub(crate) fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<String> {
     match msg {
         "开!" | "开启对话" => {
             if !crate::toggle_private_chat(crate::db::Actor::Command, user_id, true) {
@@ -426,7 +426,7 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
-pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
+pub(crate) fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
     match msg {
         "查看群聊" => {
             let groups = crate::get_active_groups();

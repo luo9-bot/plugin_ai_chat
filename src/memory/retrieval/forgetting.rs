@@ -11,7 +11,7 @@ use super::RetrievalResult;
 
 /// 单条记忆参与遗忘计算所需的元数据
 #[derive(Debug, Clone, Copy)]
-pub struct MemoryMeta {
+pub(crate) struct MemoryMeta {
     /// 上次被想起的时间（unix 秒）
     pub last_accessed: u64,
     /// 被想起的次数（含写入时的第一次）
@@ -22,7 +22,7 @@ pub struct MemoryMeta {
 
 /// 遗忘曲线配置
 #[derive(Debug, Clone)]
-pub struct ForgettingConfig {
+pub(crate) struct ForgettingConfig {
     pub enabled: bool,
     /// 基础半衰期（秒）：普通记忆从"上次想起"到淡忘到一半的时间
     pub half_life_secs: f64,
@@ -47,7 +47,7 @@ impl Default for ForgettingConfig {
 }
 
 /// 无状态保留率：距上次想起 `elapsed` 秒后还记得多少（0~1]
-pub fn retention(elapsed_secs: f64, half_life_secs: f64) -> f64 {
+pub(crate) fn retention(elapsed_secs: f64, half_life_secs: f64) -> f64 {
     if half_life_secs <= 0.0 || !half_life_secs.is_finite() {
         return 1.0;
     }
@@ -55,7 +55,7 @@ pub fn retention(elapsed_secs: f64, half_life_secs: f64) -> f64 {
 }
 
 /// 有效半衰期：回忆次数越多忘得越慢（对数强化）；重要记忆×4；永久记忆不衰减
-pub fn effective_half_life(meta: &MemoryMeta, cfg: &ForgettingConfig) -> f64 {
+pub(crate) fn effective_half_life(meta: &MemoryMeta, cfg: &ForgettingConfig) -> f64 {
     if meta.is_permanent {
         return f64::INFINITY;
     }
@@ -65,7 +65,7 @@ pub fn effective_half_life(meta: &MemoryMeta, cfg: &ForgettingConfig) -> f64 {
 }
 
 /// 把遗忘曲线应用到检索结果上（按 id 查元数据，查不到的不动）
-pub fn apply(
+pub(crate) fn apply(
     results: &mut [RetrievalResult],
     meta_of: impl Fn(&str) -> Option<MemoryMeta>,
     now: u64,

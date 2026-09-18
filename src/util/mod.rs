@@ -8,10 +8,10 @@ mod sync;
 mod text;
 mod time;
 
-pub use fs::*;
+pub(crate) use fs::*;
 pub(crate) use http::*;
-pub use json::*;
-pub use regex::*;
+pub(crate) use json::*;
+pub(crate) use regex::*;
 pub(crate) use sync::*;
-pub use text::*;
-pub use time::*;
+pub(crate) use text::*;
+pub(crate) use time::*;

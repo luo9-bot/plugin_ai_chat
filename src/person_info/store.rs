@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::db::PerUserState;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PersonProfile {
+pub(crate) struct PersonProfile {
     pub user_id: u64,
     pub person_name: String,
     pub name_reason: String,

@@ -9,5 +9,5 @@
 mod local;
 mod shared;
 
-pub use local::{BatchBuffer, GateState, TakenBatch};
-pub use shared::SharedState;
+pub(crate) use local::{BatchBuffer, GateState, TakenBatch};
+pub(crate) use shared::SharedState;

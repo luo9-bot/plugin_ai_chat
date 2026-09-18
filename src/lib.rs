@@ -8,7 +8,15 @@
 //!
 //! 插件入口是 `extern "C"`，一次 panic 不会刷新日志，而在 1ms 轮询模型下
 //! 它会让**整条消息路径消失**。测试代码不在此列——那里的 `unwrap` 就是断言。
+//!
+//! ## 可见性不该是纪律
+//!
+//! 这个 crate 只被 `extern "C"` 入口和它自己使用，没有外部 Rust 消费者。
+//! 但 `pub` 有一层副作用：**它对 dead_code 分析隐身**。曾经满仓 `pub` 让
+//! 约 1100 行死代码长期不被报告（设计文档 §13.3）。`unreachable_pub` 把
+//! "这个 `pub` 其实没人能用到"变成编译期错误，于是清理不会随时间回流。
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![warn(unreachable_pub)]
 
 pub(crate) mod activity;
 pub(crate) mod admin;

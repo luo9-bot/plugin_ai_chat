@@ -17,7 +17,7 @@ use std::sync::{LazyLock, Mutex};
 ///
 /// 编译失败时返回一个**永不匹配**的正则并 `error!` 留痕：扫描器失效是
 /// 需要人立刻知道的事，但它不该让消息处理消失。
-pub fn static_regex(pattern: &'static str) -> Regex {
+pub(crate) fn static_regex(pattern: &'static str) -> Regex {
     static CACHE: LazyLock<Mutex<HashMap<&'static str, Regex>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
 

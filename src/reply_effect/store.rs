@@ -5,20 +5,20 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum EffectStatus {
+pub(crate) enum EffectStatus {
     Pending,
     Finalized,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FollowupMessage {
+pub(crate) struct FollowupMessage {
     pub user_id: u64,
     pub content: String,
     pub timestamp: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplyEffectRecord {
+pub(crate) struct ReplyEffectRecord {
     pub reply_text: String,
     pub target_user: u64,
     pub group_id: u64,
@@ -32,7 +32,7 @@ pub struct ReplyEffectRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EffectStore {
+pub(crate) struct EffectStore {
     pub records: Vec<ReplyEffectRecord>,
 }
 
@@ -61,6 +61,6 @@ pub(crate) fn save_store(store: &EffectStore) {
     }
 }
 
-pub const OBSERVATION_WINDOW: u64 = 600;
-pub const MAX_FOLLOWUPS: usize = 10;
-pub const MAX_ACTIVE_RECORDS: usize = 20;
+pub(crate) const OBSERVATION_WINDOW: u64 = 600;
+pub(crate) const MAX_FOLLOWUPS: usize = 10;
+pub(crate) const MAX_ACTIVE_RECORDS: usize = 20;

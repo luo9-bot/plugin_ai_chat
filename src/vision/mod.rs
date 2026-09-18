@@ -3,7 +3,7 @@ use crate::config;
 use tracing::{debug, info};
 
 /// 从消息中提取 [CQ:image,...] 的图片 URL
-pub fn extract_image_urls(message: &str) -> Vec<String> {
+pub(crate) fn extract_image_urls(message: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let mut remaining = message;
     while let Some(start) = remaining.find("[CQ:image,") {
@@ -35,7 +35,7 @@ pub fn extract_image_urls(message: &str) -> Vec<String> {
 /// 只处理图片：视频/文件/转发等其它 CQ 码由 `conversation::turn::strip_cq_codes`
 /// 统一剥离（那里有完整的 CQ 语法处理）。这里的语义就是"去掉图片码"，
 /// 保留它是因为记忆与图片沉淀路径需要精确区分"这条消息本来有没有图"。
-pub fn strip_image_cq(message: &str) -> String {
+pub(crate) fn strip_image_cq(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
     let mut remaining = message;
     while let Some(start) = remaining.find("[CQ:image,") {
@@ -58,7 +58,7 @@ pub fn strip_image_cq(message: &str) -> String {
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
 /// 注意：此函数需要 user_id 参数来检查识图禁用状态
-pub fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
+pub(crate) fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
     // 检查用户是否被禁用识图
     if anti_injection::is_vision_disabled(user_id) {
         info!(user_id, "vision: 用户识图已被禁用");
@@ -166,7 +166,7 @@ fn extract_vlm_text(response_body: &str) -> Option<String> {
 ///
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
-pub fn recognize(image_url: &str) -> Option<String> {
+pub(crate) fn recognize(image_url: &str) -> Option<String> {
     info!(url = %image_url, "vision: 开始识别图片");
     let cfg = config::get();
     if !cfg.vision.enabled() {

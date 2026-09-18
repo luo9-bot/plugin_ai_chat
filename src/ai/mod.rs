@@ -2,7 +2,7 @@ mod client;
 mod error;
 mod guard;
 mod provider;
-pub mod shadow;
+pub(crate) mod shadow;
 mod tool_loop;
 mod tools;
 mod types;

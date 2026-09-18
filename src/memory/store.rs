@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 /// 记忆重要性
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Importance {
+pub(crate) enum Importance {
     Permanent,
     Important,
     Normal,
@@ -12,7 +12,7 @@ pub enum Importance {
 
 /// 记忆条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryEntry {
+pub(crate) struct MemoryEntry {
     pub content: String,
     pub importance: Importance,
     pub created: u64,
@@ -70,46 +70,46 @@ fn save_json<T: serde::Serialize>(path: &PathBuf, data: &T) {
 
 /// 单用户记忆文件
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MemoryFile {
+pub(crate) struct MemoryFile {
     pub entries: Vec<MemoryEntry>,
 }
 
 // ── CRUD ────────────────────────────────────────────────────────
 
-pub fn load_user_memory(user_id: u64) -> MemoryFile {
+pub(crate) fn load_user_memory(user_id: u64) -> MemoryFile {
     load_json(&user_path(user_id))
 }
 
-pub fn save_user_memory(user_id: u64, mem: &MemoryFile) {
+pub(crate) fn save_user_memory(user_id: u64, mem: &MemoryFile) {
     let path = user_path(user_id);
     ensure_dir(&path);
     save_json(&path, mem);
 }
 
-pub fn load_group_user_memory(group_id: u64, user_id: u64) -> MemoryFile {
+pub(crate) fn load_group_user_memory(group_id: u64, user_id: u64) -> MemoryFile {
     load_json(&group_user_path(group_id, user_id))
 }
 
-pub fn save_group_user_memory(group_id: u64, user_id: u64, mem: &MemoryFile) {
+pub(crate) fn save_group_user_memory(group_id: u64, user_id: u64, mem: &MemoryFile) {
     let path = group_user_path(group_id, user_id);
     ensure_dir(&path);
     save_json(&path, mem);
 }
 
 /// 初始化：创建存储目录
-pub fn init() {
+pub(crate) fn init() {
     let new_dir = memory_dir();
     ensure_dir(&new_dir.join("users"));
     ensure_dir(&new_dir.join("groups"));
 }
 
 /// 有记忆的用户数量
-pub fn load_user_count() -> usize {
+pub(crate) fn load_user_count() -> usize {
     all_user_ids().len()
 }
 
 /// 获取所有有记忆的用户列表
-pub fn all_user_ids() -> Vec<u64> {
+pub(crate) fn all_user_ids() -> Vec<u64> {
     let dir = memory_dir().join("users");
     let mut ids = Vec::new();
     if let Ok(entries) = fs::read_dir(&dir) {

@@ -3,7 +3,7 @@ use tracing::info;
 use super::state::{EmotionType, TriggerType, get_state, update_state};
 use crate::crisis::{detect_crisis, update_crisis};
 
-pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
+pub(crate) fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
     let mut state = get_state(user_id);
     let now = crate::util::now_secs();

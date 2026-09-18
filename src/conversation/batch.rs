@@ -18,7 +18,7 @@ use super::handler::{GroupBatch, process_message};
 use crate::util::MutexExt;
 use crate::{MESSAGE_QUEUE, ProcessingTask, batches, config, processing_users};
 
-pub fn process_expired_batches() {
+pub(crate) fn process_expired_batches() {
     let cfg = config::get();
     let timeout = cfg.conversation.batch_timeout_ms;
 

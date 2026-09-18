@@ -4,7 +4,7 @@ use std::time::Instant;
 use super::shared::CtxKey;
 
 /// 消息批次 (合并短时间内连续消息)
-pub struct MessageBatch {
+pub(crate) struct MessageBatch {
     pub messages: String,
     pub last_update: Instant,
     /// 每条消息对应的写入时间戳 (unix秒)，用于精确匹配工作记忆条目
@@ -22,7 +22,7 @@ pub struct MessageBatch {
 
 /// 从批次缓冲里取出的一批消息（交给群聊/私聊处理管线）
 #[derive(Debug, Clone)]
-pub struct TakenBatch {
+pub(crate) struct TakenBatch {
     /// 合并后的消息文本
     pub messages: String,
     /// 每条消息对应的工作记忆写入时间戳（秒）
@@ -35,7 +35,7 @@ pub struct TakenBatch {
 
 impl TakenBatch {
     /// 这批消息最早到达的时刻（秒，找不到时取当前时间）
-    pub fn first_arrival(&self) -> u64 {
+    pub(crate) fn first_arrival(&self) -> u64 {
         self.arrived_at
             .first()
             .copied()
@@ -43,7 +43,7 @@ impl TakenBatch {
     }
 
     /// 排序用的到达时刻（毫秒）
-    pub fn sort_key_ms(&self) -> u64 {
+    pub(crate) fn sort_key_ms(&self) -> u64 {
         self.arrived_at_ms
             .first()
             .copied()
@@ -59,12 +59,12 @@ impl TakenBatch {
 /// 依赖单一线程顺序。后台线程（admin HTTP、消息队列）不得触碰它——
 /// 关闭一个对话不需要清空缓冲，主循环读门禁状态时自然会丢弃它。
 #[derive(Default)]
-pub struct BatchBuffer {
+pub(crate) struct BatchBuffer {
     batches: HashMap<CtxKey, MessageBatch>,
 }
 
 impl BatchBuffer {
-    pub fn append(&mut self, group_id: u64, user_id: u64, message: &str, entry_id: u64) {
+    pub(crate) fn append(&mut self, group_id: u64, user_id: u64, message: &str, entry_id: u64) {
         let key: CtxKey = (group_id, user_id);
         let now = Instant::now();
         let arrived = crate::util::now_secs();
@@ -94,7 +94,7 @@ impl BatchBuffer {
     ///
     /// 一次性取出（而非逐个回调）是为了让调用方在**不持有缓冲借用**的情况下
     /// 继续做分发与投递。
-    pub fn take_expired(
+    pub(crate) fn take_expired(
         &mut self,
         timeout_ms: u64,
         is_busy: impl Fn(CtxKey) -> bool,
@@ -123,7 +123,7 @@ impl BatchBuffer {
     }
 
     /// 丢弃某个用户的全部未处理批次
-    pub fn forget_user(&mut self, user_id: u64) {
+    pub(crate) fn forget_user(&mut self, user_id: u64) {
         self.batches.retain(|&(_, uid), _| uid != user_id);
     }
 }
@@ -136,7 +136,7 @@ impl BatchBuffer {
 /// 管理命令）必须能改门禁状态并且立刻生效，而批次缓冲只属于主循环线程。
 /// 早先两者共用一个 `thread_local`，于是后台改的永远是**自己线程的副本**——
 /// 对话开关从未生效过，拉黑/解禁也要重启才生效。
-pub struct GateState {
+pub(crate) struct GateState {
     active: HashSet<u64>,
     active_groups: HashSet<u64>,
     blacklist: HashSet<u64>,
@@ -149,7 +149,7 @@ impl GateState {
     /// `blocklist.json` 作为第二份真相），于是后台开的对话重启即失。
     /// 读库失败时回落到空集合：门禁拿不到名单时应当拒绝放行，
     /// 而不是把所有人当成已授权。
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let db = crate::db::db();
         let active = db
             .activations(crate::db::Scope::Private)
@@ -175,12 +175,12 @@ impl GateState {
         }
     }
 
-    pub fn is_private_active(&self, user_id: u64) -> bool {
+    pub(crate) fn is_private_active(&self, user_id: u64) -> bool {
         self.active.contains(&user_id)
     }
 
     /// 返回状态是否真的发生了变化
-    pub fn set_private_active(&mut self, user_id: u64, enabled: bool) -> bool {
+    pub(crate) fn set_private_active(&mut self, user_id: u64, enabled: bool) -> bool {
         if enabled {
             self.active.insert(user_id)
         } else {
@@ -188,12 +188,12 @@ impl GateState {
         }
     }
 
-    pub fn is_group_active(&self, group_id: u64) -> bool {
+    pub(crate) fn is_group_active(&self, group_id: u64) -> bool {
         self.active_groups.contains(&group_id)
     }
 
     /// 返回状态是否真的发生了变化
-    pub fn set_group_active(&mut self, group_id: u64, enabled: bool) -> bool {
+    pub(crate) fn set_group_active(&mut self, group_id: u64, enabled: bool) -> bool {
         if enabled {
             self.active_groups.insert(group_id)
         } else {
@@ -201,12 +201,12 @@ impl GateState {
         }
     }
 
-    pub fn is_blacklisted(&self, user_id: u64) -> bool {
+    pub(crate) fn is_blacklisted(&self, user_id: u64) -> bool {
         self.blacklist.contains(&user_id)
     }
 
     /// 返回状态是否真的发生了变化
-    pub fn set_blacklisted(&mut self, user_id: u64, blocked: bool) -> bool {
+    pub(crate) fn set_blacklisted(&mut self, user_id: u64, blocked: bool) -> bool {
         if blocked {
             self.blacklist.insert(user_id)
         } else {
@@ -214,15 +214,15 @@ impl GateState {
         }
     }
 
-    pub fn active_users(&self) -> impl Iterator<Item = u64> + '_ {
+    pub(crate) fn active_users(&self) -> impl Iterator<Item = u64> + '_ {
         self.active.iter().copied()
     }
 
-    pub fn active_groups(&self) -> impl Iterator<Item = u64> + '_ {
+    pub(crate) fn active_groups(&self) -> impl Iterator<Item = u64> + '_ {
         self.active_groups.iter().copied()
     }
 
-    pub fn blacklisted(&self) -> impl Iterator<Item = u64> + '_ {
+    pub(crate) fn blacklisted(&self) -> impl Iterator<Item = u64> + '_ {
         self.blacklist.iter().copied()
     }
 }

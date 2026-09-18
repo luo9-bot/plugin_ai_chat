@@ -9,39 +9,43 @@
 //! - Shadow Sandbox 灰区决策
 //! - 用户行为信誉系统
 
-pub mod behavior;
-pub mod decision;
-pub mod memory_guard;
-pub mod normalize;
-pub mod patterns;
-pub mod sandbox;
-pub mod scorer;
-pub mod semantic;
-pub mod structure;
-pub mod unicode;
+pub(crate) mod behavior;
+pub(crate) mod decision;
+pub(crate) mod memory_guard;
+pub(crate) mod normalize;
+pub(crate) mod patterns;
+pub(crate) mod sandbox;
+pub(crate) mod scorer;
+pub(crate) mod semantic;
+pub(crate) mod structure;
+pub(crate) mod unicode;
 
 use crate::config::AntiInjectionConfig;
 use tracing::{info, warn};
 
 // ── 模块公共 API ──────────────────────────────────────────────
 
-pub use behavior::{
+pub(crate) use behavior::{
     ban_user, enable_vision, get_all_user_statuses, get_penalty_multiplier, get_reputation,
     get_user_status, get_violation_count, is_silent_banned, is_vision_disabled, reset_reputation,
     silent_ban_user, unban_user,
 };
-pub use decision::{Action, DetectionResult, SecurityIssue};
-pub use memory_guard::{check_inner_output, check_memory_entry};
+pub(crate) use decision::{Action, DetectionResult, SecurityIssue};
+pub(crate) use memory_guard::{check_inner_output, check_memory_entry};
 
 // ── Public API ──
 
 /// 初始化防注入引擎
-pub fn init() {
+pub(crate) fn init() {
     info!("anti_injection: 风险判定引擎 v2 初始化完成");
 }
 
 /// 检查用户输入消息
-pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) -> DetectionResult {
+pub(crate) fn check_input(
+    user_id: u64,
+    message: &str,
+    config: &AntiInjectionConfig,
+) -> DetectionResult {
     let normalized = normalize::normalize(message);
     let mut all_issues = Vec::new();
 
@@ -230,7 +234,11 @@ pub fn check_input(user_id: u64, message: &str, config: &AntiInjectionConfig) ->
 }
 
 /// 检查 AI 回复（user_id 用于记录违规）
-pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> DetectionResult {
+pub(crate) fn check_output(
+    user_id: u64,
+    reply: &str,
+    config: &AntiInjectionConfig,
+) -> DetectionResult {
     let normalized = normalize::normalize(reply);
 
     // 收集段
@@ -320,7 +328,7 @@ pub fn check_output(user_id: u64, reply: &str, config: &AntiInjectionConfig) -> 
 }
 
 /// 管理员命令处理
-pub fn handle_admin_command(
+pub(crate) fn handle_admin_command(
     admin_id: u64,
     cmd: &str,
     config: &crate::config::Config,

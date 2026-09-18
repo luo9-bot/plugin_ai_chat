@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 use super::store::*;
 
 /// 表情包选择结果
-pub struct StickerSelection {
+pub(crate) struct StickerSelection {
     pub hash: String,
     pub path: String,
     pub description: String,
@@ -21,7 +21,7 @@ pub struct StickerSelection {
 /// 注册表情包（从用户发送的图片）
 ///
 /// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 原子注册
-pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
+pub(crate) fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
 
     // 去重检查（持锁）
@@ -72,7 +72,7 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
 /// 区分方式：
 /// - sub_type=1 + summary=[动画表情] → 表情包，自动注册
 /// - sub_type=0 → 普通图片，跳过
-pub fn register_from_cq(cq_message: &str) -> Option<String> {
+pub(crate) fn register_from_cq(cq_message: &str) -> Option<String> {
     // 只处理表情包，跳过普通图片
     if !is_sticker_cq(cq_message) {
         debug!("sticker: not an sticker CQ code, skipping registration");
@@ -114,7 +114,7 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 /// 优先使用 stickers.json 中已持久化的描述，避免重复 VLM 调用。
 /// 与 register_from_cq 不同，此函数不执行内容过滤和完整注册，
 /// 仅用于 handler.rs 中为 AI 上下文提供图片描述。
-pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
+pub(crate) fn describe_sticker_cq(cq_message: &str) -> Option<String> {
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
         // 1. 下载文件
@@ -147,7 +147,7 @@ pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
 /// 判断 CQ 码是否为表情包（而非普通图片）
 ///
 /// 表情包特征：sub_type=1，或 summary 包含 [动画表情]
-pub fn is_sticker_cq(cq_message: &str) -> bool {
+pub(crate) fn is_sticker_cq(cq_message: &str) -> bool {
     // sub_type=1 表示表情包
     if cq_message.contains("sub_type=1") {
         return true;
@@ -167,7 +167,10 @@ pub fn is_sticker_cq(cq_message: &str) -> bool {
 /// 2. 加载图片
 /// 3. 发送给 VLM 让它选择
 /// 4. 解析选择结果
-pub fn select_sticker_vlm(context: &str, exclude_hashes: &[String]) -> Option<StickerSelection> {
+pub(crate) fn select_sticker_vlm(
+    context: &str,
+    exclude_hashes: &[String],
+) -> Option<StickerSelection> {
     let store = load_store();
     let candidates: Vec<&StickerEntry> = store
         .stickers
@@ -609,7 +612,7 @@ fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<Str
 // ── 工具函数 ────────────────────────────────────────────────────
 
 /// 更新表情包使用次数
-pub fn update_usage(hash: &str) {
+pub(crate) fn update_usage(hash: &str) {
     let mut store = load_store();
     if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
         entry.query_count += 1;
@@ -619,7 +622,7 @@ pub fn update_usage(hash: &str) {
 }
 
 /// 获取表情包统计
-pub fn get_stats() -> (usize, usize) {
+pub(crate) fn get_stats() -> (usize, usize) {
     let store = load_store();
     let total = store.stickers.len();
     let registered = store
@@ -631,7 +634,7 @@ pub fn get_stats() -> (usize, usize) {
 }
 
 /// 维护：清理无效条目
-pub fn maintenance() {
+pub(crate) fn maintenance() {
     let mut store = load_store();
     let data_dir = crate::config::data_dir();
     let before = store.stickers.len();
@@ -795,7 +798,7 @@ pub(crate) fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Opti
 ///
 /// 已注册过的文件通过路径比对跳过，不读文件、不计算哈希。
 /// 在插件启动时自动调用。
-pub fn init_ne_stickers() {
+pub(crate) fn init_ne_stickers() {
     let dir = super::store::builtin_sticker_dir();
     if !dir.exists() {
         std::fs::create_dir_all(&dir).ok();
@@ -881,7 +884,7 @@ pub fn init_ne_stickers() {
 /// 扫描 sticker/ 目录，自动注册未入库的表情包（steal_emoji）
 ///
 /// 只处理那些文件存在但尚未注册的表情包图片。
-pub fn steal_emoji_scan() -> usize {
+pub(crate) fn steal_emoji_scan() -> usize {
     let dir = super::store::sticker_dir();
     if !dir.exists() {
         return 0;
@@ -996,7 +999,7 @@ fn register_sticker_from_path(
 ///
 /// 当注册的非内置表情包超过 max_reg_num 时，
 /// 按使用次数升序 + 最后使用时间升序排序，淘汰超额的条目。
-pub fn do_replace_eviction(max_reg_num: usize) -> usize {
+pub(crate) fn do_replace_eviction(max_reg_num: usize) -> usize {
     let mut store = load_store();
     let data_dir = crate::config::data_dir();
 

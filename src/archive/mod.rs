@@ -8,7 +8,7 @@ fn archive_path() -> std::path::PathBuf {
 // ── 数据结构 ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArchivedWorkingMemory {
+pub(crate) struct ArchivedWorkingMemory {
     pub group_id: u64,
     pub user_id: u64,
     pub content: String,
@@ -18,7 +18,7 @@ pub struct ArchivedWorkingMemory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArchivedLongTermMemory {
+pub(crate) struct ArchivedLongTermMemory {
     pub user_id: u64,
     pub content: String,
     pub importance: String,
@@ -27,7 +27,7 @@ pub struct ArchivedLongTermMemory {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct ArchiveStore {
+pub(crate) struct ArchiveStore {
     pub working_memory: Vec<ArchivedWorkingMemory>,
     pub long_term: Vec<ArchivedLongTermMemory>,
 }
@@ -74,7 +74,7 @@ pub(crate) fn archive_working_memory(entries: Vec<(u64, crate::working_memory::E
 }
 
 /// 归档长期记忆 (用户遗忘或过期时)
-pub fn archive_long_term_memory(user_id: u64, entries: Vec<crate::memory::MemoryEntry>) {
+pub(crate) fn archive_long_term_memory(user_id: u64, entries: Vec<crate::memory::MemoryEntry>) {
     if entries.is_empty() {
         return;
     }
@@ -98,7 +98,7 @@ pub fn archive_long_term_memory(user_id: u64, entries: Vec<crate::memory::Memory
 }
 
 /// 返回归档统计 (用于启动日志)
-pub fn stats() -> (usize, usize) {
+pub(crate) fn stats() -> (usize, usize) {
     let store = ArchiveStore::load();
     (store.working_memory.len(), store.long_term.len())
 }

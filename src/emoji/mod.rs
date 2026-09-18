@@ -13,12 +13,12 @@
 /// - 装饰符号 (U+2702-U+27B0)
 /// - 零宽连接符 (U+200D)
 /// - 变体选择符 (U+FE0F)
-pub fn strip_emoji(text: &str) -> String {
+pub(crate) fn strip_emoji(text: &str) -> String {
     text.chars().filter(|&c| !is_emoji_char(c)).collect()
 }
 
 /// 判断字符是否为 Unicode emoji
-pub fn is_emoji_char(c: char) -> bool {
+pub(crate) fn is_emoji_char(c: char) -> bool {
     let cp = c as u32;
     matches!(cp,
         0x1F600..=0x1F64F |  // Emoticons
@@ -40,7 +40,7 @@ pub fn is_emoji_char(c: char) -> bool {
 /// 检查文本是否几乎全是 emoji（无实际文字内容）
 ///
 /// 去除 emoji 和空白后，如果剩余字符少于 2 个，视为纯 emoji
-pub fn is_emoji_only(text: &str) -> bool {
+pub(crate) fn is_emoji_only(text: &str) -> bool {
     let stripped = strip_emoji(text);
     let meaningful: String = stripped.chars().filter(|c| !c.is_whitespace()).collect();
     meaningful.len() < 2

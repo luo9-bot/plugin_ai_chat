@@ -50,7 +50,7 @@ fn report_silence(scope: &str, cause: &SilenceCause, id: u64) {
 
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
-pub enum VoiceAction {
+pub(crate) enum VoiceAction {
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
     Reply(String),
     /// 这一轮她选择沉默
@@ -58,7 +58,7 @@ pub enum VoiceAction {
 }
 
 /// 群聊里一条待处理的发言
-pub struct GroupUtterance {
+pub(crate) struct GroupUtterance {
     pub user_id: u64,
     /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
@@ -78,7 +78,7 @@ pub struct GroupUtterance {
 
 /// 回神的行动产物
 #[derive(Debug)]
-pub enum WakeAction {
+pub(crate) enum WakeAction {
     /// 说一句话（reply_to = 引用的消息 id）
     Speak { text: String, reply_to: Option<u64> },
     /// 这一轮只想想，没说话
@@ -87,7 +87,7 @@ pub enum WakeAction {
 
 /// 一次回神的完整产物
 #[derive(Debug)]
-pub struct WakeTurn {
+pub(crate) struct WakeTurn {
     /// 她亲笔的内心活动（入流 Inner）
     pub inner: Vec<String>,
     pub action: WakeAction,
@@ -158,7 +158,7 @@ thread_local! {
 }
 
 /// 取走她在本轮表达里留下的想起（若有）
-pub fn take_last_plan() -> Option<(u64, String)> {
+pub(crate) fn take_last_plan() -> Option<(u64, String)> {
     LAST_PLAN.with(|cell| cell.borrow_mut().take())
 }
 
@@ -247,7 +247,7 @@ fn search_web_tool() -> Tool {
 ///
 /// 抽取出来是因为表达与回神两条路径都要给她同一套：
 /// 她在聊天里顺手勾一下，和独处时回看今天做了什么，用的是同一批工具。
-pub fn plan_tools() -> Vec<Tool> {
+pub(crate) fn plan_tools() -> Vec<Tool> {
     vec![
         crate::ai::check_plan_tool(),
         crate::ai::add_plan_tool(),
@@ -710,7 +710,7 @@ fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
 /// `focus` 是这一批消息的焦点判定（谁在跟她说话、该回谁），
 /// 由 [`crate::conversation::turn`] 依确定性规则算出——回复目标不再
 /// 取决于"哪个用户的批次先到期"。
-pub fn speak_group(
+pub(crate) fn speak_group(
     group_id: u64,
     utterances: &[GroupUtterance],
     focus: &crate::conversation::turn::TurnFocus,
@@ -798,7 +798,7 @@ pub fn speak_group(
 ///
 /// `message` 是刚刚发生的感知内容（含图片描述）；`extra_system` 允许
 /// 调用方追加特殊场景指令（如对话结束检测提示）。
-pub fn speak_private(
+pub(crate) fn speak_private(
     user_id: u64,
     message: &str,
     history: &[(String, String)],
@@ -883,7 +883,7 @@ pub fn speak_private(
 /// 一次回神：两阶段——先写内心，再决定行动
 ///
 /// `allow_speak` 为 false（睡前整理）时只写内心，不安排 say 工具。
-pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
+pub(crate) fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 
@@ -1022,7 +1022,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
 
 /// 日记草稿（她亲笔）
 #[derive(Debug, Clone)]
-pub struct DiaryDraft {
+pub(crate) struct DiaryDraft {
     pub content: String,
     pub feeling: Option<String>,
     pub about: Option<u64>,
@@ -1030,7 +1030,7 @@ pub struct DiaryDraft {
 
 /// 人物档案修订（她亲笔，只带新内容）
 #[derive(Debug, Clone)]
-pub struct PersonUpdate {
+pub(crate) struct PersonUpdate {
     pub user_id: u64,
     pub impression: Option<String>,
     pub my_feeling: Option<String>,
@@ -1041,7 +1041,7 @@ pub struct PersonUpdate {
 
 /// 心事草稿（她亲笔）
 #[derive(Debug, Clone)]
-pub struct LoopDraft {
+pub(crate) struct LoopDraft {
     pub content: String,
     pub about_user: Option<u64>,
     pub in_secs: Option<u64>,
@@ -1049,7 +1049,7 @@ pub struct LoopDraft {
 
 /// 目标草稿（她亲笔）：睡前整理时立下的长期愿望
 #[derive(Debug, Clone)]
-pub struct GoalDraft {
+pub(crate) struct GoalDraft {
     pub text: String,
     pub parent_id: Option<u64>,
     /// 多久之后到期（秒）
@@ -1059,14 +1059,14 @@ pub struct GoalDraft {
 
 /// 想法草稿（她亲笔）：新冒出来的念头
 #[derive(Debug, Clone)]
-pub struct IdeaDraft {
+pub(crate) struct IdeaDraft {
     pub text: String,
     pub excitement: Option<u8>,
 }
 
 /// 愿望推进（她亲笔）：目标进度更新或收尾
 #[derive(Debug, Clone)]
-pub struct WishUpdate {
+pub(crate) struct WishUpdate {
     pub goal_id: u64,
     pub progress: Option<u8>,
     pub achieved: Option<bool>,
@@ -1074,7 +1074,7 @@ pub struct WishUpdate {
 
 /// 睡前整理的完整产物
 #[derive(Debug, Default)]
-pub struct DigestOutcome {
+pub(crate) struct DigestOutcome {
     pub inner: Vec<String>,
     pub diary: Vec<DiaryDraft>,
     pub persons: Vec<PersonUpdate>,
@@ -1240,7 +1240,7 @@ fn digest_tools() -> Vec<Tool> {
 }
 
 /// 睡前整理：两阶段——先写内心，再用工具整理今天
-pub fn digest_think(input: &str) -> DigestOutcome {
+pub(crate) fn digest_think(input: &str) -> DigestOutcome {
     let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 

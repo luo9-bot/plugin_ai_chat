@@ -4,10 +4,10 @@
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
 mod manager;
-pub mod store;
+pub(crate) mod store;
 
 use luo9_sdk::Msg;
-pub use manager::{
+pub(crate) use manager::{
     describe_sticker_cq, do_replace_eviction, get_stats, init_ne_stickers, is_sticker_cq,
     maintenance, register_from_cq, steal_emoji_scan,
 };
@@ -17,7 +17,7 @@ use tracing::info;
 /// 发送表情包（供 Planner tool 调用）
 ///
 /// 使用 VLM 子代理从候选网格中选择最合适的表情包，然后通过 SDK 发送。
-pub fn send_sticker(
+pub(crate) fn send_sticker(
     group_id: u64,
     user_id: u64,
     context_texts: &[String],

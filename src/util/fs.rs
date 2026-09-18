@@ -31,7 +31,7 @@ fn temp_path(path: &Path) -> PathBuf {
 ///
 /// 两个参数都接受 `AsRef`，与 `std::fs::write` 保持一致，
 /// 这样替换既有调用点时不需要改参数写法。
-pub fn atomic_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
+pub(crate) fn atomic_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
     let path = path.as_ref();
     let contents = contents.as_ref();
     if let Some(parent) = path.parent() {

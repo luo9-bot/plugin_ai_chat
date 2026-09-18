@@ -30,7 +30,7 @@ const MAX_PROCESSING_MS: u128 = 30_000;
 /// 处理期没有新消息时永不打断：没有新信息，"话题可能已经变了"这个前提
 /// 就不成立。旧实现只看时长，于是模型慢（或超时重试）超过 30 秒就会把
 /// 一句本来完全正确的话咽回去——慢的是她自己的网络，不是群里的对话。
-pub fn should_interrupt(new_messages: u32, processing_ms: u128, rand: f32) -> bool {
+pub(crate) fn should_interrupt(new_messages: u32, processing_ms: u128, rand: f32) -> bool {
     if new_messages == 0 {
         return false;
     }
@@ -60,7 +60,7 @@ fn pending_map() -> &'static Mutex<HashMap<u64, PendingState>> {
 }
 
 /// 她开始处理这个群的一批消息：清空处理期新消息计数
-pub fn begin(group_id: u64) {
+pub(crate) fn begin(group_id: u64) {
     if let Ok(mut map) = pending_map().lock() {
         map.insert(
             group_id,
@@ -73,7 +73,7 @@ pub fn begin(group_id: u64) {
 }
 
 /// 她处理期间这个群又有一条消息到达（主线程调用）
-pub fn note_arrival(group_id: u64) {
+pub(crate) fn note_arrival(group_id: u64) {
     if let Ok(mut map) = pending_map().lock()
         && let Some(state) = map.get_mut(&group_id)
     {
@@ -82,7 +82,7 @@ pub fn note_arrival(group_id: u64) {
 }
 
 /// 她收尾（无论发没发）：清掉处理期状态
-pub fn end(group_id: u64) {
+pub(crate) fn end(group_id: u64) {
     if let Ok(mut map) = pending_map().lock() {
         map.remove(&group_id);
     }
@@ -91,7 +91,7 @@ pub fn end(group_id: u64) {
 /// 发送前的最终决策：要不要把到嘴边的话咽回去
 ///
 /// 未开启打断或处理期没有记账时一律返回 false。
-pub fn should_swallow(group_id: u64) -> bool {
+pub(crate) fn should_swallow(group_id: u64) -> bool {
     let Some((new_messages, elapsed_ms)) = (|| {
         let map = pending_map().lock().ok()?;
         let state = map.get(&group_id)?;

@@ -4,18 +4,18 @@
 //! 使用 Weighted RRF 融合两路结果
 //! 支持后置图门控、自适应阈值
 
-pub mod bm25;
+pub(crate) mod bm25;
 #[cfg(test)]
 mod eval;
-pub mod forgetting;
+pub(crate) mod forgetting;
 mod fusion;
-pub mod posterior_graph;
-pub mod threshold;
+pub(crate) mod posterior_graph;
+pub(crate) mod threshold;
 pub(crate) mod vector;
 
-pub use fusion::RetrievalResult;
-pub use posterior_graph::PosteriorGraphConfig;
-pub use threshold::ThresholdConfig;
+pub(crate) use fusion::RetrievalResult;
+pub(crate) use posterior_graph::PosteriorGraphConfig;
+pub(crate) use threshold::ThresholdConfig;
 
 use std::collections::HashMap;
 

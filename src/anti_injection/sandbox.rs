@@ -17,7 +17,7 @@ const GRAY_ZONE_HIGH: f32 = 0.75;
 /// （[`super::decision::determine_action`]）只取动作——那段解释既没进 prompt
 /// 也没进日志，只有它自己的单元测试读过。产出没人读的东西不是预留，是把
 /// "这里做过判断"伪装成事实，所以删掉；真要让运维看见，就在调用点重新长出来。
-pub fn evaluate(score: &RiskScore, sensitive_action: &str) -> Action {
+pub(crate) fn evaluate(score: &RiskScore, sensitive_action: &str) -> Action {
     let risk = score.combined_risk();
 
     if risk < GRAY_ZONE_LOW {

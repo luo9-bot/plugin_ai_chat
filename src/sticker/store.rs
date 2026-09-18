@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 /// 表情包条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StickerEntry {
+pub(crate) struct StickerEntry {
     /// SHA256 哈希（唯一标识）
     pub hash: String,
     /// 文件路径（相对 data 目录）
@@ -34,7 +34,7 @@ pub struct StickerEntry {
 
 /// 表情包存储
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StickerStore {
+pub(crate) struct StickerStore {
     pub stickers: Vec<StickerEntry>,
 }
 
@@ -74,13 +74,13 @@ pub(crate) fn load_store() -> StickerStore {
 }
 
 /// 按哈希查找表情包条目
-pub fn find_entry_by_hash(hash: &str) -> Option<StickerEntry> {
+pub(crate) fn find_entry_by_hash(hash: &str) -> Option<StickerEntry> {
     let store = load_store();
     store.stickers.into_iter().find(|e| e.hash == hash)
 }
 
 /// 更新表情包的 VLM 自然语言描述
-pub fn update_vlm_description(hash: &str, description: &str) {
+pub(crate) fn update_vlm_description(hash: &str, description: &str) {
     let snapshot = {
         let mut guard = STORE.lock_recover();
         let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));

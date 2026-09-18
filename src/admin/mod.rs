@@ -212,7 +212,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
 
 // ── 启动服务器 ──────────────────────────────────────────────────
 
-pub fn start_server() {
+pub(crate) fn start_server() {
     let cfg = &config::get().admin;
     let base_port = cfg.port;
     let mut port = base_port;

@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info};
 
-pub use types::ActivityType;
+pub(crate) use types::ActivityType;
 
 mod types {
     #[derive(Debug, Clone, PartialEq)]
-    pub enum ActivityType {
+    pub(crate) enum ActivityType {
         Training,
         Eating,
         Sleeping,
@@ -24,7 +24,7 @@ mod types {
     }
 
     impl ActivityType {
-        pub fn default_duration(&self) -> u64 {
+        pub(crate) fn default_duration(&self) -> u64 {
             match self {
                 ActivityType::Training => 1800,
                 ActivityType::Eating => 1200,
@@ -35,7 +35,7 @@ mod types {
             }
         }
 
-        pub fn describe(&self) -> &str {
+        pub(crate) fn describe(&self) -> &str {
             match self {
                 ActivityType::Training => "训练/运动",
                 ActivityType::Eating => "吃饭",

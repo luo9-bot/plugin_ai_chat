@@ -1,4 +1,4 @@
-pub mod operations;
+pub(crate) mod operations;
 
 pub(crate) use operations::{
     DeleteEntryOutcome, Entry, cleanup, delete_entry_at, get_since, group_count, mark_replied,

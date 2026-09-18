@@ -9,7 +9,7 @@ pub(crate) const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
 pub(crate) const CRISIS_MILD_COOLDOWN_SECS: u64 = 3600;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum EmotionType {
+pub(crate) enum EmotionType {
     Neutral,
     Happy,
     Sad,
@@ -24,7 +24,7 @@ pub enum EmotionType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmotionState {
+pub(crate) struct EmotionState {
     pub current: EmotionType,
     /// 混合情绪（次要情绪，如"开心但有点担忧"）
     #[serde(default)]
@@ -75,7 +75,7 @@ fn default_empathy_resonance() -> f32 {
 
 /// 情绪触发事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmotionTrigger {
+pub(crate) struct EmotionTrigger {
     /// 触发类型
     pub trigger_type: TriggerType,
     /// 触发源描述
@@ -90,7 +90,7 @@ pub struct EmotionTrigger {
 
 /// 情绪触发类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TriggerType {
+pub(crate) enum TriggerType {
     /// 用户说了什么
     UserMessage,
     /// 自我反思
@@ -113,7 +113,7 @@ impl EmotionState {
     /// 2. 新刺激叠加（不是替换，是混合）
     /// 3. 基线引力——缓慢拉向人格决定的基线情绪
     /// 4. 清理过期触发链
-    pub fn update_emotional_dynamics(
+    pub(crate) fn update_emotional_dynamics(
         &mut self,
         new_stimulus: Option<(&EmotionType, f32, &str, TriggerType)>,
         delta_secs: f32,
@@ -227,7 +227,7 @@ impl Default for EmotionState {
 /// `emotion.json` 再取其中一个键"：`get_state` 在每条消息的路径上被调用，
 /// 而 `update_state` 更是"全量读 → 改一个键 → 全量写"——
 /// 一个用户的情绪波动会重写所有用户的记录。
-pub fn get_state(user_id: u64) -> EmotionState {
+pub(crate) fn get_state(user_id: u64) -> EmotionState {
     let stored = crate::db::db().emotion_state(user_id);
     match stored {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
@@ -240,7 +240,7 @@ pub fn get_state(user_id: u64) -> EmotionState {
 }
 
 /// 写一个用户的情绪状态（单行 UPSERT）
-pub fn update_state(user_id: u64, state: EmotionState) {
+pub(crate) fn update_state(user_id: u64, state: EmotionState) {
     let json = match serde_json::to_string(&state) {
         Ok(json) => json,
         Err(error) => {
@@ -254,7 +254,7 @@ pub fn update_state(user_id: u64, state: EmotionState) {
 }
 
 /// 有情绪状态记录的用户数量
-pub fn user_count() -> usize {
+pub(crate) fn user_count() -> usize {
     crate::db::db().emotion_user_count().unwrap_or(0)
 }
 
@@ -296,7 +296,7 @@ fn advance_decay(state: &mut EmotionState, user_id: u64, now: u64, decay_delay_s
 /// 周期检查需要推进**所有已知用户**，而 `emotion.json` 是"每用户一个条目的
 /// 单一文件"。逐用户调用 [`decay`] 会让 1ms 主循环上的文件操作数量变成 3N
 /// （每用户一次全量读 + 一次全量读改写）。这里一次载入、一次落盘。
-pub fn decay_many(user_ids: &[u64]) {
+pub(crate) fn decay_many(user_ids: &[u64]) {
     if user_ids.is_empty() {
         return;
     }

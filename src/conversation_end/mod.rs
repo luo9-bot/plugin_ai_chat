@@ -41,7 +41,11 @@ const SHORT_CONFIRM: &[&str] = &[
 /// 关键词预筛选：快速判断对话可能已结束
 ///
 /// 返回 true 表示需要进一步 AI 判断
-pub fn keyword_screen(bot_last_message: &str, user_message: &str, current_hour: u32) -> bool {
+pub(crate) fn keyword_screen(
+    bot_last_message: &str,
+    user_message: &str,
+    current_hour: u32,
+) -> bool {
     let trimmed = user_message.trim();
 
     // 检查是否是简短确认
@@ -65,7 +69,7 @@ pub fn keyword_screen(bot_last_message: &str, user_message: &str, current_hour: 
 /// 获取对话结束检测的 prompt 上下文
 ///
 /// 注入到 Planner 中，让 AI 综合判断
-pub fn get_context(bot_last_message: &str, user_message: &str) -> String {
+pub(crate) fn get_context(bot_last_message: &str, user_message: &str) -> String {
     format!(
         "# 对话结束检测\n\
          Bot 上一条消息：{}\n\

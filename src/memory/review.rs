@@ -3,7 +3,7 @@ use tracing::{debug, info};
 use super::operations::add;
 use super::store::{Importance, MemoryEntry};
 
-pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)]) {
+pub(crate) fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)]) {
     let threshold = crate::config::get().memory.auto_summarize_threshold;
     if history.len() < threshold {
         return;
@@ -69,7 +69,7 @@ pub fn auto_summarize(user_id: u64, group_id: u64, history: &[(String, String)])
 }
 
 /// AI 驱动的记忆审查 (定期调用，整合和修正所有用户的记忆)
-pub fn ai_review_all() {
+pub(crate) fn ai_review_all() {
     info!("memory_review: 开始审查所有用户记忆");
     let user_ids = super::store::all_user_ids();
 

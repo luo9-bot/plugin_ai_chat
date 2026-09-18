@@ -13,7 +13,7 @@ use crate::db::{TurnShadowStat, db};
 
 /// 影子观测的汇总
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ShadowReport {
+pub(crate) struct ShadowReport {
     /// 参与契约统计的轮数（不含上游故障）
     pub rounds: u64,
     /// 其中在严格 Turn 契约下会被判为无效的轮数
@@ -24,7 +24,7 @@ pub struct ShadowReport {
 
 impl ShadowReport {
     /// 严格契约下的失败率（0.0~1.0）；没有样本时返回 0
-    pub fn failure_rate(&self) -> f64 {
+    pub(crate) fn failure_rate(&self) -> f64 {
         if self.rounds == 0 {
             return 0.0;
         }
@@ -32,7 +32,7 @@ impl ShadowReport {
     }
 
     /// 人类可读的一行，用于日志
-    pub fn summary_line(&self) -> String {
+    pub(crate) fn summary_line(&self) -> String {
         format!(
             "{} 轮样本，严格 Turn 契约下 {} 轮会失败（{:.1}%）",
             self.rounds,
@@ -41,7 +41,7 @@ impl ShadowReport {
         )
     }
 
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         let by_shape: Vec<serde_json::Value> = self
             .by_shape
             .iter()
@@ -101,7 +101,7 @@ fn shape_from_label(label: &str) -> Option<TurnShape> {
 }
 
 /// 取最近 `window_secs` 秒的影子观测汇总
-pub fn report(window_secs: u64) -> ShadowReport {
+pub(crate) fn report(window_secs: u64) -> ShadowReport {
     let since = crate::util::now_secs().saturating_sub(window_secs) as i64;
     match db().turn_shadow_summary(since) {
         Ok(stats) => fold(stats),
@@ -113,7 +113,7 @@ pub fn report(window_secs: u64) -> ShadowReport {
 }
 
 /// 裁剪超过 `retain_secs` 的观测记录
-pub fn prune(retain_secs: u64) -> usize {
+pub(crate) fn prune(retain_secs: u64) -> usize {
     let before = crate::util::now_secs().saturating_sub(retain_secs) as i64;
     db().prune_turn_shadow(before).unwrap_or(0)
 }

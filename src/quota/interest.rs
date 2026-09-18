@@ -12,7 +12,7 @@ use crate::config;
 /// - darling + bot 刚回复(2min内) → 0.45，无需 @即可延续对话
 /// - 2 分钟后窗口关闭 → 0.25，需要 @bot 才能突破
 /// - 普通用户 @bot + bot 活跃 → 0.35，仍无法突破（阈值 0.45）
-pub fn calculate_priority(
+pub(crate) fn calculate_priority(
     user_id: u64,
     group_id: u64,
     message: &str,
@@ -57,7 +57,7 @@ pub fn calculate_priority(
 /// - 配额充足 → 消费配额，返回 true
 /// - 配额耗尽 + 优先级 >= 0.45 → 突破配额（不消费），返回 true
 /// - 配额耗尽 + 优先级 < 0.45 → 返回 false
-pub fn try_reply(
+pub(crate) fn try_reply(
     group_id: u64,
     user_id: u64,
     message: &str,
@@ -89,7 +89,7 @@ pub fn try_reply(
 // ── Admin API ──────────────────────────────────────────────────
 
 /// 某个群最近若干段的段日志（段起始时间倒序）
-pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
+pub(crate) fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
     let messages = crate::db::db()
         .quota_messages(group_id, limit)
         .unwrap_or_default();
@@ -119,7 +119,7 @@ pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
 }
 
 /// 有段日志的群
-pub fn get_groups_with_logs() -> Vec<u64> {
+pub(crate) fn get_groups_with_logs() -> Vec<u64> {
     crate::db::db()
         .quota_groups_with_messages()
         .unwrap_or_default()

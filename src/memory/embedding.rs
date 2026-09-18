@@ -102,7 +102,7 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 /// 注意：多模态向量化 API 不支持旧版批量返回格式，
 /// 每个 input 数组整体只返回一个向量，因此需要逐个调用。
 /// 为避免内存溢出，限制每批最大处理数量。
-pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
+pub(crate) fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
     let cfg = crate::config::get();
     if !cfg.embedding.enabled() || texts.is_empty() {
         return vec![None; texts.len()];
@@ -132,7 +132,7 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
 }
 
 /// L2 归一化向量
-pub fn l2_normalize(vector: &mut [f32]) {
+pub(crate) fn l2_normalize(vector: &mut [f32]) {
     let norm: f32 = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-10 {
         for x in vector.iter_mut() {

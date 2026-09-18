@@ -130,7 +130,7 @@ fn flashback(topic: &str, user_id: u64, group_id: u64) -> Vec<String> {
 }
 
 /// 对眼前的人与话题，她能想起什么（"想起：…"行，直接入流）
-pub fn recall_for(text: &str, user_id: u64, group_id: u64) -> Vec<String> {
+pub(crate) fn recall_for(text: &str, user_id: u64, group_id: u64) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
 
     // 自我话语回响最优先：她先"听见"自己刚说过什么

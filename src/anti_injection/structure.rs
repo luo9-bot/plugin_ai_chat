@@ -3,13 +3,13 @@ use std::sync::LazyLock;
 
 /// 结构化注入检测结果
 #[derive(Debug, Clone, Default)]
-pub struct StructureScanResult {
+pub(crate) struct StructureScanResult {
     pub score: f32,
     pub findings: Vec<String>,
 }
 
 /// JSON 注入检测：查找 role=system/assistant/developer 等结构
-pub fn scan_json(text: &str) -> StructureScanResult {
+pub(crate) fn scan_json(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     // 尝试解析为 JSON
@@ -89,7 +89,7 @@ fn scan_json_value(value: &serde_json::Value, result: &mut StructureScanResult) 
 }
 
 /// YAML 注入检测
-pub fn scan_yaml(text: &str) -> StructureScanResult {
+pub(crate) fn scan_yaml(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     // 尝试解析 YAML
@@ -157,7 +157,7 @@ fn scan_yaml_value(value: &serde_yaml::Value, result: &mut StructureScanResult) 
 }
 
 /// XML 注入检测
-pub fn scan_xml(text: &str) -> StructureScanResult {
+pub(crate) fn scan_xml(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static XML_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -190,7 +190,7 @@ pub fn scan_xml(text: &str) -> StructureScanResult {
 }
 
 /// Markdown fence 注入检测
-pub fn scan_markdown(text: &str) -> StructureScanResult {
+pub(crate) fn scan_markdown(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static FENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -220,7 +220,7 @@ pub fn scan_markdown(text: &str) -> StructureScanResult {
 }
 
 /// ChatML 注入检测
-pub fn scan_chatml(text: &str) -> StructureScanResult {
+pub(crate) fn scan_chatml(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     // <|im_start|>system 等
@@ -263,7 +263,7 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
 }
 
 /// 综合结构化注入扫描（基于 raw text）
-pub fn scan_structure(raw_text: &str) -> StructureScanResult {
+pub(crate) fn scan_structure(raw_text: &str) -> StructureScanResult {
     let mut best = StructureScanResult::default();
 
     let json_result = scan_json(raw_text);

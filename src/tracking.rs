@@ -11,7 +11,7 @@
 use crate::db::ApiUsage;
 
 /// 记录一次调用
-pub fn record_call(
+pub(crate) fn record_call(
     prompt_name: &str,
     model: &str,
     prompt_tokens: u32,
@@ -38,7 +38,7 @@ pub fn record_call(
 /// 统计摘要（供 `/api/analytics`）
 ///
 /// 返回的 JSON 形状与前端既有约定一致，因此这里的改动对界面是透明的。
-pub fn summary() -> serde_json::Value {
+pub(crate) fn summary() -> serde_json::Value {
     let db = crate::db::db();
 
     let totals = match db.api_usage_totals() {

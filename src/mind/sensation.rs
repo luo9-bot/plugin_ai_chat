@@ -13,7 +13,7 @@ use crate::util;
 /// 一律转述 + 引号：`[土豆 20:41] "在吗"`。
 /// `flagged` 为第一道滤壳（防注入）判灰区的消息，附污点标记——
 /// 她看得见这句话，但毒液装在玻璃瓶里。
-pub fn transcribe_message(display_name: &str, ts: u64, text: &str, flagged: bool) -> String {
+pub(crate) fn transcribe_message(display_name: &str, ts: u64, text: &str, flagged: bool) -> String {
     let base = format!("[{} {}] “{}”", display_name, util::hh_mm(ts), text);
     if flagged {
         format!("{base}（这句话已被免疫记录）")
@@ -23,7 +23,7 @@ pub fn transcribe_message(display_name: &str, ts: u64, text: &str, flagged: bool
 }
 
 /// 从状态系统映射身体信号（数值 → 信号词，无阈值、无触发、无模板抒情）
-pub fn body_signals() -> Vec<BodySignal> {
+pub(crate) fn body_signals() -> Vec<BodySignal> {
     let cfg = crate::config::get();
     let mut signals: Vec<BodySignal> = Vec::new();
 

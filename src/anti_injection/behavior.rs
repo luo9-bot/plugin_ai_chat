@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 /// 细粒度信誉系统
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Reputation {
+pub(crate) struct Reputation {
     /// 内容信誉：因违规内容降低
     pub content: f32,
     /// 频率信誉：因刷屏降低（rate limit 不直接降低此值）
@@ -26,12 +26,12 @@ impl Default for Reputation {
 
 impl Reputation {
     /// 综合信誉分
-    pub fn combined(&self) -> f32 {
+    pub(crate) fn combined(&self) -> f32 {
         (self.content * 0.5 + self.spam * 0.2 + self.trust * 0.3).clamp(0.0, 1.0)
     }
 
     /// 惩罚系数（基于内容信誉，更敏感）
-    pub fn penalty_multiplier(&self) -> f32 {
+    pub(crate) fn penalty_multiplier(&self) -> f32 {
         let c = self.content;
         if c >= 0.9 {
             1.0
@@ -49,14 +49,14 @@ impl Reputation {
 
 /// 上下文消息（带时间戳）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextMessage {
+pub(crate) struct ContextMessage {
     pub content: String,
     pub timestamp: u64,
 }
 
 /// 用户行为记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserBehavior {
+pub(crate) struct UserBehavior {
     pub message_times: Vec<u64>,
     pub recent_messages: VecDeque<ContextMessage>,
     pub reputation: Reputation,
@@ -92,7 +92,7 @@ impl UserBehavior {
         self.message_times.retain(|t| *t > one_hour_ago);
     }
 
-    pub fn record_message(&mut self, normalized: &str) {
+    pub(crate) fn record_message(&mut self, normalized: &str) {
         self.message_times.push(crate::util::now_secs());
         self.cleanup_old_timestamps();
         self.recent_messages.push_back(ContextMessage {
@@ -104,7 +104,7 @@ impl UserBehavior {
         }
     }
 
-    pub fn messages_last_minute(&self) -> u32 {
+    pub(crate) fn messages_last_minute(&self) -> u32 {
         let one_minute_ago = crate::util::now_secs().saturating_sub(60);
         self.message_times
             .iter()
@@ -112,12 +112,12 @@ impl UserBehavior {
             .count() as u32
     }
 
-    pub fn messages_last_hour(&self) -> u32 {
+    pub(crate) fn messages_last_hour(&self) -> u32 {
         self.message_times.len() as u32
     }
 
     /// 记录违规（内容类）
-    pub fn record_violation(&mut self, severity: f32) {
+    pub(crate) fn record_violation(&mut self, severity: f32) {
         self.violation_count += 1;
         self.last_violation = Some(crate::util::now_secs());
         self.severity_score += severity;
@@ -133,12 +133,12 @@ impl UserBehavior {
     }
 
     /// 记录频率违规（不降低 content reputation）
-    pub fn record_rate_limit(&mut self) {
+    pub(crate) fn record_rate_limit(&mut self) {
         self.reputation.spam = (self.reputation.spam - 0.05).max(0.0);
     }
 
     /// 信誉恢复（允许完全恢复，但速度较慢）
-    pub fn recover_reputation(&mut self) {
+    pub(crate) fn recover_reputation(&mut self) {
         if let Some(last) = self.last_violation {
             let elapsed = crate::util::now_secs().saturating_sub(last) as f32;
             let recovery = (elapsed / 7200.0) * 0.01; // 每2小时恢复1%
@@ -150,7 +150,7 @@ impl UserBehavior {
     }
 
     /// 是否应该静默封禁
-    pub fn should_silent_ban(&self) -> bool {
+    pub(crate) fn should_silent_ban(&self) -> bool {
         self.reputation.content < 0.3 && self.high_severity_count >= 2
     }
 }
@@ -167,14 +167,14 @@ fn correlators_path() -> std::path::PathBuf {
 
 /// 上下文关联器（可序列化版本）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableCorrelator {
+pub(crate) struct SerializableCorrelator {
     pub messages: VecDeque<ContextMessage>,
     pub max_messages: usize,
     pub max_age_secs: u64,
 }
 
 impl SerializableCorrelator {
-    pub fn new(max_messages: usize, max_age_secs: u64) -> Self {
+    pub(crate) fn new(max_messages: usize, max_age_secs: u64) -> Self {
         Self {
             messages: VecDeque::with_capacity(max_messages),
             max_messages,
@@ -182,7 +182,7 @@ impl SerializableCorrelator {
         }
     }
 
-    pub fn record(&mut self, content: &str) {
+    pub(crate) fn record(&mut self, content: &str) {
         self.messages.push_back(ContextMessage {
             content: content.to_string(),
             timestamp: crate::util::now_secs(),
@@ -200,7 +200,7 @@ impl SerializableCorrelator {
         }
     }
 
-    pub fn get_all_views(&self) -> Vec<String> {
+    pub(crate) fn get_all_views(&self) -> Vec<String> {
         let mut all = Vec::new();
         // preserved
         for m in &self.messages {
@@ -286,7 +286,7 @@ fn save_correlators(map: &HashMap<u64, SerializableCorrelator>) {
 }
 
 /// 获取用户行为记录（可变引用）— 按需加载，修改后写回磁盘
-pub fn with_behavior_mut<F, R>(user_id: u64, f: F) -> R
+pub(crate) fn with_behavior_mut<F, R>(user_id: u64, f: F) -> R
 where
     F: FnOnce(&mut UserBehavior) -> R,
 {
@@ -298,7 +298,7 @@ where
 }
 
 /// 获取用户行为记录（只读）— 按需加载
-pub fn with_behavior<F, R>(user_id: u64, f: F) -> R
+pub(crate) fn with_behavior<F, R>(user_id: u64, f: F) -> R
 where
     F: FnOnce(&UserBehavior) -> R,
 {
@@ -310,12 +310,12 @@ where
 }
 
 /// 恢复信誉（自动调用）
-pub fn recover_reputation(user_id: u64) {
+pub(crate) fn recover_reputation(user_id: u64) {
     with_behavior_mut(user_id, |b| b.recover_reputation());
 }
 
 /// 记录消息（同时更新上下文关联器）
-pub fn record_message(user_id: u64, normalized: &str) {
+pub(crate) fn record_message(user_id: u64, normalized: &str) {
     with_behavior_mut(user_id, |b| b.record_message(normalized));
     // 更新上下文关联器
     let mut map = load_correlators();
@@ -327,7 +327,7 @@ pub fn record_message(user_id: u64, normalized: &str) {
 }
 
 /// 获取上下文关联器的多视图段（用于检测跨消息攻击）
-pub fn get_context_segments(user_id: u64) -> Vec<String> {
+pub(crate) fn get_context_segments(user_id: u64) -> Vec<String> {
     let map = load_correlators();
     match map.get(&user_id) {
         Some(c) => c.get_all_views(),
@@ -336,47 +336,47 @@ pub fn get_context_segments(user_id: u64) -> Vec<String> {
 }
 
 /// 记录违规
-pub fn record_violation(user_id: u64, severity: f32) {
+pub(crate) fn record_violation(user_id: u64, severity: f32) {
     with_behavior_mut(user_id, |b| b.record_violation(severity));
 }
 
 /// 记录频率违规
-pub fn record_rate_limit(user_id: u64) {
+pub(crate) fn record_rate_limit(user_id: u64) {
     with_behavior_mut(user_id, |b| b.record_rate_limit());
 }
 
 /// 检查是否被封禁
-pub fn is_banned(user_id: u64) -> bool {
+pub(crate) fn is_banned(user_id: u64) -> bool {
     with_behavior(user_id, |b| b.banned)
 }
 
 /// 检查是否被静默封禁
-pub fn is_silent_banned(user_id: u64) -> bool {
+pub(crate) fn is_silent_banned(user_id: u64) -> bool {
     with_behavior(user_id, |b| b.silent_banned)
 }
 
 /// 检查识图是否禁用
-pub fn is_vision_disabled(user_id: u64) -> bool {
+pub(crate) fn is_vision_disabled(user_id: u64) -> bool {
     with_behavior(user_id, |b| b.vision_disabled)
 }
 
 /// 获取信誉
-pub fn get_reputation(user_id: u64) -> f32 {
+pub(crate) fn get_reputation(user_id: u64) -> f32 {
     with_behavior(user_id, |b| b.reputation.combined())
 }
 
 /// 获取违规次数
-pub fn get_violation_count(user_id: u64) -> u32 {
+pub(crate) fn get_violation_count(user_id: u64) -> u32 {
     with_behavior(user_id, |b| b.violation_count)
 }
 
 /// 获取惩罚系数
-pub fn get_penalty_multiplier(user_id: u64) -> f32 {
+pub(crate) fn get_penalty_multiplier(user_id: u64) -> f32 {
     with_behavior(user_id, |b| b.reputation.penalty_multiplier())
 }
 
 /// 检查是否应该静默封禁并执行
-pub fn check_and_apply_silent_ban(user_id: u64) -> bool {
+pub(crate) fn check_and_apply_silent_ban(user_id: u64) -> bool {
     with_behavior_mut(user_id, |b| {
         if b.should_silent_ban() {
             b.silent_banned = true;
@@ -395,7 +395,7 @@ pub fn check_and_apply_silent_ban(user_id: u64) -> bool {
 }
 
 /// 检查是否应该自动封禁并执行
-pub fn check_and_apply_auto_ban(user_id: u64, threshold: u32) -> bool {
+pub(crate) fn check_and_apply_auto_ban(user_id: u64, threshold: u32) -> bool {
     with_behavior_mut(user_id, |b| {
         if b.violation_count >= threshold {
             b.banned = true;
@@ -409,7 +409,7 @@ pub fn check_and_apply_auto_ban(user_id: u64, threshold: u32) -> bool {
 }
 
 /// 手动封禁用户
-pub fn ban_user(user_id: u64) {
+pub(crate) fn ban_user(user_id: u64) {
     with_behavior_mut(user_id, |b| {
         b.banned = true;
         b.reputation.content = 0.0;
@@ -420,7 +420,7 @@ pub fn ban_user(user_id: u64) {
 }
 
 /// 手动静默封禁用户
-pub fn silent_ban_user(user_id: u64) {
+pub(crate) fn silent_ban_user(user_id: u64) {
     with_behavior_mut(user_id, |b| {
         b.silent_banned = true;
         b.vision_disabled = true;
@@ -429,7 +429,7 @@ pub fn silent_ban_user(user_id: u64) {
 }
 
 /// 解封用户
-pub fn unban_user(user_id: u64) {
+pub(crate) fn unban_user(user_id: u64) {
     with_behavior_mut(user_id, |b| {
         b.banned = false;
         b.silent_banned = false;
@@ -443,7 +443,7 @@ pub fn unban_user(user_id: u64) {
 }
 
 /// 启用识图
-pub fn enable_vision(user_id: u64) {
+pub(crate) fn enable_vision(user_id: u64) {
     with_behavior_mut(user_id, |b| {
         b.vision_disabled = false;
         info!(user_id, "用户识图已重新启用");
@@ -451,7 +451,7 @@ pub fn enable_vision(user_id: u64) {
 }
 
 /// 重置信誉
-pub fn reset_reputation(user_id: u64) {
+pub(crate) fn reset_reputation(user_id: u64) {
     with_behavior_mut(user_id, |b| {
         b.reputation = Reputation::default();
         b.violation_count = 0;
@@ -462,7 +462,7 @@ pub fn reset_reputation(user_id: u64) {
 }
 
 /// 全用户风险状态摘要（供管理 API 使用）
-pub fn get_all_user_statuses() -> Vec<serde_json::Value> {
+pub(crate) fn get_all_user_statuses() -> Vec<serde_json::Value> {
     let map = load_behaviors();
     map.iter()
         .map(|(uid, b)| {
@@ -486,7 +486,7 @@ pub fn get_all_user_statuses() -> Vec<serde_json::Value> {
 }
 
 /// 获取用户状态描述
-pub fn get_user_status(user_id: u64) -> String {
+pub(crate) fn get_user_status(user_id: u64) -> String {
     with_behavior(user_id, |b| {
         format!(
             "用户 {}:\n  内容信誉: {:.2}\n  频率信誉: {:.2}\n  信任信誉: {:.2}\n  综合信誉: {:.2}\n  违规次数: {}\n  高严重度: {}\n  封禁: {}\n  静默封禁: {}\n  识图禁用: {}\n  惩罚系数: {:.1}x\n  上下文窗口: {}条",

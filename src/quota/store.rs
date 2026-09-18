@@ -16,14 +16,14 @@ use crate::util::{hour_cst_at, now_secs, segment_start_cst};
 // ── 段日志（后台视图用） ────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SegmentMessage {
+pub(crate) struct SegmentMessage {
     pub user_id: u64,
     pub message: String,
     pub timestamp: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SegmentLogEntry {
+pub(crate) struct SegmentLogEntry {
     pub segment_start: u64,
     pub messages: Vec<SegmentMessage>,
 }
@@ -31,7 +31,7 @@ pub struct SegmentLogEntry {
 // ── 初始化 ──────────────────────────────────────────────────
 
 /// 初始化：跨天则重置，并裁掉 48 小时前的段日志
-pub fn init() {
+pub(crate) fn init() {
     let db = crate::db::db();
     match db.quota_roll_day(&crate::util::today_str()) {
         Ok(true) => debug!("quota: 跨天，计数与段日志已重置"),

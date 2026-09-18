@@ -202,7 +202,7 @@ fn perceive_batch_message(group_id: u64, user_id: u64, message: &str, entry_ids:
 // ── 私聊 ────────────────────────────────────────────────────────
 
 /// 私聊消息处理：感知 → 表达 → 落地
-pub fn process_message(user_id: u64, message: &str) {
+pub(crate) fn process_message(user_id: u64, message: &str) {
     // 标记用户为处理中，防止并发处理同一用户的消息
     {
         let mut processing = processing_users().lock_recover();
@@ -357,7 +357,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
 /// 结构化而不是元组：字段多了以后 `(u64, String, Vec<u64>, Vec<u64>)`
 /// 在调用点完全读不出含义，传参顺序写错编译器也帮不上忙。
 #[derive(Debug, Clone)]
-pub struct GroupBatch {
+pub(crate) struct GroupBatch {
     /// 群号（私聊为 0）
     pub group_id: u64,
     pub user_id: u64,
@@ -367,18 +367,18 @@ pub struct GroupBatch {
 
 impl GroupBatch {
     /// 这批消息最早到达的时刻（秒）
-    pub fn first_arrival(&self) -> u64 {
+    pub(crate) fn first_arrival(&self) -> u64 {
         self.taken.first_arrival()
     }
 
     /// 排序用的到达时刻（毫秒）
-    pub fn sort_key_ms(&self) -> u64 {
+    pub(crate) fn sort_key_ms(&self) -> u64 {
         self.taken.sort_key_ms()
     }
 }
 
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
-pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
+pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
     let self_qq = cfg.self_qq;
 

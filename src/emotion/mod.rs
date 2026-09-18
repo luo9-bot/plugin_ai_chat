@@ -4,7 +4,9 @@ mod state;
 // ── re-exports ────────────────────────────────────────────────
 
 // state.rs
-pub use state::{EmotionState, EmotionType, decay_many, get_state, update_state, user_count};
+pub(crate) use state::{
+    EmotionState, EmotionType, decay_many, get_state, update_state, user_count,
+};
 
 // detect.rs
-pub use detect::analyze_user_message;
+pub(crate) use detect::analyze_user_message;

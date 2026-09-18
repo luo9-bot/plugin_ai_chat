@@ -1,9 +1,9 @@
 //! 人物档案系统
 
-pub mod relationship;
+pub(crate) mod relationship;
 mod store;
 
-pub use store::*;
+pub(crate) use store::*;
 
 use tracing::{debug, info};
 

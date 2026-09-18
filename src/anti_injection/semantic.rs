@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 /// 语义检测类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SemanticCategory {
+pub(crate) enum SemanticCategory {
     /// 提示词泄露
     PromptExfiltration,
     /// 元执行指令
@@ -18,7 +18,7 @@ pub enum SemanticCategory {
 
 /// 语义检测结果
 #[derive(Debug, Clone, Default)]
-pub struct SemanticScores {
+pub(crate) struct SemanticScores {
     pub prompt_exfiltration: f32,
     pub meta_execution: f32,
     pub authority_override: f32,
@@ -27,7 +27,7 @@ pub struct SemanticScores {
 }
 
 impl SemanticScores {
-    pub fn add(&mut self, category: SemanticCategory, score: f32) {
+    pub(crate) fn add(&mut self, category: SemanticCategory, score: f32) {
         match category {
             SemanticCategory::PromptExfiltration => {
                 self.prompt_exfiltration = (self.prompt_exfiltration + score).min(1.0)
@@ -278,7 +278,7 @@ fn build_semantic_rules() -> Vec<SemanticRule> {
 static SEMANTIC_RULES: LazyLock<Vec<SemanticRule>> = LazyLock::new(build_semantic_rules);
 
 /// 在单段文本上执行语义启发式扫描
-pub fn scan_semantic_segment(segment: &str) -> SemanticScores {
+pub(crate) fn scan_semantic_segment(segment: &str) -> SemanticScores {
     let mut scores = SemanticScores::default();
     for rule in SEMANTIC_RULES.iter() {
         if rule.regex.is_match(segment) {
@@ -289,7 +289,7 @@ pub fn scan_semantic_segment(segment: &str) -> SemanticScores {
 }
 
 /// 对多段文本执行语义扫描（逐段）
-pub fn scan_semantic(segments: &[String]) -> SemanticScores {
+pub(crate) fn scan_semantic(segments: &[String]) -> SemanticScores {
     let mut combined = SemanticScores::default();
     for seg in segments {
         let seg_scores = scan_semantic_segment(seg);
@@ -309,7 +309,7 @@ pub fn scan_semantic(segments: &[String]) -> SemanticScores {
 }
 
 /// 将语义检测结果合并到 jailbreak 分数
-pub fn semantic_to_jailbreak(scores: &SemanticScores) -> f32 {
+pub(crate) fn semantic_to_jailbreak(scores: &SemanticScores) -> f32 {
     // 使用贝叶斯融合
     let probs = [
         scores.prompt_exfiltration,

@@ -18,7 +18,7 @@ use crate::config;
 const MAX_READ_MS: u64 = 2500;
 
 /// 回复时机配置（动态计算）
-pub struct ResponseTiming {
+pub(crate) struct ResponseTiming {
     /// 基础打字速度（字符/秒），受人格影响
     pub base_typing_speed: f32,
     /// 当前修正系数（受精力/情绪/昼夜节律影响）
@@ -38,7 +38,7 @@ impl Default for ResponseTiming {
 
 impl ResponseTiming {
     /// 根据当前状态计算修正后的打字速度
-    pub fn effective_speed(&self) -> f32 {
+    pub(crate) fn effective_speed(&self) -> f32 {
         (self.base_typing_speed * self.speed_modifier).max(1.0)
     }
 
@@ -58,7 +58,7 @@ impl ResponseTiming {
     /// `incoming` 是刚看到的消息内容（用来估算"读完"的时间），
     /// `cap_ms` 是配置里的延迟上限。延迟上限由调用方给出，本函数
     /// 不读配置——这样节奏计算是纯函数，可测且不受全局状态影响。
-    pub fn calculate_delay(&self, reply_text: &str, incoming: &str, cap_ms: u64) -> u64 {
+    pub(crate) fn calculate_delay(&self, reply_text: &str, incoming: &str, cap_ms: u64) -> u64 {
         let reply_chars = reply_text.chars().count() as f32;
         let incoming_chars = incoming.chars().count() as f32;
         let cap = cap_ms.max(1);
@@ -85,7 +85,7 @@ impl ResponseTiming {
     }
 
     /// 根据当前状态更新修正系数
-    pub fn update_modifiers(
+    pub(crate) fn update_modifiers(
         &mut self,
         battery_level: f32,
         circadian_energy: f32,

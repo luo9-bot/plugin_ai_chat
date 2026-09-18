@@ -19,7 +19,7 @@ const CST_OFFSET_SECS: i64 = 8 * 3600;
 const SECS_PER_DAY: i64 = 86_400;
 
 /// 当前 Unix 时间戳（秒）
-pub fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -27,7 +27,7 @@ pub fn now_secs() -> u64 {
 }
 
 /// 当前 Unix 时间戳（毫秒）
-pub fn now_millis() -> u64 {
+pub(crate) fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -37,17 +37,17 @@ pub fn now_millis() -> u64 {
 // ── 东八区投影（纯函数） ────────────────────────────────────────
 
 /// 时间戳 → 东八区"日序号"（自 epoch 起的天数）
-pub fn day_index_cst(secs: u64) -> u64 {
+pub(crate) fn day_index_cst(secs: u64) -> u64 {
     ((secs as i64 + CST_OFFSET_SECS).div_euclid(SECS_PER_DAY)) as u64
 }
 
 /// 时间戳 → 东八区当天已过的秒数
-pub fn secs_of_day_cst(secs: u64) -> u64 {
+pub(crate) fn secs_of_day_cst(secs: u64) -> u64 {
     (secs as i64 + CST_OFFSET_SECS).rem_euclid(SECS_PER_DAY) as u64
 }
 
 /// 时间戳 → 东八区小时 (0-23)
-pub fn hour_cst_at(secs: u64) -> u32 {
+pub(crate) fn hour_cst_at(secs: u64) -> u32 {
     (secs_of_day_cst(secs) / 3600) as u32
 }
 
@@ -57,7 +57,7 @@ pub fn hour_cst_at(secs: u64) -> u32 {
 /// 5 分钟段跨过整点（13:58–14:02）：段内的小时配额上限中途变化，
 /// 而该段的计数不重置，于是"这一小时还剩多少条"两个量互相矛盾。
 /// 对齐到当天零点后，只要段长能整除一小时，一个段必然落在同一个小时里。
-pub fn segment_start_cst(secs: u64, segment_secs: u64) -> u64 {
+pub(crate) fn segment_start_cst(secs: u64, segment_secs: u64) -> u64 {
     if segment_secs == 0 {
         return secs;
     }
@@ -69,7 +69,7 @@ pub fn segment_start_cst(secs: u64, segment_secs: u64) -> u64 {
 ///
 /// `start == end` 视为"没有免打扰时段"，而不是"整天都免打扰"——
 /// 后者会让一个没配置过的时段静默关掉全部主动行为。
-pub fn hour_in_window(hour: u32, start: u32, end: u32) -> bool {
+pub(crate) fn hour_in_window(hour: u32, start: u32, end: u32) -> bool {
     if start == end {
         return false;
     }
@@ -81,7 +81,7 @@ pub fn hour_in_window(hour: u32, start: u32, end: u32) -> bool {
 }
 
 /// 当前 UTC+8 小时数 (0-23)
-pub fn current_hour_cst() -> u32 {
+pub(crate) fn current_hour_cst() -> u32 {
     hour_cst_at(now_secs())
 }
 
@@ -92,18 +92,18 @@ pub fn current_hour_cst() -> u32 {
 /// 用于"今天 23:30"这类以本地日历表达的调度时刻，替代手写
 /// `now + 8*3600` → 取整 → `- 8*3600` 的偏移运算：那种写法一旦有一处
 /// 忘了减回去，就会把本地时间当 UTC 用。
-pub fn cst_time_on_same_day(secs: u64, hour: u32, minute: u32) -> u64 {
+pub(crate) fn cst_time_on_same_day(secs: u64, hour: u32, minute: u32) -> u64 {
     let day_start = secs - secs_of_day_cst(secs);
     day_start + hour as u64 * 3600 + minute as u64 * 60
 }
 
 /// 判断闰年
-pub fn is_leap_year(year: u64) -> bool {
+pub(crate) fn is_leap_year(year: u64) -> bool {
     (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 /// 从 epoch 天数计算 (年, 月, 日)，UTC+8
-pub fn epoch_days_to_ymd(mut days: u64) -> (u64, u32, u32) {
+pub(crate) fn epoch_days_to_ymd(mut days: u64) -> (u64, u32, u32) {
     let mut y = 1970u64;
     loop {
         let days_in_year = if is_leap_year(y) { 366 } else { 365 };
@@ -140,23 +140,23 @@ pub fn epoch_days_to_ymd(mut days: u64) -> (u64, u32, u32) {
 }
 
 /// 时间戳 → (年, 月, 日)，UTC+8
-pub fn ts_to_ymd_cst(secs: u64) -> (u64, u32, u32) {
+pub(crate) fn ts_to_ymd_cst(secs: u64) -> (u64, u32, u32) {
     epoch_days_to_ymd(day_index_cst(secs))
 }
 
 /// 时间戳 → 日期字符串 "YYYY-MM-DD"（UTC+8）
-pub fn ts_to_date_str(secs: u64) -> String {
+pub(crate) fn ts_to_date_str(secs: u64) -> String {
     let (y, m, d) = ts_to_ymd_cst(secs);
     format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// 当前 UTC+8 日期字符串 "YYYY-MM-DD"
-pub fn today_str() -> String {
+pub(crate) fn today_str() -> String {
     ts_to_date_str(now_secs())
 }
 
 /// 当前 UTC+8 格式化时间 "HH:MM:SS (YYYY年M月D日)"
-pub fn now_formatted_cst() -> String {
+pub(crate) fn now_formatted_cst() -> String {
     let now = now_secs();
     let of_day = secs_of_day_cst(now);
     let (year, month, day) = ts_to_ymd_cst(now);
@@ -172,19 +172,19 @@ pub fn now_formatted_cst() -> String {
 }
 
 /// 时间戳 → "HH:MM"（东八区）
-pub fn hh_mm(secs: u64) -> String {
+pub(crate) fn hh_mm(secs: u64) -> String {
     let of_day = secs_of_day_cst(secs);
     format!("{:02}:{:02}", of_day / 3600, (of_day % 3600) / 60)
 }
 
 /// 时间戳 → 月份字符串 "YYYY-MM"（UTC+8）
-pub fn ts_to_month_str(secs: u64) -> String {
+pub(crate) fn ts_to_month_str(secs: u64) -> String {
     let (y, m, _) = ts_to_ymd_cst(secs);
     format!("{y:04}-{m:02}")
 }
 
 /// 时间戳 → UTC+8 星期几（1=周一, 7=周日）
-pub fn weekday_cst_at(secs: u64) -> u32 {
+pub(crate) fn weekday_cst_at(secs: u64) -> u32 {
     // 1970-01-01 是**周四**，因此日序号 0 对应 4。
     // 这里曾经写成 `((days + 3) % 7)` 再把 0 特判成 7——那会把周四算成周三，
     // 于是 `monday_of_week_str()` 得到的是"周一的前一天"，周计划的边界
@@ -196,12 +196,12 @@ pub fn weekday_cst_at(secs: u64) -> u32 {
 ///
 /// 直接在"epoch 天数"上做减法，不经过时间戳：用 `now_secs() - offset*86400`
 /// 会把当天的时分秒一起带进结果，跨零点时容易算错一天。
-pub fn monday_of_week_str() -> String {
+pub(crate) fn monday_of_week_str() -> String {
     monday_of_week_str_at(now_secs())
 }
 
 /// 某时间戳所在那一周的周一日期字符串（UTC+8）
-pub fn monday_of_week_str_at(secs: u64) -> String {
+pub(crate) fn monday_of_week_str_at(secs: u64) -> String {
     let days = day_index_cst(secs);
     let offset = (weekday_cst_at(secs) - 1) as u64;
     let (y, m, d) = epoch_days_to_ymd(days.saturating_sub(offset));

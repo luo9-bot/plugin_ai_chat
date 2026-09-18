@@ -12,7 +12,7 @@ use crate::util::{RwLockReadExt, RwLockWriteExt};
 /// 错误位置且无人察觉）。因此本函数是"配置必须先初始化"的断言，也是全仓
 /// 少数被显式豁免 `expect_used` 的位置之一。
 #[allow(clippy::expect_used)]
-pub fn data_dir() -> &'static PathBuf {
+pub(crate) fn data_dir() -> &'static PathBuf {
     DATA_DIR.get().expect("Config not initialized")
 }
 
@@ -20,7 +20,7 @@ pub fn data_dir() -> &'static PathBuf {
 ///
 /// 给"可能在启动流程之前被调用"的模块用（状态库的惰性打开）。
 /// 这类模块不该因为启动顺序而 panic——那是把顺序错误变成崩溃。
-pub fn try_data_dir() -> Option<&'static PathBuf> {
+pub(crate) fn try_data_dir() -> Option<&'static PathBuf> {
     DATA_DIR.get()
 }
 
@@ -28,7 +28,7 @@ pub fn try_data_dir() -> Option<&'static PathBuf> {
 ///
 /// 同 [`data_dir`]：未初始化即访问配置是启动顺序错误，必须立刻可见。
 #[allow(clippy::expect_used)]
-pub fn get() -> Config {
+pub(crate) fn get() -> Config {
     CONFIG
         .read_recover()
         .as_ref()
@@ -37,12 +37,12 @@ pub fn get() -> Config {
 }
 
 /// 获取配置解析错误信息，为空表示正常
-pub fn error_message() -> String {
+pub(crate) fn error_message() -> String {
     CONFIG_ERROR.read_recover().clone()
 }
 
 /// 重新载入配置文件（热重载，无需重启插件）
-pub fn reload() -> Result<(), String> {
+pub(crate) fn reload() -> Result<(), String> {
     let config_path = data_dir().join("config.yaml");
     let content = fs::read_to_string(&config_path).map_err(|e| format!("读取配置失败: {}", e))?;
     let config: Config = match serde_yaml::from_str(&content) {
@@ -69,7 +69,7 @@ pub fn reload() -> Result<(), String> {
     Ok(())
 }
 
-pub fn prompt() -> String {
+pub(crate) fn prompt() -> String {
     PROMPT.read_recover().clone()
 }
 
@@ -86,7 +86,7 @@ pub fn prompt() -> String {
 /// 写盘前先反序列化校验一次：序列化/反序列化不对称（`skip_serializing`、
 /// 自定义 `deserialize_with` 等）会让配置变成"写得进、读不出"，
 /// 那正是"改坏配置导致插件起不来"的成因。
-pub fn save(config: &Config) -> Result<(), String> {
+pub(crate) fn save(config: &Config) -> Result<(), String> {
     let path = data_dir().join("config.yaml");
     let yaml = serde_yaml::to_string(config).map_err(|e| format!("序列化配置失败: {e}"))?;
 

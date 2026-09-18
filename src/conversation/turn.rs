@@ -17,7 +17,7 @@ use super::super::voice::GroupUtterance;
 
 /// 批内一条发言的规范化视图
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UtteranceDigest {
+pub(crate) struct UtteranceDigest {
     pub user_id: u64,
     /// @ 与 CQ 码之外的纯正文
     pub text: String,
@@ -54,7 +54,7 @@ impl UtteranceDigest {
 
 /// 一批消息的焦点判定结果
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TurnFocus {
+pub(crate) struct TurnFocus {
     /// 按到达时间升序的发言
     pub digests: Vec<UtteranceDigest>,
     /// 明确叫她的人（@ 或叫名字），按发言先后
@@ -67,12 +67,12 @@ pub struct TurnFocus {
 
 impl TurnFocus {
     /// 有没有明确的呼叫信号——有就直接叫醒她，不经过评分门控。
-    pub fn is_called(&self) -> bool {
+    pub(crate) fn is_called(&self) -> bool {
         !self.called_by.is_empty()
     }
 
     /// 除了 primary，是否还有别人也在这批里说话。
-    pub fn has_other_speakers(&self) -> bool {
+    pub(crate) fn has_other_speakers(&self) -> bool {
         self.digests
             .iter()
             .any(|d| d.has_text() && d.user_id != self.primary)
@@ -81,7 +81,7 @@ impl TurnFocus {
     /// 评分用的"被点名"加成：叫她的人或刚回过的人越多越该说话。
     ///
     /// 返回 0.0 / 0.5 / 1.0 三档，避免连续值被手工常量放大。
-    pub fn addressing_strength(&self) -> f32 {
+    pub(crate) fn addressing_strength(&self) -> f32 {
         if self.is_called() {
             1.0
         } else if !self.followed_up_by.is_empty() {
@@ -93,13 +93,13 @@ impl TurnFocus {
 }
 
 /// 剥掉 CQ 码，只留正文（实现已移到 `util`，检索层也要用）
-pub use crate::util::strip_cq_codes;
+pub(crate) use crate::util::strip_cq_codes;
 
 /// 从**原始 CQ 文本**里取出被 @ 的 QQ 号
 ///
 /// 调用方必须传 CQ 原文：归一化后的文本里 `[CQ:at,qq=N]` 已变成 `@名字`，
 /// 在这里解析只会得到空列表（这正是"@ 了却不算叫她"的成因）。
-pub fn at_targets(text: &str) -> Vec<u64> {
+pub(crate) fn at_targets(text: &str) -> Vec<u64> {
     let mut targets = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("[CQ:at,qq=") {
@@ -125,7 +125,7 @@ fn names_bot(text: &str, bot_name: &str) -> bool {
 ///
 /// `is_follow_up(user_id)` 由调用方提供（通常是"她 N 秒内回过这个人"），
 /// 保持本函数纯粹可测。
-pub fn focus_batch(
+pub(crate) fn focus_batch(
     utterances: &[GroupUtterance],
     self_qq: u64,
     bot_name: &str,

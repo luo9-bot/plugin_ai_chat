@@ -20,7 +20,7 @@ use crate::config;
 /// 计划跨度
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Timeframe {
+pub(crate) enum Timeframe {
     /// 今日
     Day,
     /// 本周
@@ -30,7 +30,7 @@ pub enum Timeframe {
 }
 
 impl Timeframe {
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Day => "今日",
             Self::Week => "本周",
@@ -39,10 +39,10 @@ impl Timeframe {
     }
 
     /// 全部跨度，按"越近越先说"排序
-    pub const ALL: [Timeframe; 3] = [Timeframe::Day, Timeframe::Week, Timeframe::Month];
+    pub(crate) const ALL: [Timeframe; 3] = [Timeframe::Day, Timeframe::Week, Timeframe::Month];
 
     /// 稳定前缀，用于让她用 id 指认时不产生歧义
-    pub fn id_prefix(self) -> &'static str {
+    pub(crate) fn id_prefix(self) -> &'static str {
         match self {
             Self::Day => "d",
             Self::Week => "w",
@@ -53,7 +53,7 @@ impl Timeframe {
 
 /// 一条计划事项
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanItem {
+pub(crate) struct PlanItem {
     /// 稳定短 id（如 `d3` / `w1` / `m2`）——她引用它来落笔
     pub id: String,
     pub content: String,
@@ -81,12 +81,12 @@ const MAX_CONTENT_CHARS: usize = 60;
 
 impl PlanItem {
     /// 是否还值得推进（未完成）
-    pub fn is_open(&self) -> bool {
+    pub(crate) fn is_open(&self) -> bool {
         !self.completed
     }
 
     /// 一行用于 prompt 的渲染
-    pub fn render_line(&self) -> String {
+    pub(crate) fn render_line(&self) -> String {
         let mark = if self.completed { "✓" } else { "·" };
         let note = if self.completion_note.is_empty() {
             String::new()
@@ -108,7 +108,7 @@ impl PlanItem {
 
 /// 一个跨度的计划（落盘单元）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Plan {
+pub(crate) struct Plan {
     /// 周期标识：日报日期 / 周一日期 / 年月
     #[serde(default)]
     pub period: String,
@@ -172,7 +172,7 @@ const GENERATION_RETRY_SECS: u64 = 30 * 60;
 /// - 条目为空且距上次尝试已过 [`GENERATION_RETRY_SECS`]：上次没生成出内容，重试
 ///
 /// 条目为空但刚试过 → 不重试，等间隔到。
-pub fn ensure_plan(timeframe: Timeframe) -> bool {
+pub(crate) fn ensure_plan(timeframe: Timeframe) -> bool {
     let plan = load(timeframe);
     let period = current_period(timeframe);
     if plan.period == period && !plan.items.is_empty() {
@@ -220,7 +220,7 @@ pub fn ensure_plan(timeframe: Timeframe) -> bool {
 ///
 /// 生成是整体替换而不是追加：跨周/跨月时旧条目已在 `ensure_plan` 里清空，
 /// 同日重跑也不该把同一批目标堆两份。
-pub fn replace_items(timeframe: Timeframe, generated: Vec<GeneratedItem>) {
+pub(crate) fn replace_items(timeframe: Timeframe, generated: Vec<GeneratedItem>) {
     let mut plan = load(timeframe);
     if plan.period != current_period(timeframe) {
         // 生成期间跨了周期：以当前周期为准重开
@@ -259,7 +259,7 @@ pub fn replace_items(timeframe: Timeframe, generated: Vec<GeneratedItem>) {
 
 /// AI 生成结果里的一条（还没有 id）
 #[derive(Debug, Clone)]
-pub struct GeneratedItem {
+pub(crate) struct GeneratedItem {
     pub content: String,
     pub target_day: Option<String>,
 }
@@ -267,12 +267,12 @@ pub struct GeneratedItem {
 // ── 读取 ────────────────────────────────────────────────────────
 
 /// 某个跨度的计划（admin 展示用）
-pub fn plan_of(timeframe: Timeframe) -> Plan {
+pub(crate) fn plan_of(timeframe: Timeframe) -> Plan {
     load(timeframe)
 }
 
 /// 当前周期仍未完成的条目
-pub fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
+pub(crate) fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
     load(timeframe)
         .items
         .into_iter()
@@ -283,7 +283,7 @@ pub fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
 /// 跨全部跨度的未完成条目，供她一眼看全并指认
 ///
 /// 排序：今日 → 本周 → 本月，各自保持生成顺序。
-pub fn open_items_all() -> Vec<PlanItem> {
+pub(crate) fn open_items_all() -> Vec<PlanItem> {
     Timeframe::ALL.into_iter().flat_map(open_items).collect()
 }
 
@@ -291,7 +291,7 @@ pub fn open_items_all() -> Vec<PlanItem> {
 ///
 /// 只给未完成的：已勾掉的再列一遍会诱导她重复决定"要不要做"。
 /// 上限 `max` 条，避免计划变长后把 prompt 撑爆。
-pub fn render_open_items(max: usize) -> Option<String> {
+pub(crate) fn render_open_items(max: usize) -> Option<String> {
     let items = open_items_all();
     if items.is_empty() {
         return None;
@@ -308,7 +308,7 @@ pub fn render_open_items(max: usize) -> Option<String> {
 
 /// 状态变更的结果
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetStatusOutcome {
+pub(crate) enum SetStatusOutcome {
     /// 落笔成功
     Applied {
         id: String,
@@ -323,7 +323,7 @@ pub enum SetStatusOutcome {
 ///
 /// `completed = Some(true)` 勾选完成，`Some(false)` 取消勾选，
 /// `None` 只推进展不动完成状态。
-pub fn set_status(
+pub(crate) fn set_status(
     item_id: &str,
     completed: Option<bool>,
     note: &str,
@@ -375,7 +375,7 @@ pub fn set_status(
 }
 
 /// 她给自己加一条计划（当日）
-pub fn add_own_item(content: &str) -> Option<PlanItem> {
+pub(crate) fn add_own_item(content: &str) -> Option<PlanItem> {
     let content = content.trim();
     if content.is_empty() || content.chars().count() > MAX_CONTENT_CHARS {
         return None;
@@ -420,7 +420,7 @@ fn push_history_path() -> std::path::PathBuf {
 }
 
 /// 记一笔计划状态变更，供管理页回看
-pub fn record_activity_log(item: &PlanItem, completed: bool) {
+pub(crate) fn record_activity_log(item: &PlanItem, completed: bool) {
     let path = push_history_path();
     let mut history: Vec<serde_json::Value> = fs::read_to_string(&path)
         .ok()
@@ -442,7 +442,7 @@ pub fn record_activity_log(item: &PlanItem, completed: bool) {
 }
 
 /// 推动历史（admin 读取）
-pub fn push_history() -> Vec<serde_json::Value> {
+pub(crate) fn push_history() -> Vec<serde_json::Value> {
     fs::read_to_string(push_history_path())
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
