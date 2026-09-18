@@ -17,8 +17,6 @@ pub struct PosteriorGraphConfig {
     pub drop_ratio: f64,
     /// 最少核心结果数
     pub min_core_results: usize,
-    /// 最多图补充结果数
-    pub max_graph_slots: usize,
     /// 连通性提升权重
     pub connectivity_boost: f64,
     /// 孤立结果惩罚
@@ -31,7 +29,6 @@ impl Default for PosteriorGraphConfig {
             enabled: true,
             drop_ratio: 0.15,
             min_core_results: 2,
-            max_graph_slots: 2,
             connectivity_boost: 0.15,
             isolation_penalty: 0.3,
         }

@@ -67,19 +67,9 @@ impl StreamEvent {
         self.about = Some(user_id);
         self
     }
-
-    pub fn with_body(mut self, body: BodySignal) -> Self {
-        self.body = Some(body);
-        self
-    }
 }
 
 // ── 写入 ────────────────────────────────────────────────────────
-
-/// 写入一条感官事件（代码路径：感知转译、身体信号、世界事件）
-pub fn push_sensation(content: impl Into<String>) {
-    push(StreamEvent::new(StreamKind::Sensation, content));
-}
 
 /// 写入一条她的内心活动。
 ///
@@ -271,12 +261,11 @@ mod tests {
 
     #[test]
     fn event_round_trips_with_optional_fields() {
-        let event = event_at(StreamKind::Sensation, "土豆说“在吗”", 1_700_000_000)
-            .with_about(42)
-            .with_body(BodySignal {
-                name: "困倦".into(),
-                level: 0.7,
-            });
+        let mut event = event_at(StreamKind::Sensation, "土豆说“在吗”", 1_700_000_000).with_about(42);
+        event.body = Some(BodySignal {
+            name: "困倦".into(),
+            level: 0.7,
+        });
         let json = serde_json::to_string(&event).unwrap();
         let back: StreamEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(back, event);

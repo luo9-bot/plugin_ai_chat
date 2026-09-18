@@ -408,18 +408,6 @@ pub fn check_and_apply_auto_ban(user_id: u64, threshold: u32) -> bool {
     })
 }
 
-/// 记录 AI 审查失败
-pub fn record_ai_review_failure(user_id: u64) {
-    with_behavior_mut(user_id, |b| {
-        b.record_violation(2.0);
-        if b.violation_count >= 3 {
-            b.silent_banned = true;
-            b.vision_disabled = true;
-            warn!(user_id, "AI审查失败过多，触发非察觉性封禁");
-        }
-    });
-}
-
 /// 手动封禁用户
 pub fn ban_user(user_id: u64) {
     with_behavior_mut(user_id, |b| {

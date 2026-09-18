@@ -8,7 +8,7 @@
 
 /// 一次模型调用的失败原因
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LlmError {
+pub(crate) enum LlmError {
     /// 请求体无法序列化——我们的 bug，重试没有意义
     Serialize { source: String },
     /// 传输层失败（连接、超时、读取）
@@ -28,7 +28,7 @@ impl LlmError {
     ///
     /// 4xx 不重试：那是"我们的请求写错了"，重试只会重复犯错。
     /// 熔断打开时不重试：它本身就是"别再打了"的信号。
-    pub fn is_retryable(&self) -> bool {
+    pub(crate) fn is_retryable(&self) -> bool {
         match self {
             LlmError::Transport { retryable, .. } => *retryable,
             // 5xx 与 429 是上游的临时状态
@@ -41,7 +41,7 @@ impl LlmError {
     }
 
     /// 稳定的短标签，用于日志与统计（不要用 Debug 输出当标签）
-    pub fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             LlmError::Serialize { .. } => "serialize",
             LlmError::Transport { .. } => "transport",
@@ -76,7 +76,7 @@ impl std::fmt::Display for LlmError {
 /// **只有 [`SilenceCause::Chose`] 算"她不想说话"。** 其余三类是故障，
 /// 必须留痕、可告警——把它们混为一谈会让"API 全挂了"看起来像"她今天很安静"。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SilenceCause {
+pub(crate) enum SilenceCause {
     /// 她选择不说：合法结果
     Chose,
     /// 输出无效：把工具调用写成了文字，纠正若干次仍不合法
@@ -89,11 +89,11 @@ pub enum SilenceCause {
 
 impl SilenceCause {
     /// 这是"她的决定"吗？（决定沉默 ≠ 没能说话）
-    pub fn is_deliberate(&self) -> bool {
+    pub(crate) fn is_deliberate(&self) -> bool {
         matches!(self, SilenceCause::Chose)
     }
 
-    pub fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             SilenceCause::Chose => "chose",
             SilenceCause::InvalidOutput { .. } => "invalid_output",
@@ -105,7 +105,7 @@ impl SilenceCause {
 
 /// 这一轮她的产出
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Utterance {
+pub(crate) enum Utterance {
     /// 她要说的内容
     Say(String),
     /// 她这一轮没有外发内容，以及为什么
@@ -116,7 +116,7 @@ impl Utterance {
     /// 沉默原因（有内容时为 `None`）
     ///
     /// 调用方用模式匹配取要外发的文本，因此这里只暴露"为什么沉默"。
-    pub fn silence_cause(&self) -> Option<&SilenceCause> {
+    pub(crate) fn silence_cause(&self) -> Option<&SilenceCause> {
         match self {
             Utterance::Say(_) => None,
             Utterance::Silent(cause) => Some(cause),
@@ -124,12 +124,12 @@ impl Utterance {
     }
 
     /// 便捷构造：沉默
-    pub fn silent(cause: SilenceCause) -> Self {
+    pub(crate) fn silent(cause: SilenceCause) -> Self {
         Utterance::Silent(cause)
     }
 
     /// 便捷构造：上游故障导致的沉默
-    pub fn failed(error: LlmError) -> Self {
+    pub(crate) fn failed(error: LlmError) -> Self {
         Utterance::Silent(SilenceCause::UpstreamFailed { error })
     }
 }
@@ -140,7 +140,7 @@ impl Utterance {
 /// 会变成 schema 失败"。判断依据完全来自 `tool_loop` 已有的分支，
 /// 因此观测本身不改变任何行为。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnShape {
+pub(crate) enum TurnShape {
     /// 裸文本 = 发言。**当前契约下是正常路径**，但在严格 Turn 下
     /// "发言"必须走 tool call，因此它会被判为无效输出
     PlainText,
@@ -163,7 +163,7 @@ pub enum TurnShape {
 }
 
 impl TurnShape {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             TurnShape::PlainText => "plain_text",
             TurnShape::EmptyResponse => "empty_response",
@@ -182,12 +182,12 @@ impl TurnShape {
     ///
     /// 只有"一次干净的工具调用"合法。上游故障不该算进契约合法率——
     /// 那是传输问题，不是模型没遵守 schema。
-    pub fn is_valid_under_turn_contract(self) -> bool {
+    pub(crate) fn is_valid_under_turn_contract(self) -> bool {
         matches!(self, TurnShape::ToolCallClean)
     }
 
     /// 是否参与契约合法率的统计
-    pub fn counts_toward_contract(self) -> bool {
+    pub(crate) fn counts_toward_contract(self) -> bool {
         !matches!(self, TurnShape::UpstreamFailed)
     }
 }

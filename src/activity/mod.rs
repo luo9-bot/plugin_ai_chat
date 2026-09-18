@@ -21,7 +21,6 @@ mod types {
         Working,
         Outing,
         Bathing,
-        Custom(String),
     }
 
     impl ActivityType {
@@ -33,7 +32,6 @@ mod types {
                 ActivityType::Working => 7200,
                 ActivityType::Outing => 3600,
                 ActivityType::Bathing => 1200,
-                ActivityType::Custom(_) => 1800,
             }
         }
 
@@ -45,7 +43,6 @@ mod types {
                 ActivityType::Working => "工作/学习",
                 ActivityType::Outing => "外出",
                 ActivityType::Bathing => "洗澡",
-                ActivityType::Custom(s) => s.as_str(),
             }
         }
     }
@@ -61,7 +58,7 @@ pub(crate) enum ActivityPhase {
 }
 
 impl ActivityPhase {
-    pub fn from_progress(progress: f64) -> Self {
+    pub(crate) fn from_progress(progress: f64) -> Self {
         if progress >= 1.0 {
             ActivityPhase::Completed
         } else if progress >= 0.8 {
@@ -84,14 +81,14 @@ pub(crate) struct ActivityState {
 
 impl ActivityState {
     /// 计算进度 0.0~1.0
-    pub fn progress(&self) -> f64 {
+    pub(crate) fn progress(&self) -> f64 {
         let now = crate::util::now_secs();
         let elapsed = now.saturating_sub(self.started_at);
         let total = self.expires_at.saturating_sub(self.started_at).max(1);
         (elapsed as f64 / total as f64).min(1.0)
     }
 
-    pub fn phase(&self) -> ActivityPhase {
+    pub(crate) fn phase(&self) -> ActivityPhase {
         ActivityPhase::from_progress(self.progress())
     }
 }

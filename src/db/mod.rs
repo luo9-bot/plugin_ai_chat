@@ -33,14 +33,6 @@ impl Scope {
             Scope::Group => "group",
         }
     }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "private" => Some(Scope::Private),
-            "group" => Some(Scope::Group),
-            _ => None,
-        }
-    }
 }
 
 /// 谁在改状态——审计要能回答"谁改的"
@@ -71,8 +63,6 @@ pub enum DbError {
     Open(String),
     /// SQL 执行失败
     Sql(String),
-    /// 锁被毒化：某次写入中断，但连接本身仍可用，取回内部值继续
-    Poisoned,
 }
 
 impl std::fmt::Display for DbError {
@@ -80,7 +70,6 @@ impl std::fmt::Display for DbError {
         match self {
             DbError::Open(source) => write!(f, "状态库打不开: {source}"),
             DbError::Sql(source) => write!(f, "状态库执行失败: {source}"),
-            DbError::Poisoned => write!(f, "状态库锁被毒化"),
         }
     }
 }
@@ -344,17 +333,6 @@ impl Db {
                 )?;
                 Ok(changed > 0)
             }
-        })
-    }
-
-    pub fn is_activated(&self, scope: Scope, id: u64) -> Result<bool, DbError> {
-        self.with_conn(|conn| {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM activation WHERE scope = ?1 AND id = ?2",
-                rusqlite::params![scope.as_str(), id],
-                |row| row.get(0),
-            )?;
-            Ok(count > 0)
         })
     }
 
@@ -1821,7 +1799,7 @@ mod tests {
 
         // 重开：数据必须还在（WAL 已合并）
         let reopened = Db::open(&path).expect("重开文件库");
-        assert!(reopened.is_activated(Scope::Group, 4242).expect("查询"));
+        assert!(reopened.activations(Scope::Group).expect("查询").contains(&4242));
         assert_eq!(
             reopened.emotion_state(7).expect("查询").as_deref(),
             Some(r#"{"intensity":0.5}"#)
@@ -1831,32 +1809,20 @@ mod tests {
     }
 
     #[test]
-    fn scope_round_trips_through_storage_format() {
-        for scope in [Scope::Private, Scope::Group] {
-            assert_eq!(Scope::parse(scope.as_str()), Some(scope));
-        }
-        assert_eq!(
-            Scope::parse("guild"),
-            None,
-            "未知作用域不能被当成某个默认值"
-        );
-    }
-
-    #[test]
     fn activation_persists_and_reports_real_changes() {
         let db = Db::open_in_memory().expect("内存库");
         let scope = Scope::Group;
         let group = 12345;
 
-        assert!(!db.is_activated(scope, group).expect("查询"));
+        assert!(!db.activations(scope).expect("查询").contains(&group));
         assert!(db.set_activation(scope, group, true).expect("开启"));
-        assert!(db.is_activated(scope, group).expect("查询"));
+        assert!(db.activations(scope).expect("查询").contains(&group));
         // 幂等：重复开启不再报告变化
         assert!(!db.set_activation(scope, group, true).expect("重复开启"));
         assert_eq!(db.activations(scope).expect("列表"), vec![group]);
 
         assert!(db.set_activation(scope, group, false).expect("关闭"));
-        assert!(!db.is_activated(scope, group).expect("查询"));
+        assert!(!db.activations(scope).expect("查询").contains(&group));
         assert!(!db.set_activation(scope, group, false).expect("重复关闭"));
         assert!(db.activations(scope).expect("列表").is_empty());
     }
@@ -1869,9 +1835,9 @@ mod tests {
 
         db.set_activation(Scope::Private, id, true)
             .expect("私聊开启");
-        assert!(db.is_activated(Scope::Private, id).expect("查询"));
+        assert!(db.activations(Scope::Private).expect("查询").contains(&id));
         assert!(
-            !db.is_activated(Scope::Group, id).expect("查询"),
+            !db.activations(Scope::Group).expect("查询").contains(&id),
             "私聊的开启不该让群聊也算开启"
         );
         assert!(db.activations(Scope::Group).expect("列群聊").is_empty());

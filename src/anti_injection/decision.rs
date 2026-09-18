@@ -8,16 +8,11 @@ pub enum SecurityIssue {
     Sexual,
     Violence,
     Illegal,
-    RoleplayInjection,
     EmotionalManipulation,
-    InjectionOverride,
-    InjectionRoleSwitch,
     InjectionPromptLeak,
-    InjectionEncoding,
     InjectionJailbreak,
     RateLimitExceeded,
     LowReputation,
-    AiReviewFlagged,
     StructuredInjection,
 }
 
@@ -78,16 +73,11 @@ pub fn calculate_severity(issues: &[SecurityIssue]) -> f32 {
             SecurityIssue::Sexual => 3.0,
             SecurityIssue::Violence => 2.5,
             SecurityIssue::Illegal => 2.5,
-            SecurityIssue::RoleplayInjection => 1.5,
             SecurityIssue::EmotionalManipulation => 1.0,
-            SecurityIssue::InjectionOverride => 4.0,
-            SecurityIssue::InjectionRoleSwitch => 3.5,
             SecurityIssue::InjectionPromptLeak => 3.0,
-            SecurityIssue::InjectionEncoding => 2.0,
             SecurityIssue::InjectionJailbreak => 4.0,
             SecurityIssue::RateLimitExceeded => 0.5,
             SecurityIssue::LowReputation => 1.0,
-            SecurityIssue::AiReviewFlagged => 3.0,
             SecurityIssue::StructuredInjection => 3.5,
         };
     }
@@ -108,8 +98,7 @@ pub fn determine_action(score: &RiskScore, config: &AntiInjectionConfig) -> Acti
         };
     }
     // 使用 Shadow Sandbox 做精细决策
-    let sandbox_decision = sandbox::evaluate(score, &config.input.sensitive_action);
-    sandbox_decision.action
+    sandbox::evaluate(score, &config.input.sensitive_action)
 }
 
 /// 生成替换消息

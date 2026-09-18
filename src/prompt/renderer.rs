@@ -12,7 +12,7 @@ pub(crate) struct PromptRenderer;
 
 impl PromptRenderer {
     /// 渲染模板，替换所有 {key} 占位符（缺失的保留原样）
-    pub fn render_simple(template: &str, vars: &HashMap<&str, &str>) -> String {
+    pub(crate) fn render_simple(template: &str, vars: &HashMap<&str, &str>) -> String {
         let mut result = template.to_string();
         for (key, value) in vars {
             result = result.replace(&format!("{{{}}}", key), value);

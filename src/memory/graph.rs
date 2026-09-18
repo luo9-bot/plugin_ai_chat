@@ -44,12 +44,12 @@ pub(crate) struct KnowledgeGraph {
 }
 
 impl KnowledgeGraph {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// 添加实体（节点以名称小写为 key，因此节点本身不再存一份名字）
-    pub fn add_entity(&mut self, name: &str) {
+    pub(crate) fn add_entity(&mut self, name: &str) {
         let entry = self.nodes.entry(name.to_lowercase()).or_insert(GraphNode {
             appearance_count: 0,
         });
@@ -58,7 +58,7 @@ impl KnowledgeGraph {
 
     /// 添加有向关系
     #[allow(clippy::too_many_arguments)]
-    pub fn add_relation(
+    pub(crate) fn add_relation(
         &mut self,
         subject: &str,
         predicate: &str,
@@ -100,7 +100,7 @@ impl KnowledgeGraph {
 
     /// 合并或更新关系（如果已存在则增加权重和计数）
     #[allow(clippy::too_many_arguments)]
-    pub fn merge_relation(
+    pub(crate) fn merge_relation(
         &mut self,
         subject: &str,
         predicate: &str,
@@ -141,7 +141,7 @@ pub(crate) struct EntityMatcher {
 }
 
 impl EntityMatcher {
-    pub fn build(entities: &[String]) -> Self {
+    pub(crate) fn build(entities: &[String]) -> Self {
         let ac = aho_corasick::AhoCorasick::builder()
             .ascii_case_insensitive(true)
             .build(entities)
@@ -156,7 +156,7 @@ impl EntityMatcher {
     }
 
     /// 在文本中匹配已知实体
-    pub fn match_entities(&self, text: &str) -> Vec<String> {
+    pub(crate) fn match_entities(&self, text: &str) -> Vec<String> {
         let Some(ac) = &self.ac else {
             return Vec::new();
         };

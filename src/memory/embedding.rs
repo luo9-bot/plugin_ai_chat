@@ -15,16 +15,6 @@ const EMBEDDING_DIMENSION: usize = 2048;
 /// 单个文本不值得等更久。
 const EMBEDDING_TIMEOUT_SECS: u64 = 10;
 
-/// 调用 Embedding API 生成单个文本的向量
-pub fn embed_text(text: &str) -> Option<Vec<f32>> {
-    let cfg = crate::config::get();
-    if !cfg.embedding.enabled() {
-        return None;
-    }
-
-    embed_single(text)
-}
-
 /// 调用多模态向量化 API，对单个文本生成向量
 fn embed_single(text: &str) -> Option<Vec<f32>> {
     let cfg = crate::config::get();
@@ -149,25 +139,4 @@ pub fn l2_normalize(vector: &mut [f32]) {
             *x /= norm;
         }
     }
-}
-
-/// 计算两个向量的余弦相似度
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-
-    let dot: f64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(x, y)| (*x as f64) * (*y as f64))
-        .sum();
-    let norm_a: f64 = a.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
-    let norm_b: f64 = b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
-
-    if norm_a < 1e-10 || norm_b < 1e-10 {
-        return 0.0;
-    }
-
-    dot / (norm_a * norm_b)
 }

@@ -48,17 +48,6 @@ impl RiskScore {
         ];
         combine_probabilities(&weighted)
     }
-
-    /// 获取各维度的最大风险分
-    pub fn max_raw_score(&self) -> f32 {
-        self.sexual
-            .max(self.violence)
-            .max(self.illegal)
-            .max(self.jailbreak)
-            .max(self.emotional)
-            .max(self.structured)
-            .max(self.prompt_leak)
-    }
 }
 
 /// 贝叶斯概率融合：1 - Π(1 - p_i)
@@ -168,6 +157,5 @@ mod tests {
     fn test_risk_score_all_zero() {
         let score = RiskScore::default();
         assert_eq!(score.combined_risk(), 0.0);
-        assert_eq!(score.max_raw_score(), 0.0);
     }
 }

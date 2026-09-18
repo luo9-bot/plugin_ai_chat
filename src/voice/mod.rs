@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 
 use crate::ai::{ALL_TOOL_NAMES, SilenceCause, Tool, ToolOutcome, Utterance, run_tool_loop};
 use crate::config;
-use crate::mind::{self, SensoryPacket};
+use crate::mind::{self};
 
 /// 报告一次沉默
 ///
@@ -72,15 +72,6 @@ pub struct GroupUtterance {
     pub ts: u64,
     /// 到达时刻（毫秒）——排序用，同一秒内的先后靠它区分
     pub ts_ms: u64,
-}
-
-/// 按真实到达顺序排好一批发言
-///
-/// 批次是按 (群, 用户) 切出来的，合并后输入顺序不反映群里谁先谁后——
-/// 不排序就会出现"接着甲的话、回给乙"的错位。同一毫秒的并列由
-/// 用户号兜底，保证顺序确定。
-pub fn order_by_arrival(utterances: &mut [GroupUtterance]) {
-    utterances.sort_by_key(|u| (u.ts_ms, u.user_id));
 }
 
 // ── 回神协议 ────────────────────────────────────────────────────
@@ -836,18 +827,13 @@ pub fn speak_private(
         system.push_str(extra);
     }
 
-    // 她惦记这个人的心事进入感官（读取侧滤壳：这些 reason 落盘且反复回灌）
+    // 她惦记这个人的心事进入感官（读取侧滤壳：这些 reason 落盘且反复回灌 prompt）
     let loops = mind::wake::sanitize_reasons(mind::wake::pending_reasons_for(user_id));
-    let packet = SensoryPacket {
-        loops,
-        ..Default::default()
-    };
     let mut user_content = stream_user_content(message);
-    if !packet.loops.is_empty() {
+    if !loops.is_empty() {
         user_content.push_str("\n\n你惦记的：\n");
         user_content.push_str(
-            &packet
-                .loops
+            &loops
                 .iter()
                 .map(|l| format!("- {l}"))
                 .collect::<Vec<_>>()

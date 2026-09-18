@@ -25,7 +25,7 @@ pub(crate) struct AttentionState {
 }
 
 impl AttentionState {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             attention_level: 0.7,
             user_attention: HashMap::new(),

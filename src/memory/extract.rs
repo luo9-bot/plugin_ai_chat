@@ -204,27 +204,3 @@ fn fallback_keyword(user_id: u64, group_id: u64, message: &str) {
         }
     }
 }
-
-pub fn extract_memory_from_message(user_id: u64, message: &str) {
-    if looks_ephemeral(message) {
-        return;
-    }
-    if let Some(pos) = message.find("记住") {
-        let after = &message[pos + 2..].trim();
-        if !after.is_empty()
-            && !is_keyword_on_cooldown(user_id, "记住")
-            && !is_contradictory(user_id, after)
-        {
-            super::ops_log::record(
-                "keyword_extract",
-                user_id,
-                0,
-                after,
-                "normal",
-                "keyword '记住' from message",
-            );
-            add(user_id, 0, after, Importance::Normal);
-            mark_keyword_extracted(user_id, "记住");
-        }
-    }
-}

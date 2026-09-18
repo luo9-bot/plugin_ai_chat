@@ -17,12 +17,12 @@ pub struct FunctionDef {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct ToolCall {
+pub(crate) struct ToolCall {
     pub function: ToolCallFunction,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct ToolCallFunction {
+pub(crate) struct ToolCallFunction {
     pub name: String,
     pub arguments: String,
 }
@@ -83,7 +83,7 @@ pub(crate) struct ChatChoice {
 }
 
 /// 工具执行结果（表达管线的工具循环使用）
-pub enum ToolOutcome {
+pub(crate) enum ToolOutcome {
     /// 把执行结果回传给模型，继续本轮推理
     Continue(String),
     /// 立即结束循环且不产生任何发言（如 finish 工具 = 她选择沉默）

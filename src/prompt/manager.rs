@@ -14,7 +14,7 @@ pub(crate) struct PromptManager {
 
 impl PromptManager {
     /// 初始化：扫描 prompts/ 目录，加载所有 .prompt 和 .txt 文件
-    pub fn init(data_dir: &Path) {
+    pub(crate) fn init(data_dir: &Path) {
         let prompts_dir = data_dir.join("prompts");
         std::fs::create_dir_all(&prompts_dir).ok();
 
@@ -51,7 +51,7 @@ impl PromptManager {
     ///
     /// 未初始化时惰性建一个空管理器，而不是 panic：prompt 缺失应当表现为
     /// "这一层没有内容"，不该让整条回复路径消失。
-    pub fn get() -> &'static PromptManager {
+    pub(crate) fn get() -> &'static PromptManager {
         PROMPTS.get_or_init(|| {
             tracing::warn!("prompt: 未初始化即被访问，使用空管理器（prompt 内容为空）");
             PromptManager {
@@ -64,7 +64,7 @@ impl PromptManager {
     ///
     /// 占位符格式：`{key}`，从 `vars` 映射中查找替换。
     /// 无匹配的占位符保持原样。
-    pub fn render(&self, name: &str, vars: &HashMap<&str, &str>) -> String {
+    pub(crate) fn render(&self, name: &str, vars: &HashMap<&str, &str>) -> String {
         let template = match self.templates.get(name) {
             Some(t) => t.as_str(),
             None => {
@@ -80,7 +80,7 @@ impl PromptManager {
     }
 
     /// 获取原始模板（不替换占位符）
-    pub fn raw(&self, name: &str) -> &str {
+    pub(crate) fn raw(&self, name: &str) -> &str {
         self.templates
             .get(name)
             .map(|s| s.as_str())

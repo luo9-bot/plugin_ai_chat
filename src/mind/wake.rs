@@ -116,16 +116,6 @@ impl WakePlan {
         }
     }
 
-    pub fn with_target(mut self, group_id: Option<u64>, user_id: u64) -> Self {
-        self.target_group = group_id;
-        self.target_user = if group_id.is_none() {
-            Some(user_id)
-        } else {
-            None
-        };
-        self
-    }
-
     pub fn with_about(mut self, user_id: u64) -> Self {
         self.about_user = Some(user_id);
         self

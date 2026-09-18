@@ -8,12 +8,9 @@ pub mod store;
 
 use luo9_sdk::Msg;
 pub use manager::{
-    StickerSelection, describe_sticker_cq, do_replace_eviction, get_stats, get_sticker_path,
-    init_ne_stickers, is_sticker_cq, maintenance, register_from_cq, register_sticker,
-    select_sticker_vlm, steal_emoji_scan, update_usage,
+    describe_sticker_cq, do_replace_eviction, get_stats, init_ne_stickers, is_sticker_cq,
+    maintenance, register_from_cq, steal_emoji_scan,
 };
-pub use store::StickerEntry;
-pub use store::{find_entry_by_hash, update_vlm_description};
 
 use tracing::info;
 
@@ -63,16 +60,4 @@ pub fn send_sticker(
     );
 
     Ok(selection.description)
-}
-
-/// 获取表情包上下文（注入到 Planner prompt）
-pub fn get_sticker_context() -> String {
-    let (_total, registered) = manager::get_stats();
-    if registered == 0 {
-        return String::new();
-    }
-    format!(
-        "# 表情包系统\n你有 {} 个可用的表情包。当语言不够到位、用户要求发表情包、或对话氛围需要时，直接调用 send_sticker 工具。系统会自动选择最合适的表情包。如果发送失败，请用文字表达情绪，不要输出[图片]。",
-        registered
-    )
 }

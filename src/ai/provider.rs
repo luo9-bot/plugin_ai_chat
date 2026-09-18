@@ -28,7 +28,7 @@ pub(crate) fn no_error_agent() -> ureq::Agent {
 }
 
 /// 从 AI 响应中提取 JSON 对象 (处理 <think> 标签、markdown 代码块等)
-pub fn extract_json(raw: &str) -> Option<String> {
+pub(crate) fn extract_json(raw: &str) -> Option<String> {
     let cleaned = if let Some(pos) = raw.find("</think>") {
         raw[pos + 8..].trim()
     } else {
@@ -148,7 +148,7 @@ fn repair_truncated_json(raw: &str) -> Option<serde_json::Value> {
 }
 
 /// 从 JSON Value 中解析布尔值 (兼容布尔值和字符串 "true"/"false")
-pub fn parse_bool(value: &serde_json::Value) -> Option<bool> {
+pub(crate) fn parse_bool(value: &serde_json::Value) -> Option<bool> {
     value.as_bool().or_else(|| {
         value.as_str().and_then(|s| match s {
             "true" => Some(true),
@@ -159,7 +159,7 @@ pub fn parse_bool(value: &serde_json::Value) -> Option<bool> {
 }
 
 /// 渲染 core_rules（占位符已按配置填充）——对话与回神共用的唯一渲染路径
-pub fn rendered_core_rules() -> String {
+pub(crate) fn rendered_core_rules() -> String {
     let cfg = config::get();
     let bot_name = &cfg.bot_name;
 
@@ -211,7 +211,7 @@ fn completion_text(req: &ChatRequest, prompt_name: &str) -> Result<String, Strin
 /// 调用 AI API，注入记忆/人格/情绪上下文
 ///
 /// 返回 (reply, detected_emotion)
-pub fn chat(
+pub(crate) fn chat(
     base_prompt: &str,
     extra_context: &str,
     history: &[(String, String)],
@@ -277,7 +277,7 @@ pub fn chat(
 /// 轻量级 AI 分析调用 (记忆提取、情绪分析等)
 ///
 /// 使用更低的 max_tokens 和 temperature，快速返回结构化结果
-pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String> {
+pub(crate) fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String> {
     let cfg = config::get();
 
     let messages = vec![
@@ -316,7 +316,7 @@ pub fn analyze(system_prompt: &str, user_content: &str) -> Result<String, String
 /// 使用 tools 参数定义可用函数，AI 会通过 tool_calls 返回结构化数据。
 /// 如果 API 没有返回 tool_calls，fallback 到从文本中提取 JSON。
 /// 模型偶尔会忽略 tool_calls 直接返回文本，此时自动重试一次。
-pub fn analyze_with_tools(
+pub(crate) fn analyze_with_tools(
     system_prompt: &str,
     user_content: &str,
     tools: &[Tool],
@@ -337,7 +337,7 @@ pub fn analyze_with_tools(
 ///
 /// 与 `analyze_with_tools` 逻辑完全一致，仅允许调用方指定
 /// temperature 与 top_p（如主动消息生成需要更高随机性时使用）。
-pub fn analyze_with_tools_cfg(
+pub(crate) fn analyze_with_tools_cfg(
     system_prompt: &str,
     user_content: &str,
     tools: &[Tool],

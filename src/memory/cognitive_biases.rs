@@ -246,7 +246,6 @@ mod tests {
             id: id.to_string(),
             content: content.to_string(),
             score,
-            source: "test",
         }
     }
 

@@ -246,7 +246,6 @@ humanity:
 
   # 变速回复：动态打字延迟（拟人节奏，不做内容手术）
   response_timing_enabled: true
-  thinking_pause_probability: 0.15   # 思考暂停概率
   base_typing_speed: 5.0           # 基础打字速度
 
   # 不可预测性：概率性观点漂移和遗忘

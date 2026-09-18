@@ -160,35 +160,6 @@ pub fn set_reward(group_id: u64, reply_id: i64, reward: f32) {
     }
 }
 
-/// 归档统计（admin 用）：各群已归档的消息/回复条数
-pub fn stats() -> Vec<(u64, u64, u64)> {
-    let dir = config::data_dir().join("mind").join("archive");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let gid: u64 = entry.file_name().to_str()?.parse().ok()?;
-            let count = |db: &str, table: &str| -> u64 {
-                let path = dir.join(gid.to_string()).join(format!("{db}.db"));
-                let Ok(conn) = Connection::open(&path) else {
-                    return 0;
-                };
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap_or(0) as u64
-            };
-            Some((
-                gid,
-                count("messages", "messages"),
-                count("replies", "replies"),
-            ))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

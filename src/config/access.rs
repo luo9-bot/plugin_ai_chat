@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::debug;
 
-use super::init::{CONFIG, CONFIG_ERROR, DATA_DIR, DEFAULT_CONFIG_YAML, PROMPT};
+use super::init::{CONFIG, CONFIG_ERROR, DATA_DIR, PROMPT};
 use super::structs::Config;
 use crate::util::{RwLockReadExt, RwLockWriteExt};
 
@@ -73,11 +73,6 @@ pub fn prompt() -> String {
     PROMPT.read_recover().clone()
 }
 
-/// 返回配置模板（带注释的 YAML）
-pub fn config_template() -> &'static str {
-    DEFAULT_CONFIG_YAML
-}
-
 /// 保存配置：**类型化序列化 + 原子落盘**
 ///
 /// 这是唯一的保存路径。它取代了原先 307 行的"逐行文本重写器"
@@ -107,11 +102,12 @@ pub fn save(config: &Config) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::init::DEFAULT_CONFIG_YAML;
     use super::*;
 
     /// 默认配置的参考实例：默认值的唯一真源就是模板本身
     fn reference_config() -> Config {
-        serde_yaml::from_str(config_template()).expect("模板必须是合法的 Config")
+        serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法的 Config")
     }
 
     /// 模板（`config.example.yaml`）必须始终能解析成 `Config`。
@@ -120,7 +116,7 @@ mod tests {
     /// 新装用户的配置就会带着解析错误启动。
     #[test]
     fn example_template_parses_into_config() {
-        let parsed: Result<Config, _> = serde_yaml::from_str(config_template());
+        let parsed: Result<Config, _> = serde_yaml::from_str(DEFAULT_CONFIG_YAML);
         assert!(
             parsed.is_ok(),
             "config.example.yaml 无法解析为 Config：{:?}",
@@ -210,7 +206,7 @@ mod tests {
     #[test]
     fn template_has_no_unknown_keys() {
         let template: serde_yaml::Value =
-            serde_yaml::from_str(config_template()).expect("模板必须是合法 YAML");
+            serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法 YAML");
         let known: serde_yaml::Value =
             serde_yaml::to_value(reference_config()).expect("配置必须可序列化");
 

@@ -70,15 +70,6 @@ pub enum IdeaStatus {
 }
 
 impl IdeaStatus {
-    /// 生命周期的下一步（dropped/realized 是终点）
-    pub fn advance(self) -> Option<Self> {
-        match self {
-            Self::New => Some(Self::Developing),
-            Self::Developing => Some(Self::Realized),
-            _ => None,
-        }
-    }
-
     pub fn is_alive(self) -> bool {
         matches!(self, Self::New | Self::Developing)
     }
@@ -317,16 +308,6 @@ pub fn close_goal(goal_id: u64, achieved: bool) -> bool {
     true
 }
 
-/// 全部活跃目标（admin API / 上下文用）
-pub fn active_goals() -> Vec<WishGoal> {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_store()
-        .goals
-        .into_iter()
-        .filter(|g| g.status.is_active())
-        .collect()
-}
-
 /// 目标是否到期该被提醒：有期限、过期、且最近没提醒过
 fn goal_due(goal: &WishGoal, now: u64) -> bool {
     goal.status.is_active()
@@ -435,48 +416,6 @@ pub fn add_idea(text: &str, excitement: u8, source: WishSource) -> Option<WishId
     Some(idea)
 }
 
-/// 念头生命周期推进：new → developing → realized
-pub fn advance_idea(idea_id: u64) -> bool {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut store = load_store();
-    let Some(idea) = store.ideas.iter_mut().find(|i| i.id == idea_id) else {
-        return false;
-    };
-    let Some(next) = idea.status.advance() else {
-        return false;
-    };
-    idea.status = next;
-    idea.updated_at = util::now_secs();
-    save_store(&store);
-    true
-}
-
-/// 放下一个念头
-pub fn drop_idea(idea_id: u64) -> bool {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut store = load_store();
-    let Some(idea) = store.ideas.iter_mut().find(|i| i.id == idea_id) else {
-        return false;
-    };
-    if !idea.status.is_alive() {
-        return false;
-    }
-    idea.status = IdeaStatus::Dropped;
-    idea.updated_at = util::now_secs();
-    save_store(&store);
-    true
-}
-
-/// 活着的念头（admin API 用）
-pub fn alive_ideas() -> Vec<WishIdea> {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_store()
-        .ideas
-        .into_iter()
-        .filter(|i| i.status.is_alive())
-        .collect()
-}
-
 // ── 上下文呈现 ──────────────────────────────────────────────────
 
 /// 目标的一行描述（进度/期限是机械事实，解释交给她的表达）
@@ -554,13 +493,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn idea_lifecycle_is_forward_only() {
-        assert_eq!(IdeaStatus::New.advance(), Some(IdeaStatus::Developing));
-        assert_eq!(IdeaStatus::Developing.advance(), Some(IdeaStatus::Realized));
-        assert_eq!(IdeaStatus::Realized.advance(), None);
-        assert_eq!(IdeaStatus::Dropped.advance(), None);
+    fn only_unfinished_ideas_are_alive() {
         assert!(IdeaStatus::New.is_alive());
+        assert!(IdeaStatus::Developing.is_alive());
         assert!(!IdeaStatus::Realized.is_alive());
+        assert!(!IdeaStatus::Dropped.is_alive());
     }
 
     #[test]

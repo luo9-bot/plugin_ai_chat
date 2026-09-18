@@ -5,8 +5,6 @@ use std::time::Instant;
 pub struct UserContext {
     /// 对话历史 (role, content)
     pub history: Vec<(String, String)>,
-    /// 当前情绪标签 (由 AI 回复中解析)
-    pub emotion: String,
     /// AI 生成的历史摘要（当历史过长时使用），记录重要内容
     pub conversation_summary: String,
 }
@@ -113,7 +111,6 @@ impl SharedState {
         let key: CtxKey = (group_id, user_id);
         self.contexts.entry(key).or_insert(UserContext {
             history: Vec::new(),
-            emotion: String::new(),
             conversation_summary: String::new(),
         })
     }

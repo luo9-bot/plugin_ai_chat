@@ -21,14 +21,9 @@ pub mod style;
 pub mod wake;
 pub mod wish;
 
-pub use diary::DiaryEntry;
-pub use persons::{PersonFile, PersonSeed};
-pub use sensation::{SensoryPacket, body_signals, transcribe_message, transcribe_world};
-pub use social::{SocialState, TopicThread};
+pub use persons::PersonFile;
+pub use sensation::{body_signals, transcribe_message};
 pub use stream::{
-    KEEP_DAYS, StreamEvent, StreamKind, cleanup, push_acted, push_digested, push_inner,
-    push_sensation, recent, recent_text,
+    StreamEvent, StreamKind, push_acted, push_digested, push_inner, recent, recent_text,
 };
-pub use wake::{
-    Urgency, WakeKind, WakePlan, WakeProduct, add as add_wake_plan, is_night, tick as wake_tick,
-};
+pub use wake::{Urgency, WakeKind, WakePlan, add as add_wake_plan, is_night, tick as wake_tick};

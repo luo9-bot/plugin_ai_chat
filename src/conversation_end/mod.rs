@@ -75,9 +75,3 @@ pub fn get_context(bot_last_message: &str, user_message: &str) -> String {
         bot_last_message, user_message
     )
 }
-
-/// 检查用户消息是否是简短确认（用于其他模块）
-pub fn is_short_confirm(message: &str) -> bool {
-    let trimmed = message.trim();
-    SHORT_CONFIRM.contains(&trimmed)
-}

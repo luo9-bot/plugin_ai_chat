@@ -126,11 +126,6 @@ impl BatchBuffer {
     pub fn forget_user(&mut self, user_id: u64) {
         self.batches.retain(|&(_, uid), _| uid != user_id);
     }
-
-    /// 丢弃某个会话的未处理批次（关闭对话时用）
-    pub fn forget_chat(&mut self, key: CtxKey) {
-        self.batches.remove(&key);
-    }
 }
 
 // ── 门禁状态：进程级，任何线程都可读写 ────────────────────────

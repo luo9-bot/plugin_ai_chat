@@ -27,7 +27,6 @@ pub struct RetrievalResult {
     pub content: String,
     /// 归一化到 [0,1] 的相关性：1.0 = 两条路都排第一
     pub score: f64,
-    pub source: &'static str,
 }
 
 /// RRF 的理论满分：两条路都排第一时的加权融合值
@@ -36,7 +35,7 @@ fn rrf_ceiling(rrf_k: f64, vector_weight: f64, bm25_weight: f64) -> f64 {
 }
 
 /// Weighted RRF 融合，分数归一化到 [0,1]
-pub fn weighted_rrf_fusion(
+pub(crate) fn weighted_rrf_fusion(
     vector_results: &[VectorResult],
     bm25_results: &[Bm25Result],
     rrf_k: f64,
@@ -71,15 +70,6 @@ pub fn weighted_rrf_fusion(
     let mut results: Vec<RetrievalResult> = scores
         .into_iter()
         .map(|(id, raw_score)| {
-            let source = if vector_results.iter().any(|r| r.id == id)
-                && bm25_results.iter().any(|r| r.id == id)
-            {
-                "fusion_rrf"
-            } else if vector_results.iter().any(|r| r.id == id) {
-                "vector"
-            } else {
-                "bm25"
-            };
             RetrievalResult {
                 id,
                 content: String::new(), // 填充由调用方完成
@@ -89,7 +79,6 @@ pub fn weighted_rrf_fusion(
                 } else {
                     raw_score
                 },
-                source,
             }
         })
         .collect();

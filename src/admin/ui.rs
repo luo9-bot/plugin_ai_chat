@@ -8,7 +8,7 @@
 //!
 //! 产物缺失或比源码旧时的处理见 `build.rs`：它会重建 dist，失败即让构建失败。
 
-pub const HTML: &str = include_str!(concat!(
+pub(crate) const HTML: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/frontend/dist/index.html"
 ));

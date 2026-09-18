@@ -151,13 +151,11 @@ mod tests {
             id: "fresh".into(),
             content: String::new(),
             score: 1.0,
-            source: "test",
         };
         let stale = RetrievalResult {
             id: "stale".into(),
             content: String::new(),
             score: 1.0,
-            source: "test",
         };
         let mut results = vec![fresh, stale];
         apply(

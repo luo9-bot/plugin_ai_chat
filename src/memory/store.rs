@@ -40,10 +40,6 @@ fn group_dir(group_id: u64) -> PathBuf {
     memory_dir().join("groups").join(group_id.to_string())
 }
 
-fn group_memory_path(group_id: u64) -> PathBuf {
-    group_dir(group_id).join("group.json")
-}
-
 fn group_user_path(group_id: u64, user_id: u64) -> PathBuf {
     group_dir(group_id).join(format!("{}.json", user_id))
 }
@@ -86,16 +82,6 @@ pub fn load_user_memory(user_id: u64) -> MemoryFile {
 
 pub fn save_user_memory(user_id: u64, mem: &MemoryFile) {
     let path = user_path(user_id);
-    ensure_dir(&path);
-    save_json(&path, mem);
-}
-
-pub fn load_group_memory(group_id: u64) -> MemoryFile {
-    load_json(&group_memory_path(group_id))
-}
-
-pub fn save_group_memory(group_id: u64, mem: &MemoryFile) {
-    let path = group_memory_path(group_id);
     ensure_dir(&path);
     save_json(&path, mem);
 }

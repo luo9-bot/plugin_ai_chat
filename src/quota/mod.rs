@@ -4,4 +4,4 @@ mod store;
 
 pub use interest::*;
 pub use segment::*;
-pub use store::{SegmentLogEntry, SegmentMessage, init};
+pub use store::init;

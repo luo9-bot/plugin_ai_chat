@@ -9,7 +9,6 @@ pub enum RiskCategory {
     Illegal,
     Jailbreak,
     Emotional,
-    StructuredInjection,
 }
 
 /// 带权重的模式规则
@@ -964,16 +963,7 @@ impl PatternScores {
             RiskCategory::Illegal => self.illegal = (self.illegal + score).min(1.0),
             RiskCategory::Jailbreak => self.jailbreak = (self.jailbreak + score).min(1.0),
             RiskCategory::Emotional => self.emotional = (self.emotional + score).min(1.0),
-            RiskCategory::StructuredInjection => {}
         }
-    }
-
-    pub fn max_score(&self) -> f32 {
-        self.sexual
-            .max(self.violence)
-            .max(self.illegal)
-            .max(self.jailbreak)
-            .max(self.emotional)
     }
 }
 

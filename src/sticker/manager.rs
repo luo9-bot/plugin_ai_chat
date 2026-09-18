@@ -618,21 +618,6 @@ pub fn update_usage(hash: &str) {
     }
 }
 
-/// 获取表情包文件路径
-pub fn get_sticker_path(hash: &str) -> Option<String> {
-    let store = load_store();
-    store
-        .stickers
-        .iter()
-        .find(|e| e.hash == hash && e.is_registered && !e.is_banned)
-        .map(|e| {
-            crate::config::data_dir()
-                .join(&e.path)
-                .to_string_lossy()
-                .to_string()
-        })
-}
-
 /// 获取表情包统计
 pub fn get_stats() -> (usize, usize) {
     let store = load_store();
@@ -763,7 +748,7 @@ fn detect_format(bytes: &[u8]) -> String {
 /// 注册内置表情包（ne_sticker），跳过内容审查
 ///
 /// 内置表情已经过用户人工筛选，不经过 VLM 内容过滤。
-pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
+pub(crate) fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
 
     // 去重检查

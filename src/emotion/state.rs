@@ -23,57 +23,6 @@ pub enum EmotionType {
     Like, // 喜欢/心动
 }
 
-impl EmotionType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Neutral => "neutral",
-            Self::Happy => "happy",
-            Self::Sad => "sad",
-            Self::Thinking => "thinking",
-            Self::Surprised => "surprised",
-            Self::Angry => "angry",
-            Self::Shy => "shy",
-            Self::Worried => "worried",
-            Self::Tired => "tired",
-            Self::Excited => "excited",
-            Self::Like => "like",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "happy" | "开心" | "高兴" => Self::Happy,
-            "sad" | "难过" | "伤心" => Self::Sad,
-            "thinking" | "思考" | "沉思" => Self::Thinking,
-            "surprised" | "惊讶" | "吃惊" => Self::Surprised,
-            "angry" | "生气" | "愤怒" => Self::Angry,
-            "shy" | "害羞" | "羞涩" => Self::Shy,
-            "worried" | "担心" | "担忧" => Self::Worried,
-            "tired" | "疲惫" | "困倦" => Self::Tired,
-            "excited" | "兴奋" | "激动" => Self::Excited,
-            "like" | "喜欢" | "心动" => Self::Like,
-            _ => Self::Neutral,
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Neutral => "平静",
-            Self::Happy => "开心",
-            Self::Sad => "难过",
-            Self::Thinking => "沉思",
-            Self::Surprised => "惊讶",
-            Self::Angry => "有些不悦",
-            Self::Shy => "害羞",
-            Self::Worried => "担忧",
-            Self::Tired => "疲惫",
-            Self::Excited => "兴奋",
-            Self::Like => "心动",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmotionState {
     pub current: EmotionType,
@@ -246,55 +195,6 @@ impl EmotionState {
 
         self.last_update = crate::util::now_secs();
     }
-
-    /// 情绪感染——被他人的情绪状态影响
-    pub fn emotional_contagion(&mut self, other_emotion: &EmotionType, other_intensity: f32) {
-        let resonance = self.empathy_resonance * other_intensity * 0.3;
-        if resonance > 0.1 {
-            self.update_emotional_dynamics(
-                Some((
-                    other_emotion,
-                    resonance,
-                    "情绪感染",
-                    TriggerType::EmotionalContagion,
-                )),
-                0.0,
-            );
-        }
-    }
-
-    /// 获取当前情绪的描述
-    pub fn describe_detailed(&self) -> String {
-        let mut desc = match self.current {
-            EmotionType::Neutral => "平静".to_string(),
-            EmotionType::Happy => "开心".to_string(),
-            EmotionType::Sad => "难过".to_string(),
-            EmotionType::Thinking => "沉思".to_string(),
-            EmotionType::Surprised => "惊讶".to_string(),
-            EmotionType::Angry => "有些不悦".to_string(),
-            EmotionType::Shy => "害羞".to_string(),
-            EmotionType::Worried => "担忧".to_string(),
-            EmotionType::Tired => "疲惫".to_string(),
-            EmotionType::Excited => "兴奋".to_string(),
-            EmotionType::Like => "心动".to_string(),
-        };
-
-        if let Some(secondary) = &self.secondary {
-            let sec_desc = match secondary {
-                EmotionType::Happy => "开心",
-                EmotionType::Sad => "难过",
-                EmotionType::Worried => "担忧",
-                EmotionType::Excited => "兴奋",
-                EmotionType::Thinking => "思考",
-                _ => "",
-            };
-            if !sec_desc.is_empty() {
-                desc = format!("{}但有点{}", desc, sec_desc);
-            }
-        }
-
-        format!("{}(强度:{:.1})", desc, self.intensity)
-    }
 }
 
 impl Default for EmotionState {
@@ -435,11 +335,6 @@ pub fn decay_many(user_ids: &[u64]) {
     if let Err(error) = db.set_emotion_states(&changed) {
         tracing::warn!(%error, count = changed.len(), "emotion: 批量写库失败");
     }
-}
-
-pub fn describe(user_id: u64) -> String {
-    let state = get_state(user_id);
-    format!("{}({:.1})", state.current.description(), state.intensity)
 }
 
 #[cfg(test)]

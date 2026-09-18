@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use tracing::debug;
 
 /// 向量检索结果
-pub struct VectorResult {
+pub(crate) struct VectorResult {
     pub id: String,
     pub score: f64,
 }
@@ -161,20 +161,20 @@ fn save_cache_to_disk(cache: &HashMap<String, Vec<f32>>) {
 }
 
 /// 初始化查询向量缓存（从磁盘加载）
-pub fn init_query_cache() {
+pub(crate) fn init_query_cache() {
     let cache = load_cache_from_disk();
     let mut guard = QUERY_CACHE.lock_recover();
     *guard = Some(QueryCache::from_entries(cache));
 }
 
 /// 获取缓存的查询向量（非阻塞，只读缓存）
-pub fn get_cached_query_embedding(query: &str) -> Option<Vec<f32>> {
+pub(crate) fn get_cached_query_embedding(query: &str) -> Option<Vec<f32>> {
     let guard = QUERY_CACHE.lock_recover();
     guard.as_ref()?.get(&cache_key(query)).cloned()
 }
 
 /// 缓存查询向量（内存 + 异步写磁盘）
-pub fn cache_query_embedding(query: String, embedding: Vec<f32>) {
+pub(crate) fn cache_query_embedding(query: String, embedding: Vec<f32>) {
     let should_save = {
         let mut guard = QUERY_CACHE.lock_recover();
         let cache = guard.get_or_insert_with(|| QueryCache::from_entries(load_cache_from_disk()));
@@ -192,7 +192,7 @@ pub fn cache_query_embedding(query: String, embedding: Vec<f32>) {
 }
 
 /// 后台生成查询向量（由调用方在独立线程中执行）
-pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
+pub(crate) fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
     let cfg = crate::config::get();
     if !cfg.embedding.enabled() {
         return None;
@@ -249,7 +249,11 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
 }
 
 /// 向量搜索：计算余弦相似度
-pub fn search(query: &[f32], embeddings: &[(String, Vec<f32>)], top_k: usize) -> Vec<VectorResult> {
+pub(crate) fn search(
+    query: &[f32],
+    embeddings: &[(String, Vec<f32>)],
+    top_k: usize,
+) -> Vec<VectorResult> {
     if query.is_empty() || embeddings.is_empty() {
         return Vec::new();
     }

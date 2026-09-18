@@ -209,7 +209,6 @@ fn dual_path_bm25_only(
                 .map(|(_, c)| c.clone())
                 .unwrap_or_default(),
             score: r.score,
-            source: "bm25",
         })
         .collect()
 }

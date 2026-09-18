@@ -8,7 +8,7 @@ use super::{err, ok, parse_json};
 
 // ── 表情包管理 ────────────────────────────────────────────────
 
-pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
     let (total, registered) = crate::sticker::get_stats();
     let store = crate::sticker::store::load_store();
     ok(serde_json::json!({
@@ -31,7 +31,7 @@ pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// 切换表情包封禁状态
-pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut store = crate::sticker::store::load_store();
     let banned = store
         .stickers
@@ -49,7 +49,7 @@ pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// 删除表情包
-pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut store = crate::sticker::store::load_store();
     let data_dir = crate::config::data_dir();
     if let Some(idx) = store.stickers.iter().position(|e| e.hash == hash) {
@@ -69,7 +69,7 @@ pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 ///
 /// 1. 优先从注册表中查找哈希对应的路径
 /// 2. 注册表未命中时，直接扫描 sticker/ 和 ne_sticker/ 目录查找文件
-pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let data_dir = crate::config::data_dir();
     let mut full_path = None;
 
@@ -137,7 +137,7 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// 更新表情包标签
-pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     let val: serde_json::Value = match super::parse_json(body) {
         Ok(v) => v,
         Err(e) => return super::err(400, &e),
@@ -162,7 +162,10 @@ pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<
 }
 
 /// 更新表情包 VLM 自然语言描述
-pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_description(
+    hash: &str,
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let val: serde_json::Value = match super::parse_json(body) {
         Ok(v) => v,
         Err(e) => return super::err(400, &e),
@@ -183,7 +186,7 @@ pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::
 
 // ── 仪表盘统计 ────────────────────────────────────────────────
 
-pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
     let user_ids = crate::memory::store::all_user_ids();
     let user_count = user_ids.len();
     let mut mem_count: usize = 0;
@@ -228,7 +231,7 @@ fn parse_importance(
     }
 }
 
-pub fn handle_memory(
+pub(crate) fn handle_memory(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -379,7 +382,7 @@ pub fn handle_memory(
 
 // ── Handler: 工作记忆 ──────────────────────────────────────────
 
-pub fn handle_working_memory(
+pub(crate) fn handle_working_memory(
     method: &Method,
     segs: &[&str],
     _body: &[u8],
@@ -468,7 +471,7 @@ pub fn handle_working_memory(
 
 // ── Handler: 情绪 ──────────────────────────────────────────────
 
-pub fn handle_emotion(
+pub(crate) fn handle_emotion(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -531,7 +534,7 @@ pub fn handle_emotion(
 
 // ── Handler: 黑名单 ──────────────────────────────────────────
 
-pub fn handle_blocklist(
+pub(crate) fn handle_blocklist(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -585,7 +588,7 @@ pub fn handle_blocklist(
 
 // ── Handler: 归档 ──────────────────────────────────────────────
 
-pub fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("archive.json");
     let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
     let store: serde_json::Value = serde_json::from_str(&data)
@@ -595,7 +598,7 @@ pub fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
 
 // ── Handler: 备份 ──────────────────────────────────────────────
 
-pub fn handle_backups(
+pub(crate) fn handle_backups(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -659,7 +662,7 @@ pub fn handle_backups(
 
 // ── 配额追踪 ────────────────────────────────────────────────────
 
-pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
     if *method != Method::Get {
         return err(405, "method not allowed");
     }
@@ -691,7 +694,10 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
 
 // ── 防注入状态管理 ────────────────────────────────────────────────
 
-pub fn handle_anti_injection(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_anti_injection(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             // GET /api/anti-injection/users - 获取所有用户风险状态
@@ -795,7 +801,7 @@ pub fn handle_anti_injection(method: &Method, segs: &[&str]) -> Response<std::io
 
 // ── 配置管理 ──────────────────────────────────────────────────
 
-pub fn handle_config(
+pub(crate) fn handle_config(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -930,7 +936,7 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
-pub fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
     ok(crate::tracking::summary())
 }
 
@@ -938,13 +944,40 @@ pub fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
 ///
 /// 这是"要不要把「文本即发言」换成严格 `Turn` tagged union"的决策依据——
 /// 看 `failure_rate`：它就是在当前流量下，严格契约会失败的比例。
-pub fn handle_turn_shadow() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_turn_shadow() -> Response<std::io::Cursor<Vec<u8>>> {
     ok(crate::ai::shadow::report(24 * 3600).to_json())
+}
+
+/// 后台操作审计：最近 100 条"谁在什么时候改了什么"
+///
+/// 审计表此前**只写不读**——写入方（[`crate::db::Db::record_audit`]）在，
+/// 读方没有出口，只有它自己的单元测试读过。没有读方的审计回答不了它本来
+/// 要回答的问题，所以补上这个出口而不是删掉读方。
+pub(crate) fn handle_audit() -> Response<std::io::Cursor<Vec<u8>>> {
+    const PAGE_SIZE: usize = 100;
+
+    match crate::db::db().recent_audit(PAGE_SIZE) {
+        Ok(entries) => {
+            let items: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "actor": entry.actor,
+                        "command": entry.command,
+                        "detail": entry.detail,
+                        "created_at": entry.created_at,
+                    })
+                })
+                .collect();
+            ok(serde_json::json!({ "entries": items }))
+        }
+        Err(error) => err(500, &format!("读取审计失败: {error}")),
+    }
 }
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
-pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     // POST: 更新计划状态
     if method == &Method::Post {
         let body_val: serde_json::Value = match serde_json::from_slice(body) {
@@ -1029,7 +1062,10 @@ pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor
 
 // ── 对话管理 ──────────────────────────────────────────────────
 
-pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_conversations(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             // GET /api/conversations -- 列出所有活跃群聊和私聊
@@ -1086,7 +1122,7 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
 
 // ── Handler: 人性化状态 ──────────────────────────────────────────
 
-pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
     let cfg = config::get();
 
     let battery = if cfg.humanity.social_battery_enabled {
@@ -1164,7 +1200,10 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
     }))
 }
 
-pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_relationships(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     if *method != Method::Get {
         return err(405, "method not allowed");
     }
@@ -1196,7 +1235,10 @@ pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io:
 
 // ── Handler: 内存操作日志 ──────────────────────────────────────────
 
-pub fn handle_memory_ops_log(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_memory_ops_log(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             let limit = segs
@@ -1287,7 +1329,7 @@ fn mind_now() -> serde_json::Value {
     })
 }
 
-pub fn handle_mind(
+pub(crate) fn handle_mind(
     method: &Method,
     segs: &[&str],
     body: &[u8],

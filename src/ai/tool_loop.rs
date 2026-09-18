@@ -45,7 +45,7 @@ fn observe(shape: TurnShape, detail: &str) {
 ///
 /// 返回 [`Utterance`]：要么是她要说的话，要么是一次**带原因**的沉默。
 /// 失败原因放在值里而不是 `Err`，调用方无法"忽略错误"而丢掉它。
-pub fn run_tool_loop(
+pub(crate) fn run_tool_loop(
     system_prompt: &str,
     history: &[(String, String)],
     user_content: &str,

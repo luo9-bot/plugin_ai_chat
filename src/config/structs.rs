@@ -573,8 +573,6 @@ pub struct HumanityConfig {
     // 变速回复
     #[serde(default = "default_true")]
     pub response_timing_enabled: bool,
-    #[serde(default = "default_thinking_pause_probability")]
-    pub thinking_pause_probability: f32,
     #[serde(default = "default_base_typing_speed")]
     pub base_typing_speed: f32,
 
@@ -631,7 +629,6 @@ impl Default for HumanityConfig {
             cognitive_biases: CognitiveBiasesConfig::default(),
             attention_enabled: true,
             response_timing_enabled: true,
-            thinking_pause_probability: default_thinking_pause_probability(),
             base_typing_speed: default_base_typing_speed(),
             unpredictability_enabled: true,
             whim_probability: default_whim_probability(),
@@ -914,9 +911,6 @@ fn default_anchoring_strength() -> f32 {
 }
 fn default_availability_heuristic() -> f32 {
     0.4
-}
-fn default_thinking_pause_probability() -> f32 {
-    0.15
 }
 fn default_base_typing_speed() -> f32 {
     5.0

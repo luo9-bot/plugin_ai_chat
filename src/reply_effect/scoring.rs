@@ -67,7 +67,7 @@ const POSITIVE_PATTERNS: &[&str] = &[
 // ── ASI 总分 ────────────────────────────────────────────────────
 
 /// ASI = (0.45 * 行为分 + 0.35 * 关系分 + 0.20 * (1 - 摩擦分)) * 100
-pub fn calculate_asi(record: &ReplyEffectRecord) -> f64 {
+pub(crate) fn calculate_asi(record: &ReplyEffectRecord) -> f64 {
     let behavior = calculate_behavior_score(record);
     let relational = calculate_relational_score(record);
     let friction = calculate_friction_score(record);
@@ -76,7 +76,7 @@ pub fn calculate_asi(record: &ReplyEffectRecord) -> f64 {
 
 // ── 行为分 ──────────────────────────────────────────────────────
 
-pub fn calculate_behavior_score(record: &ReplyEffectRecord) -> f64 {
+pub(crate) fn calculate_behavior_score(record: &ReplyEffectRecord) -> f64 {
     let target: Vec<&FollowupMessage> = record
         .followups
         .iter()
@@ -261,7 +261,7 @@ fn calculate_friction_score(record: &ReplyEffectRecord) -> f64 {
 
 // ── 终结判断 ────────────────────────────────────────────────────
 
-pub fn should_finalize(record: &ReplyEffectRecord) -> bool {
+pub(crate) fn should_finalize(record: &ReplyEffectRecord) -> bool {
     let now = crate::util::now_secs();
 
     // 超时终结
@@ -306,7 +306,7 @@ pub fn should_finalize(record: &ReplyEffectRecord) -> bool {
 /// LLM 评判结果
 #[derive(Debug, Clone)]
 
-pub struct LlmJudgeScores {
+pub(crate) struct LlmJudgeScores {
     pub social_presence: f64,
     pub warmth: f64,
     pub competence: f64,
@@ -316,7 +316,7 @@ pub struct LlmJudgeScores {
 /// 使用 LLM 评判回复质量（5 维度，1-5 分）
 ///
 /// 可选增强：当 API 预算允许时调用，规则匹配作为 fallback。
-pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
+pub(crate) fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
     let prompt = crate::prompt::PromptManager::get().raw("reply_effect_judge");
     if prompt.is_empty() {
         return None;
@@ -374,7 +374,7 @@ pub fn judge_with_llm(record: &ReplyEffectRecord) -> Option<LlmJudgeScores> {
 }
 
 /// 计算 LLM Judge 的关系分
-pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
+pub(crate) fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
     // 归一化到 0-1：(score - 1) / 4
     let sp = (scores.social_presence - 1.0) / 4.0;
     let w = (scores.warmth - 1.0) / 4.0;
@@ -384,7 +384,7 @@ pub fn calculate_relational_from_llm(scores: &LlmJudgeScores) -> f64 {
 }
 
 /// 计算 LLM Judge 的摩擦分（含 uncanny_risk）
-pub fn calculate_friction_from_llm(record: &ReplyEffectRecord, uncanny_risk: f64) -> f64 {
+pub(crate) fn calculate_friction_from_llm(record: &ReplyEffectRecord, uncanny_risk: f64) -> f64 {
     let neg = NEGATIVE_PATTERNS
         .iter()
         .any(|p| record.followups.iter().any(|f| f.content.contains(p)));

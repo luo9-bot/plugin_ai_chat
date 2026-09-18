@@ -280,32 +280,11 @@ pub fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
         .collect()
 }
 
-/// 今天该做的周计划条目（未完成、安排在今天的）
-pub fn today_week_items() -> Vec<PlanItem> {
-    let today = crate::util::current_weekday_eng();
-    load(Timeframe::Week)
-        .items
-        .into_iter()
-        .filter(|item| item.is_open() && item.target_day.as_deref() == Some(today.as_str()))
-        .collect()
-}
-
 /// 跨全部跨度的未完成条目，供她一眼看全并指认
 ///
 /// 排序：今日 → 本周 → 本月，各自保持生成顺序。
 pub fn open_items_all() -> Vec<PlanItem> {
     Timeframe::ALL.into_iter().flat_map(open_items).collect()
-}
-
-/// 按 id 找一条（跨全部跨度）
-pub fn find(item_id: &str) -> Option<PlanItem> {
-    let wanted = item_id.trim().to_ascii_lowercase();
-    Timeframe::ALL.into_iter().find_map(|timeframe| {
-        load(timeframe)
-            .items
-            .into_iter()
-            .find(|item| item.id == wanted)
-    })
 }
 
 /// 渲染成给她看的一行行文本；没有未完成事项时返回 None
@@ -681,18 +660,11 @@ mod tests {
         assert!(add_own_item("   ").is_none());
         assert!(add_own_item(&"长".repeat(MAX_CONTENT_CHARS + 1)).is_none());
 
-        // ── 跨跨度：三个跨度各有独立编号，都能按 id 找到 ──
+        // ── 跨跨度：三个跨度各有独立编号 ──
         seed(Timeframe::Week, &["本周的事"]);
         seed(Timeframe::Month, &["本月的事"]);
         assert_eq!(open_items(Timeframe::Week)[0].id, "w1");
         assert_eq!(open_items(Timeframe::Month)[0].id, "m1");
-        assert_eq!(find("w1").map(|i| i.content), Some("本周的事".to_string()));
-        assert_eq!(
-            find("M1").map(|i| i.content),
-            Some("本月的事".to_string()),
-            "id 大小写不敏感"
-        );
-        assert!(find("x9").is_none(), "不存在的 id 找不到");
 
         // ── 递给她看的清单：覆盖三个跨度、带标签、受上限约束 ──
         let rendered = render_open_items(20).expect("有未完成事项就该渲染出清单");

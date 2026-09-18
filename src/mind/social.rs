@@ -1023,7 +1023,7 @@ pub fn speak_score(
     };
     let (bot_name, self_qq) = (cfg.bot_name.clone(), cfg.self_qq);
     let now = util::now_secs();
-    let intimacy_component = W_INTIMACY * intimacy;
+    let intimacy_component = W_INTIMACY * input.intimacy;
     with_state(group_id, |state| {
         let mut breakdown = speak_score_breakdown(state, now, &input, &bot_name, self_qq);
         // 亲密度不单独成项暴露（它是关系系统的输出），并入总分说明

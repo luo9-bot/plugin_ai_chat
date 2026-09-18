@@ -149,14 +149,6 @@ fn send_msg_rhythmic(group_id: u64, user_id: u64, text: &str) {
     }
 }
 
-/// 发送带 @ 的群消息
-pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
-    let full = format!("[CQ:at,qq={}]\n{}", user_id, text);
-    info!(group_id, user_id, content = text, "send: at msg");
-    let msg = crate::util::to_c_string(full);
-    Bot::send_group_msg(group_id, msg);
-}
-
 /// 安全发送 AI 生成的消息：clean_reply + check_output + 分割 + 打字延迟
 ///
 /// `incoming` 是她正在回应的原文（用于估算阅读时间）；传空串表示

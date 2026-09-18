@@ -144,11 +144,6 @@ pub fn ts_to_ymd_cst(secs: u64) -> (u64, u32, u32) {
     epoch_days_to_ymd(day_index_cst(secs))
 }
 
-/// 当前 UTC+8 的 (年, 月, 日)
-pub fn today_ymd() -> (u64, u32, u32) {
-    ts_to_ymd_cst(now_secs())
-}
-
 /// 时间戳 → 日期字符串 "YYYY-MM-DD"（UTC+8）
 pub fn ts_to_date_str(secs: u64) -> String {
     let (y, m, d) = ts_to_ymd_cst(secs);
@@ -195,25 +190,6 @@ pub fn weekday_cst_at(secs: u64) -> u32 {
     // 于是 `monday_of_week_str()` 得到的是"周一的前一天"，周计划的边界
     // 与 `current_weekday_eng()` 报给模型的星期都错了一天。
     ((day_index_cst(secs) + 3) % 7) as u32 + 1
-}
-
-/// 当前 UTC+8 星期几（1=周一, 7=周日）
-pub fn current_weekday_cst() -> u32 {
-    weekday_cst_at(now_secs())
-}
-
-/// 当前 UTC+8 英文星期几
-pub fn current_weekday_eng() -> String {
-    let names = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
-    names[(current_weekday_cst() - 1) as usize].to_string()
 }
 
 /// 本周周一的日期字符串 "YYYY-MM-DD"（UTC+8）

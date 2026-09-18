@@ -9,5 +9,5 @@
 mod local;
 mod shared;
 
-pub use local::{BatchBuffer, GateState, MessageBatch, TakenBatch};
-pub use shared::{CtxKey, SharedState, UserContext};
+pub use local::{BatchBuffer, GateState, TakenBatch};
+pub use shared::SharedState;

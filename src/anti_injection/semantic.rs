@@ -46,14 +46,6 @@ impl SemanticScores {
             }
         }
     }
-
-    pub fn max_score(&self) -> f32 {
-        self.prompt_exfiltration
-            .max(self.meta_execution)
-            .max(self.authority_override)
-            .max(self.indirect_jailbreak)
-            .max(self.role_abstraction)
-    }
 }
 
 struct SemanticRule {
@@ -378,7 +370,11 @@ mod tests {
     fn test_normal_text_no_detection() {
         let segments = vec!["今天天气真好".to_string()];
         let scores = scan_semantic(&segments);
-        assert_eq!(scores.max_score(), 0.0);
+        assert_eq!(scores.prompt_exfiltration, 0.0);
+        assert_eq!(scores.meta_execution, 0.0);
+        assert_eq!(scores.authority_override, 0.0);
+        assert_eq!(scores.indirect_jailbreak, 0.0);
+        assert_eq!(scores.role_abstraction, 0.0);
     }
 
     #[test]

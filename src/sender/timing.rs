@@ -23,8 +23,6 @@ pub struct ResponseTiming {
     pub base_typing_speed: f32,
     /// 当前修正系数（受精力/情绪/昼夜节律影响）
     pub speed_modifier: f32,
-    /// 思考分布的期望值倍率（越大越容易"想一会儿"）
-    pub thinking_pause_probability: f32,
 }
 
 impl Default for ResponseTiming {
@@ -34,7 +32,6 @@ impl Default for ResponseTiming {
         Self {
             base_typing_speed: h.base_typing_speed,
             speed_modifier: 1.0,
-            thinking_pause_probability: h.thinking_pause_probability,
         }
     }
 }
@@ -116,7 +113,6 @@ mod tests {
         ResponseTiming {
             base_typing_speed: 5.0,
             speed_modifier: 1.0,
-            thinking_pause_probability: 0.15,
         }
     }
 

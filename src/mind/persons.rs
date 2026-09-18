@@ -236,11 +236,6 @@ pub fn all() -> Vec<(u64, PersonFile)> {
         .collect()
 }
 
-/// 涉及某人的今日互动（供睡前整理确定要修订谁）
-pub fn involved_today(about_users: &[u64]) -> Vec<(u64, PersonFile)> {
-    about_users.iter().map(|&uid| (uid, get(uid))).collect()
-}
-
 /// 零容忍清洗：清除与该用户相关的待办牵挂（TA的印象与记忆保留——那是事实）
 pub fn purge_user_want_to_say(uid: u64) {
     let mut file = get(uid);

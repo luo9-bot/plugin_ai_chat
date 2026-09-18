@@ -38,8 +38,6 @@ pub fn get_recent_sticker_hashes(group_id: u64, max_age_secs: u64) -> Vec<String
 pub struct ReplyRecord {
     /// 回复文本
     pub text: String,
-    /// 发送时间
-    pub sent_at: Instant,
 }
 
 /// 一条已发送的表情记录
@@ -90,7 +88,6 @@ impl ReplyDedupTracker {
         let entry = self.group_replies.entry(group_id).or_default();
         entry.push_back(ReplyRecord {
             text: text.to_string(),
-            sent_at: Instant::now(),
         });
         if entry.len() > MAX_RECENT_REPLIES {
             entry.pop_front();

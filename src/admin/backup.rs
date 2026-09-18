@@ -43,7 +43,7 @@ fn backup_state_db(data_type: &str) -> bool {
     }
 }
 
-pub fn before_modify(data_type: &str) {
+pub(crate) fn before_modify(data_type: &str) {
     if IN_STATE_DB.contains(&data_type) {
         backup_state_db(data_type);
         return;
@@ -77,7 +77,7 @@ fn prune(dir: &Path, max_count: usize) {
     }
 }
 
-pub fn list(data_type: &str) -> serde_json::Value {
+pub(crate) fn list(data_type: &str) -> serde_json::Value {
     let dir = config::data_dir().join("backups").join(data_type);
     let mut items = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -96,7 +96,7 @@ pub fn list(data_type: &str) -> serde_json::Value {
     serde_json::json!({"backups": items})
 }
 
-pub fn list_all_types() -> serde_json::Value {
+pub(crate) fn list_all_types() -> serde_json::Value {
     let types = ["working_memory", "emotion", "blocklist", "archive"];
     let mut counts = serde_json::Map::new();
     for t in &types {
@@ -109,7 +109,7 @@ pub fn list_all_types() -> serde_json::Value {
     serde_json::json!({"types": types, "counts": counts})
 }
 
-pub fn restore(data_type: &str, filename: &str) -> Result<(), String> {
+pub(crate) fn restore(data_type: &str, filename: &str) -> Result<(), String> {
     // 安全校验：仅允许安全字符
     if !filename
         .chars()
