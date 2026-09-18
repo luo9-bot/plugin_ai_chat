@@ -10,12 +10,14 @@
 //! 写操作串行；读可以另外开只读连接（WAL 下写不阻塞读）。
 //!
 //! `scope` 用枚举而不是 `'private' | 'group'` 字面量：调用点不可能拼错，
-//! 存储格式只在 [`Scope::as_str`] / [`Scope::parse`] 两处出现。
+//! 存储格式只在 [`Scope::as_str`] 一处出现。
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{Connection, OptionalExtension};
+
+use crate::util::MutexExt;
 
 /// 状态行的作用域
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,10 +310,7 @@ impl Db {
         &self,
         f: impl FnOnce(&Connection) -> Result<T, DbError>,
     ) -> Result<T, DbError> {
-        let guard = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = self.conn.lock_recover();
         f(&guard)
     }
 

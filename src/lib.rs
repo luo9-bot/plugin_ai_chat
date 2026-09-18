@@ -166,9 +166,7 @@ pub(crate) fn gate_read<F, R>(f: F) -> R
 where
     F: FnOnce(&state::GateState) -> R,
 {
-    let guard = gate()
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = gate().read_recover();
     f(&guard)
 }
 
@@ -176,9 +174,7 @@ pub(crate) fn gate_write<F, R>(f: F) -> R
 where
     F: FnOnce(&mut state::GateState) -> R,
 {
-    let mut guard = gate()
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = gate().write_recover();
     f(&mut guard)
 }
 

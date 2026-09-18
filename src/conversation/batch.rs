@@ -15,6 +15,7 @@ use std::thread;
 use tracing::{info, warn};
 
 use super::handler::{GroupBatch, process_message};
+use crate::util::MutexExt;
 use crate::{MESSAGE_QUEUE, ProcessingTask, batches, config, processing_users};
 
 pub fn process_expired_batches() {
@@ -24,9 +25,7 @@ pub fn process_expired_batches() {
     // 收集所有过期批次，跳过正在处理中的用户。
     // `take_expired` 一次性返回结果，因此这里不把缓冲借用带出闭包。
     let expired: Vec<GroupBatch> = {
-        let processing = processing_users()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let processing = processing_users().lock_recover();
         batches(|b| b.take_expired(timeout, |key| processing.contains(&key)))
             .into_iter()
             .map(|((group_id, user_id), taken)| GroupBatch {
