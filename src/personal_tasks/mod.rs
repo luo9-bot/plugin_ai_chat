@@ -8,6 +8,8 @@ const MAX_ACTIVE_TASKS: usize = 30;
 const MAX_FINISHED_TASKS: usize = 20;
 const FOLLOW_UP_DELAY_SECS: u64 = 4 * 3600;
 const MAX_FOLLOW_UPS: u8 = 2;
+/// 每项任务保留的进展行数上限
+const MAX_PROGRESS_LINES: usize = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -122,8 +124,10 @@ pub fn add_or_reinforce(
         if !next_action.trim().is_empty() {
             task.next_action = next_action.trim().to_string();
         }
-        task.progress.push(format!("再次确认：{}", title));
-        task.progress.truncate(8);
+        // 不把提取模型的原话再写回进展：它下一轮会读到这行，
+        // 于是"再次确认：X"层层复制成 #20 那种滚雪球式进展。
+        task.progress.push("又被提起一次".to_string());
+        task.progress.truncate(MAX_PROGRESS_LINES);
         let result = task.clone();
         save(&store);
         return Some(result);
@@ -167,6 +171,9 @@ pub fn add_or_reinforce(
 }
 
 /// 收到关联对象的新消息。等待任务被真正的外部事件推进，而不是自动猜测完成。
+///
+/// 只登记"对方有回音"这件事供后续复盘，不再把任务立刻翻回进行中：
+/// 自动复活会让一件对方根本没接的事无限循环（等 → 复活 → 跟进 → 再等）。
 pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
     let mut store = load();
     let now = crate::util::now_secs();
@@ -176,7 +183,6 @@ pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
             && task.associated_user == user_id
             && task.associated_group == group_id
         {
-            task.status = TaskStatus::InProgress;
             task.review_at = now;
             task.updated_at = now;
             task.blocker.clear();
@@ -184,7 +190,7 @@ pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
                 "对方回复：{}",
                 message.chars().take(40).collect::<String>()
             ));
-            task.progress.truncate(8);
+            task.progress.truncate(MAX_PROGRESS_LINES);
             changed = true;
         }
     }
@@ -192,12 +198,17 @@ pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
         save(&store);
         debug!(
             user_id,
-            group_id, "personal_tasks: waiting task resumed by reply"
+            group_id, "personal_tasks: waiting task marked reviewable by reply"
         );
     }
 }
 
-/// 到期任务不会凭空完成：等待超过重试上限则搁置，其余任务回到待决定状态。
+/// 到期任务不会凭空完成：等待超过重试上限就彻底放下，其余回到待决定状态。
+///
+/// `follow_up_count` 必须在这里真正累加——它曾经只被读取、从不写入，
+/// 于是"等待超时 → 决定跟进 → 再等待"形成一个永不终止的环，
+/// 表现就是她隔几小时又来催同一件事。到达上限后直接 Abandoned：
+/// 真人不会为一件没回音的事无限排期。
 pub fn review_due_tasks() {
     let mut store = load();
     let now = crate::util::now_secs();
@@ -208,16 +219,19 @@ pub fn review_due_tasks() {
         }
         match task.status {
             TaskStatus::WaitingForPerson if task.follow_up_count >= MAX_FOLLOW_UPS => {
-                task.status = TaskStatus::Snoozed;
-                task.blocker = "已跟进两次，先别催了".to_string();
-                task.review_at = now + 24 * 3600;
-                task.progress.push("暂缓：等待对方回应".to_string());
+                task.status = TaskStatus::Abandoned;
+                task.blocker = format!("已跟进 {MAX_FOLLOW_UPS} 次没有回音，放下");
+                task.next_action.clear();
+                task.review_at = 0;
+                task.progress.push("放下：对方一直没接".to_string());
                 changed = true;
             }
             TaskStatus::WaitingForPerson => {
+                task.follow_up_count += 1;
                 task.status = TaskStatus::InProgress;
                 task.next_action = "决定是否自然地跟进一次".to_string();
-                task.progress.push("等待超时：需要决定下一步".to_string());
+                task.progress
+                    .push(format!("等待超时（第 {} 次）", task.follow_up_count));
                 changed = true;
             }
             TaskStatus::Snoozed => {
@@ -229,7 +243,7 @@ pub fn review_due_tasks() {
         }
         if changed {
             task.updated_at = now;
-            task.progress.truncate(8);
+            task.progress.truncate(MAX_PROGRESS_LINES);
         }
     }
     if changed {
@@ -315,14 +329,18 @@ pub fn get_context(max_count: usize) -> String {
     }
 }
 
-/// 从一次真实对话中提取 bot 的明确事项。模型只能给出候选，本模块负责绑定对象和存储。
-pub fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str, bot_reply: &str) {
-    let context = format!(
-        "# 当前任务\n{}\n\n# 对方刚说\n{}\n\n# 你刚回复\n{}",
-        get_context(10),
-        user_message,
-        bot_reply,
-    );
+/// 从一次真实对话中提取她答应下来的事项。模型只能给出候选，本模块负责绑定对象和存储。
+///
+/// 只把**对方说的话**交给提取模型：她自己的回复是模型生成的文本，不是
+/// 现实里发生过的约定。把她的回复一起喂进来，等于让模型把自己写下的
+/// 一句话提升成"她的待办"，再在下一次提取时看见自己上轮的产物——
+/// 这是一条自我强化回路（真实表现：同一件事被反复"再次确认"、
+/// 凭空长出"确认明天时间"这类她从未答应过的任务）。
+///
+/// 传入的 `user_message` 应当已经包含对话上下文（见调用方），
+/// 提取器据此判断"对方是不是真的提出了约定"。
+pub fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str) {
+    let context = format!("# 对方刚说\n{user_message}");
     let result = crate::ai::analyze_with_tools(
         crate::prompt::PromptManager::get().raw("task_progress"),
         &context,

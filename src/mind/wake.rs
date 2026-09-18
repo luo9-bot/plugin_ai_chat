@@ -441,8 +441,36 @@ fn build_wake_input(plan: &WakePlan) -> String {
         sections.push(unread.join("\n"));
     }
 
-    sections.push(format!("你留了话：{}", plan.reason));
+    // 她留给自己的话在读取侧再滤一次壳（见 sanitize_reasons）
+    let reason = sanitize_reasons(std::iter::once(plan.reason.clone()))
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "（这条想起已被滤掉）".to_string());
+    sections.push(format!("你留了话：{reason}"));
     sections.join("\n\n")
+}
+
+/// 把一组"她留给自己的话"过滤成可以进 prompt 的文本。
+///
+/// 这些 reason 由模型生成、落盘、并会在之后每一轮回灌 prompt，
+/// 与内心独白/日记属于同一类污染面。写入侧已做滤壳，这里再做一次
+/// 读取侧过滤：老数据（滤壳上线前落盘的）同样不能进 prompt。
+///
+/// `filter_shell_level` 为 "off" 时不过滤，与其它通道保持一致。
+pub fn sanitize_reasons(reasons: impl IntoIterator<Item = String>) -> Vec<String> {
+    if crate::config::get().conversation.filter_shell_level == "off" {
+        return reasons.into_iter().collect();
+    }
+    reasons
+        .into_iter()
+        .filter(|reason| {
+            let passed = crate::anti_injection::check_memory_entry(reason).passed;
+            if !passed {
+                super::security::log_event(0, "wake_reason_read", "rejected", reason);
+            }
+            passed
+        })
+        .collect()
 }
 
 /// 睡前整理的输入：一整天的经历 + 互动过的人的现有档案
