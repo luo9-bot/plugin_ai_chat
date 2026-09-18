@@ -31,6 +31,10 @@ pub fn extract_image_urls(message: &str) -> Vec<String> {
 }
 
 /// 去除消息中的 [CQ:image,...] 标签，返回纯文本
+///
+/// 只处理图片：视频/文件/转发等其它 CQ 码由 `conversation::turn::strip_cq_codes`
+/// 统一剥离（那里有完整的 CQ 语法处理）。这里的语义就是"去掉图片码"，
+/// 保留它是因为记忆与图片沉淀路径需要精确区分"这条消息本来有没有图"。
 pub fn strip_image_cq(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
     let mut remaining = message;

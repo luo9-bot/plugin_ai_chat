@@ -27,5 +27,8 @@ test_*.rs
 
 .mimocode/
 
+# 日志审计用的临时工作区（解码后的日志与会话脚本），不属于仓库内容
+.tmp_logs/
+
 luo9*.txt
 *.md
