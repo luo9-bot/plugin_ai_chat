@@ -32,3 +32,6 @@ test_*.rs
 
 luo9*.txt
 *.md
+
+.npm-cache/
+*cache*/
