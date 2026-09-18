@@ -212,16 +212,16 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
 
     let json_body = serde_json::to_string(&request_body).ok()?;
 
-    let mut resp = ureq::post(&url)
-        .header(
-            "Authorization",
-            &format!("Bearer {}", cfg.embedding.api_key),
-        )
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-        .ok()?;
+    // 超时来自 `ai.request_timeout`：embedding 也在消息处理路径上，
+    // 一个没有上限的请求会把整个串行队列拖住
+    let resp_str = crate::util::post_json(
+        &crate::ai::no_error_agent(),
+        &url,
+        &cfg.embedding.api_key,
+        &json_body,
+    )
+    .ok()?;
 
-    let resp_str = resp.body_mut().read_to_string().ok()?;
     let v: serde_json::Value = serde_json::from_str(&resp_str).ok()?;
 
     let embedding = v

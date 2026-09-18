@@ -81,10 +81,8 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
-        // 下载图片
-        if let Ok(mut resp) = ureq::get(url).call()
-            && let Ok(bytes) = resp.body_mut().read_to_vec()
-        {
+        // 下载图片（超时由 util::http 统一强制，不在这里手工拼请求）
+        if let Ok(bytes) = crate::util::get_bytes(url) {
             let format = detect_format(&bytes);
 
             // 内容过滤
@@ -120,13 +118,8 @@ pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
         // 1. 下载文件
-        let resp = match ureq::get(url).call() {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let bytes = match resp.into_body().read_to_vec() {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(bytes) = crate::util::get_bytes(url) else {
+            continue;
         };
         let hash = compute_hash(&bytes);
 
@@ -391,9 +384,14 @@ fn select_with_vlm(image_paths: &[String], context: &str) -> Option<(usize, Stri
         "max_output_tokens": 256
     });
 
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-
-    let result = call_vlm_api(&url, &cfg.vision.api_key, &request_body);
+    let result =
+        match crate::vision::call_vlm(&cfg.vision.base_url, &cfg.vision.api_key, &request_body) {
+            Ok(response) => Some(response),
+            Err(error) => {
+                debug!(error = %error, "sticker: VLM 选择调用失败");
+                None
+            }
+        };
 
     match result {
         Some(response) => {
@@ -599,57 +597,13 @@ fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<Str
         "max_output_tokens": cfg.vision.max_tokens
     });
 
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-    call_vlm_api(&url, &cfg.vision.api_key, &request_body)
-}
-
-/// 通用 VLM API 调用
-fn call_vlm_api(url: &str, api_key: &str, body: &serde_json::Value) -> Option<String> {
-    let json_body = serde_json::to_string(body).ok()?;
-
-    let mut resp = ureq::post(url)
-        .header("Authorization", &format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-        .ok()?;
-
-    let resp_str = resp.body_mut().read_to_string().ok()?;
-
-    // 解析响应
-    serde_json::from_str::<serde_json::Value>(&resp_str)
-        .ok()
-        .and_then(|v| {
-            // responses 格式
-            v.get("output")
-                .and_then(|o| o.as_array())
-                .and_then(|output| {
-                    output.iter().find_map(|item| {
-                        item.get("content")
-                            .and_then(|c| c.as_array())
-                            .and_then(|contents| {
-                                contents.iter().find_map(|content| {
-                                    content
-                                        .get("text")
-                                        .and_then(|t| t.as_str())
-                                        .map(|s| s.to_string())
-                                })
-                            })
-                    })
-                })
-                // chat completions 格式
-                .or_else(|| {
-                    v.get("choices")
-                        .and_then(|c| c.as_array())
-                        .and_then(|choices| {
-                            choices.first().and_then(|c| {
-                                c.get("message")
-                                    .and_then(|m| m.get("content"))
-                                    .and_then(|c| c.as_str())
-                                    .map(|s| s.to_string())
-                            })
-                        })
-                })
-        })
+    match crate::vision::call_vlm(&cfg.vision.base_url, &cfg.vision.api_key, &request_body) {
+        Ok(text) => Some(text),
+        Err(error) => {
+            debug!(error = %error, "sticker: VLM 描述调用失败");
+            None
+        }
+    }
 }
 
 // ── 工具函数 ────────────────────────────────────────────────────

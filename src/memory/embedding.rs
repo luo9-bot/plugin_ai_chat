@@ -62,26 +62,10 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
         EMBEDDING_TIMEOUT_SECS,
     ));
 
-    let mut resp = match agent
-        .post(&url)
-        .header(
-            "Authorization",
-            &format!("Bearer {}", cfg.embedding.api_key),
-        )
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-    {
-        Ok(r) => r,
-        Err(e) => {
-            warn!(error = %e, "embedding: request failed");
-            return None;
-        }
-    };
-
-    let resp_str = match resp.body_mut().read_to_string() {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(error = %e, "embedding: read response failed");
+    let resp_str = match crate::util::post_json(&agent, &url, &cfg.embedding.api_key, &json_body) {
+        Ok(body) => body,
+        Err(error) => {
+            warn!(error = %error, "embedding: request failed");
             return None;
         }
     };
