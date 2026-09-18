@@ -261,11 +261,9 @@ pub extern "C" fn plugin_main() {
     use tracing_appender::rolling;
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-    let log_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("data")
-        .join("plugin_ai_chat")
-        .join("logs");
+    // 与 config 用同一份数据目录推导：这里早于 config::init()，
+    // 不能走 data_dir()（DATA_DIR 还没设置），但也不能各写一遍路径
+    let log_dir = crate::config::default_data_path().join("logs");
     std::fs::create_dir_all(&log_dir).ok();
     let file_appender = rolling::daily(&log_dir, "ai_chat.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);

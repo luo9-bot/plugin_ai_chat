@@ -4,9 +4,16 @@
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, info, warn};
 
 use super::store::*;
+
+/// 内容过滤临时文件的序号
+///
+/// 原先是纳秒时间戳：同一 tick 内的两次调用可能拿到同一个名字而互相覆盖，
+/// 而且墙钟可被回拨。计数器不会重复，也不需要读时钟。
+static FILTRATION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 表情包选择结果
 pub(crate) struct StickerSelection {
@@ -290,21 +297,27 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
         return true;
     }
 
-    // 保存临时文件
-    let temp_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("data")
-        .join("plugin_ai_chat")
-        .join("temp");
-    std::fs::create_dir_all(&temp_dir).ok();
+    // 保存临时文件（VLM 需要一个路径而不是字节）
+    //
+    // 目录必须来自 `config::data_dir()`：原先这里自己拼 `current_dir()/data/
+    // plugin_ai_chat/temp`，等于绕开了数据目录的唯一来源——工作目录一变就写到
+    // 别处，测试也会污染真实目录。
+    let temp_dir = crate::config::data_dir().join("temp");
+    if let Err(error) = std::fs::create_dir_all(&temp_dir) {
+        warn!(error = %error, dir = ?temp_dir, "sticker: 临时目录创建失败，跳过内容过滤");
+        return false;
+    }
 
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let tmp_path = temp_dir.join(format!("sticker_filtration_{}.{}", timestamp, format));
+    let seq = FILTRATION_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = temp_dir.join(format!("sticker_filtration_{seq}.{format}"));
     debug!("文件写入路径: {:?}", tmp_path);
-    std::fs::write(&tmp_path, image_bytes).ok();
+
+    // 写不进去就没法过滤。与"VLM 调用失败"同样按保守处理（拒绝），
+    // 而不是带着一个不存在的路径继续往下走
+    if let Err(error) = std::fs::write(&tmp_path, image_bytes) {
+        warn!(error = %error, path = ?tmp_path, "sticker: 临时文件写入失败，跳过内容过滤");
+        return false;
+    }
 
     let prompt = if format == "gif" {
         format!(

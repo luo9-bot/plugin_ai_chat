@@ -51,15 +51,20 @@ pub(super) const DEFAULT_PROMPT_TXT: &str = r#"# 人设
 /// 测试留下的状态会参与下一次（代码里记为"约每十几次一次"的偶发红灯）。
 ///
 /// 生产构建仍然用真实目录：`data_dir()` 是启动契约，不能猜。
+///
+/// 它同时是**唯一**的推导入口：`plugin_main` 要在 `init()` 之前建日志目录，
+/// 那时 `DATA_DIR` 还没被设置（走 `data_dir()` 会 panic，而插件入口是
+/// `extern "C"`，一次 panic 不刷日志）。两处各推导一遍路径才是真正的隐患——
+/// 推导规则一旦改动，日志会落到和数据不同的地方。
 #[cfg(test)]
-fn default_data_path() -> PathBuf {
+pub(crate) fn default_data_path() -> PathBuf {
     std::env::temp_dir()
         .join("plugin_ai_chat_test")
         .join(format!("pid{}", std::process::id()))
 }
 
 #[cfg(not(test))]
-fn default_data_path() -> PathBuf {
+pub(crate) fn default_data_path() -> PathBuf {
     to_absolute(&PathBuf::from("data").join("plugin_ai_chat"))
 }
 
