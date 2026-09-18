@@ -1,3 +1,4 @@
+use crate::util::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -33,15 +34,17 @@ fn load_from_disk() -> VecDeque<OpsLogEntry> {
 
 fn save_to_disk(log: &VecDeque<OpsLogEntry>) {
     let path = log_path();
-    if let Ok(json) = serde_json::to_string_pretty(log) {
-        std::fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(log)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
 /// 初始化：从磁盘加载日志
 pub fn init() {
     let loaded = load_from_disk();
-    let mut guard = OPS_LOG.lock().unwrap();
+    let mut guard = OPS_LOG.lock_recover();
     *guard = Some(loaded);
 }
 
@@ -65,7 +68,7 @@ pub fn record(
         detail: detail.to_string(),
     };
 
-    let mut guard = OPS_LOG.lock().unwrap();
+    let mut guard = OPS_LOG.lock_recover();
     let log = guard.get_or_insert_with(VecDeque::new);
     log.push_back(entry);
     // 超出上限时移除最旧的
@@ -83,7 +86,7 @@ pub fn record(
 
 /// 获取最近 N 条日志
 pub fn get_logs(limit: Option<usize>) -> Vec<OpsLogEntry> {
-    let guard = OPS_LOG.lock().unwrap();
+    let guard = OPS_LOG.lock_recover();
     let log = guard.as_ref().map(|l| l.as_slices().0).unwrap_or_default();
     let n = limit.unwrap_or(500).min(log.len());
     // 返回最近 n 条（从尾部取）
@@ -92,7 +95,7 @@ pub fn get_logs(limit: Option<usize>) -> Vec<OpsLogEntry> {
 
 /// 清空日志
 pub fn clear() {
-    let mut guard = OPS_LOG.lock().unwrap();
+    let mut guard = OPS_LOG.lock_recover();
     if let Some(log) = guard.as_mut() {
         log.clear();
     }

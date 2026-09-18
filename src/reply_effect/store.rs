@@ -1,5 +1,6 @@
 //! 回复效果数据结构和持久化
 
+use crate::util::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -42,7 +43,7 @@ pub(crate) fn store_path() -> std::path::PathBuf {
 }
 
 pub(crate) fn load_store() -> EffectStore {
-    let mut guard = STORE.lock().unwrap();
+    let mut guard = STORE.lock_recover();
     if guard.is_none() {
         *guard = Some(crate::util::load_json(&store_path()));
     }
@@ -50,9 +51,14 @@ pub(crate) fn load_store() -> EffectStore {
 }
 
 pub(crate) fn save_store(store: &EffectStore) {
-    let mut guard = STORE.lock().unwrap();
-    *guard = Some(store.clone());
-    crate::util::save_json(&store_path(), store);
+    {
+        let mut guard = STORE.lock_recover();
+        *guard = Some(store.clone());
+        // 锁在这里释放：磁盘延迟不该决定锁的持有时间
+    }
+    if let Err(error) = crate::util::save_json(&store_path(), store) {
+        tracing::warn!(error = %error, path = %store_path().display(), "reply_effect: 持久化失败");
+    }
 }
 
 pub const OBSERVATION_WINDOW: u64 = 600;

@@ -206,11 +206,14 @@ static CONFUSABLE_MAP: LazyLock<HashMap<char, char>> = LazyLock::new(|| {
         m.insert(char::from_u32(0x1D7F6 + i as u32).unwrap_or(c), c);
     }
 
-    // Fullwidth ASCII
+    // Fullwidth ASCII：全角 0xFF01..=0xFF5E 与半角 0x0021..=0x007E 一一对应。
+    // 这里用 `if let` 而不是 `unwrap`：范围固定、实际不可能越界，
+    // 但扫描表构造不该持有任何 panic 点。
     for i in 0x0021..=0x007E {
-        let full = char::from_u32(0xFF01 + (i - 0x0021)).unwrap();
-        let half = char::from_u32(i).unwrap();
-        m.insert(full, half);
+        if let (Some(full), Some(half)) = (char::from_u32(0xFF01 + (i - 0x0021)), char::from_u32(i))
+        {
+            m.insert(full, half);
+        }
     }
     m.insert('\u{3000}', ' ');
 

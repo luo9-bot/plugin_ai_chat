@@ -162,22 +162,11 @@ fn load_store() -> WishStore {
 }
 
 fn save_store(store: &WishStore) {
-    if let Some(parent) = wish_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "wish: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string_pretty(store) else {
         warn!("wish: 愿望库序列化失败");
         return;
     };
-    let tmp = wish_path().with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!("wish: 愿望库写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, wish_path()) {
+    if let Err(e) = crate::util::atomic_write(wish_path(), json) {
         warn!(error = %e, "wish: 愿望库落盘失败");
     }
 }

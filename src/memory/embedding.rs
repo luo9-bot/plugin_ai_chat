@@ -3,11 +3,17 @@
 //! 调用火山引擎多模态向量化 API 生成文本向量。
 //! API 文档: https://www.volcengine.com/docs/82379/1409291
 
-use std::time::Duration;
 use tracing::{debug, warn};
 
 /// Embedding 向量维度（doubao-embedding-vision 默认输出 2048 维）
 const EMBEDDING_DIMENSION: usize = 2048;
+
+/// 单次向量化请求的超时（秒）
+///
+/// 每个文本是一次独立请求（该 API 不支持批量返回），所以这个值同时决定了
+/// 一批 N 条文本的最坏耗时 N × 该值。选 10 秒是因为向量化是后台补数据，
+/// 单个文本不值得等更久。
+const EMBEDDING_TIMEOUT_SECS: u64 = 10;
 
 /// 调用 Embedding API 生成单个文本的向量
 pub fn embed_text(text: &str) -> Option<Vec<f32>> {
@@ -50,12 +56,11 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 
     debug!(model = %cfg.embedding.model, "embedding: sending request");
 
-    // 使用 10 秒超时，避免阻塞消息处理
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(10)))
-            .build(),
-    );
+    // 10 秒超时 + 复用连接池：一批文本会连续发 N 次请求，
+    // 每次重新握手在"后台补向量"这个场景下纯属浪费
+    let agent = crate::util::agent(crate::util::AgentSpec::requiring_success(
+        EMBEDDING_TIMEOUT_SECS,
+    ));
 
     let mut resp = match agent
         .post(&url)

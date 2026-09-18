@@ -65,8 +65,10 @@ fn load_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
 
 fn save_json<T: serde::Serialize>(path: &PathBuf, data: &T) {
     ensure_dir(path);
-    if let Ok(json) = serde_json::to_string_pretty(data) {
-        fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(data)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 

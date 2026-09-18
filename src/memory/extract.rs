@@ -19,8 +19,10 @@ fn load_keyword_map() -> std::collections::HashMap<String, u64> {
 
 fn save_keyword_map(map: &std::collections::HashMap<String, u64>) {
     let path = keyword_cooldown_path();
-    if let Ok(json) = serde_json::to_string_pretty(map) {
-        std::fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(map)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 

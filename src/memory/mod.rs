@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use crate::config;
 
 pub use extract::*;
-pub use operations::*;
+pub(crate) use operations::*;
 pub use review::*;
 pub use store::*;
 
@@ -124,7 +124,6 @@ pub fn search_memories(
         vector_weight: 0.7,
         bm25_weight: 0.3,
         rrf_k: 60.0,
-        metadata_filter: None,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
     };

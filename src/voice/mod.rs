@@ -14,9 +14,39 @@ use std::collections::HashMap;
 
 use tracing::{debug, info, warn};
 
-use crate::ai::{ALL_TOOL_NAMES, Tool, ToolOutcome, run_tool_loop};
+use crate::ai::{ALL_TOOL_NAMES, SilenceCause, Tool, ToolOutcome, Utterance, run_tool_loop};
 use crate::config;
 use crate::mind::{self, SensoryPacket};
+
+/// 报告一次沉默
+///
+/// 这是把"上游全挂了"与"她今天很安静"分开的那一处：只有
+/// [`SilenceCause::Chose`] 是正常结果（`debug!`，不刷屏），
+/// 其余三类都是故障，走 `warn!` 并带上稳定的 `kind` 标签，
+/// 便于告警与统计。
+fn report_silence(scope: &str, cause: &SilenceCause, id: u64) {
+    let kind = cause.kind();
+    if cause.is_deliberate() {
+        debug!(scope, id, kind, "voice: 她选择沉默");
+        return;
+    }
+    // 三类故障各自带上能定位问题的字段
+    let detail = match cause {
+        SilenceCause::Chose => String::new(),
+        SilenceCause::UpstreamFailed { error } => {
+            format!("{} retryable={}", error.kind(), error.is_retryable())
+        }
+        SilenceCause::InvalidOutput { attempts } => format!("attempts={attempts}"),
+        SilenceCause::BudgetExhausted { rounds } => format!("rounds={rounds}"),
+    };
+    warn!(
+        scope,
+        id,
+        kind,
+        detail = %detail,
+        "voice: 这一轮没能表达——原因是故障，不是她不想说"
+    );
+}
 
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
@@ -32,6 +62,12 @@ pub struct GroupUtterance {
     pub user_id: u64,
     /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
+    /// 这条消息 @ 到的 QQ 号
+    ///
+    /// 必须从**原始 CQ 文本**解析：`text` 已经过
+    /// [`crate::conversation::perception::normalize`]，其中的
+    /// `[CQ:at,qq=N]` 会被还原成 `@名字`，之后再解析就永远为空。
+    pub at_targets: Vec<u64>,
     /// 消息到达时间（unix 秒，转译入流用）
     pub ts: u64,
     /// 到达时刻（毫秒）——排序用，同一秒内的先后靠它区分
@@ -751,14 +787,15 @@ pub fn speak_group(
         |name, args| execute_tool(name, args, group_id, primary, &involved, &transcript_tail),
     );
 
+    // 沉默的原因必须分类留痕：只有"她选择不说"是正常结果，
+    // 其余三类是故障（上游挂了 / 输出无效 / 轮次用尽）。
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
+        Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Silent,
         },
-        Ok(None) => VoiceAction::Silent,
-        Err(e) => {
-            info!(group_id, error = %e, "voice: group API error");
+        Utterance::Silent(cause) => {
+            report_silence("group", &cause, group_id);
             VoiceAction::Silent
         }
     }
@@ -844,13 +881,12 @@ pub fn speak_private(
     );
 
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
+        Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Silent,
         },
-        Ok(None) => VoiceAction::Silent,
-        Err(e) => {
-            info!(user_id, error = %e, "voice: private API error");
+        Utterance::Silent(cause) => {
+            report_silence("private", &cause, user_id);
             VoiceAction::Silent
         }
     }
@@ -980,8 +1016,13 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
         }
         },
     );
-    // 决策阶段失败且她什么都没留下 = 这次回神没有完成，不是她的沉默
-    let api_failed = decision_result.is_err() && captured_action.borrow().is_none();
+    // 决策阶段上游故障且她什么都没留下 = 这次回神没有完成，不是她的沉默。
+    // 判据从"是不是 Err"变成"沉默原因是不是上游故障"：前者只是约定，
+    // 后者是类型保证的。
+    let api_failed = matches!(
+        decision_result.silence_cause(),
+        Some(SilenceCause::UpstreamFailed { .. })
+    ) && captured_action.borrow().is_none();
 
     WakeTurn {
         inner,

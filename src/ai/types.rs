@@ -89,20 +89,3 @@ pub enum ToolOutcome {
     /// 立即结束循环且不产生任何发言（如 finish 工具 = 她选择沉默）
     Abort,
 }
-
-/// 记忆纠错条目
-pub struct MemoryCorrection {
-    pub old: String,    // 需要修正的旧内容 (模糊匹配)
-    pub new: String,    // 修正后的正确内容 (空 = 删除)
-    pub target: String, // "user" | "self"
-}
-
-/// 后处理分析结果
-pub struct PostAnalysis {
-    pub memories: Vec<(String, String)>, // (content, importance)
-    pub emotion: String,
-    pub intensity: f32,
-    pub corrections: Vec<MemoryCorrection>,
-    pub concerns: Vec<(String, String)>, // (content, category)
-    pub deliberations: Vec<String>,      // content
-}

@@ -10,7 +10,6 @@
 //! - 用户行为信誉系统
 
 pub mod behavior;
-pub mod context;
 pub mod decision;
 pub mod memory_guard;
 pub mod normalize;

@@ -52,20 +52,10 @@ fn load_index() -> Vec<DiaryEntry> {
 }
 
 fn save_index(entries: &[DiaryEntry]) {
-    if let Some(parent) = index_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "diary: 创建目录失败");
-        return;
-    }
     match serde_json::to_string_pretty(entries) {
         Ok(json) => {
-            let tmp = index_path().with_extension("json.tmp");
-            if fs::write(&tmp, json)
-                .and_then(|_| fs::rename(&tmp, index_path()))
-                .is_err()
-            {
-                warn!("diary: 索引落盘失败");
+            if let Err(e) = crate::util::atomic_write(index_path(), json) {
+                warn!(error = %e, "diary: 索引落盘失败");
             }
         }
         Err(e) => warn!(error = %e, "diary: 索引序列化失败"),

@@ -5,6 +5,7 @@
 //! - 起床/入睡周期
 //! - 最近完成的活动记录（供主动消息使用）
 
+use crate::util::MutexExt;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info};
@@ -52,7 +53,7 @@ mod types {
 
 /// 活动阶段
 #[derive(Debug, Clone, PartialEq)]
-pub enum ActivityPhase {
+pub(crate) enum ActivityPhase {
     JustStarted,
     InProgress,
     NearEnd,
@@ -75,7 +76,7 @@ impl ActivityPhase {
 
 /// 活动状态（进行中）
 #[derive(Debug, Clone)]
-pub struct ActivityState {
+pub(crate) struct ActivityState {
     pub activity: ActivityType,
     pub started_at: u64,
     pub expires_at: u64,
@@ -96,39 +97,20 @@ impl ActivityState {
 }
 
 /// 已完成的活动记录
+///
+/// 只保留完成时刻：`activity` 字段原本也存了一份，但没有任何读取点，
+/// 而活动类型已经进了日志（见下方 `info!`）。
 #[derive(Debug, Clone)]
-pub struct CompletedActivity {
-    pub activity: ActivityType,
+pub(crate) struct CompletedActivity {
     pub finished_at: u64,
 }
-
-/// 待处理的生命事件（用于主动消息触发）
-#[derive(Debug, Clone)]
-pub enum LifeEvent {
-    /// 刚醒来
-    WokeUp,
-    /// 刚完成某活动
-    ActivityCompleted(ActivityType),
-    /// 要去睡觉了
-    GoingToSleep,
-}
-
-// ── 全局状态 ────────────────────────────────────────────────────
 
 /// 当前进行中的活动
 static ACTIVITY_STATE: Mutex<Option<HashMap<u64, ActivityState>>> = Mutex::new(None);
 /// 最近完成的活动列表
 static COMPLETED_ACTIVITIES: Mutex<Vec<CompletedActivity>> = Mutex::new(Vec::new());
-/// 今天的日期字符串，用于判断是否需要重新检查起床/入睡
-static LAST_WAKE_DATE: Mutex<String> = Mutex::new(String::new());
-static LAST_SLEEP_DATE: Mutex<String> = Mutex::new(String::new());
-
 /// 已完成活动的保留时间（秒）
 const COMPLETED_TTL: u64 = 7200;
-
-const DARLING_ACTIVITY_DURATION_RATIO: f64 = 0.3;
-
-// ── 公开 API ────────────────────────────────────────────────────
 
 /// 检测 bot 自己的消息是否包含活动声明，并记录
 ///
@@ -136,7 +118,7 @@ const DARLING_ACTIVITY_DURATION_RATIO: f64 = 0.3;
 /// 与计划文本做整句字面包含匹配来判定完成，三天日志里 0 次命中——
 /// 判断该由她自己在工具的帮助下做（见 `schedule::set_status`），
 /// 而不是靠猜文本。
-pub fn check_bot_message(user_id: u64, message: &str) {
+pub(crate) fn check_bot_message(user_id: u64, message: &str) {
     if let Some(activity) = detect_activity(message) {
         let now = crate::util::now_secs();
         let duration = activity.default_duration();
@@ -146,138 +128,22 @@ pub fn check_bot_message(user_id: u64, message: &str) {
             expires_at: now + duration,
         };
 
-        let mut guard = ACTIVITY_STATE.lock().unwrap();
+        let mut guard = ACTIVITY_STATE.lock_recover();
         let map = guard.get_or_insert_with(HashMap::new);
         info!(user_id, activity = %activity.describe(), duration, "activity: started");
         map.insert(user_id, state);
     }
 }
 
-/// 检查用户是否有活跃的活动状态
-pub fn get_active_activity(user_id: u64) -> Option<ActivityState> {
-    let guard = ACTIVITY_STATE.lock().unwrap();
-    if let Some(ref map) = *guard
-        && let Some(state) = map.get(&user_id)
-    {
-        let now = crate::util::now_secs();
-        let effective_expires = if is_darling(user_id) {
-            state.started_at
-                + ((state.expires_at - state.started_at) as f64 * DARLING_ACTIVITY_DURATION_RATIO)
-                    as u64
-        } else {
-            state.expires_at
-        };
-        if now < effective_expires {
-            return Some(state.clone());
-        }
-    }
-    None
-}
-
-/// 获取活动状态的 prompt 上下文
-pub fn get_activity_context(user_id: u64) -> Option<String> {
-    let state = get_active_activity(user_id)?;
-    let progress = state.progress();
-    let remaining = state.expires_at.saturating_sub(crate::util::now_secs());
-    let remaining_min = remaining / 60;
-
-    let phase_hint = match state.phase() {
-        ActivityPhase::JustStarted => "你刚说完要做这件事，还不久。",
-        ActivityPhase::InProgress => "你还在做这件事。",
-        ActivityPhase::NearEnd => "快做完了，正在收尾。",
-        ActivityPhase::Completed => "",
-    };
-
-    let darling_note = if is_darling(user_id) {
-        "\n注意：这是你认定的人(Darling)，即使在忙你也愿意去回复他。"
-    } else {
-        ""
-    };
-
-    Some(format!(
-        "# 当前活动状态\n{}（还剩约{}分钟，进度{:.0}%）。\n{}{}",
-        state.activity.describe(),
-        remaining_min,
-        progress * 100.0,
-        phase_hint,
-        darling_note
-    ))
-}
-
-/// 检查是否有待处理的生命事件
-/// 返回优先级最高的事件（只返回一个，消费后需调用 clear_life_event）
-pub fn get_pending_life_event(_user_id: u64) -> Option<LifeEvent> {
-    let now = crate::util::now_secs();
-    let schedule_config = crate::schedule::config::load_config();
-
-    // 优先级 1: 起床事件（只在今天还没触发过时触发）
-    if schedule_config.enabled {
-        let today = crate::util::today_str();
-        let hour = crate::util::current_hour_cst();
-        {
-            let last_wake = LAST_WAKE_DATE.lock().unwrap();
-            if *last_wake != today && hour >= schedule_config.daily.wake_up && hour < 12 {
-                return Some(LifeEvent::WokeUp);
-            }
-        }
-        // 优先级 2: 入睡事件
-        {
-            let last_sleep = LAST_SLEEP_DATE.lock().unwrap();
-            if *last_sleep != today && hour >= schedule_config.daily.sleep {
-                return Some(LifeEvent::GoingToSleep);
-            }
-        }
-    }
-
-    // 优先级 3: 刚完成的活动（2 小时内完成的）
-    {
-        let completed = COMPLETED_ACTIVITIES.lock().unwrap();
-        if let Some(last) = completed.last()
-            && now.saturating_sub(last.finished_at) < 600
-        {
-            // 10 分钟内刚完成的
-            return Some(LifeEvent::ActivityCompleted(last.activity.clone()));
-        }
-    }
-
-    None
-}
-
-/// 消费一个生命事件（标记为已处理）
-pub fn clear_life_event(event: &LifeEvent) {
-    match event {
-        LifeEvent::WokeUp => {
-            let today = crate::util::today_str();
-            let mut last = LAST_WAKE_DATE.lock().unwrap();
-            *last = today;
-            info!("life_event: woke up marked");
-        }
-        LifeEvent::GoingToSleep => {
-            let today = crate::util::today_str();
-            let mut last = LAST_SLEEP_DATE.lock().unwrap();
-            *last = today;
-            info!("life_event: going to sleep marked");
-        }
-        LifeEvent::ActivityCompleted(_) => {
-            // 已完成的活动从列表移除（被消费后就不再触发）
-            let mut completed = COMPLETED_ACTIVITIES.lock().unwrap();
-            if !completed.is_empty() {
-                completed.remove(0);
-                info!("life_event: activity completion consumed");
-            }
-        }
-    }
-}
-
 /// 从周期循环中调用：检查活动进度，处理阶段转换
-pub fn check_activity_progress() {
+pub(crate) fn check_activity_progress() {
     let now = crate::util::now_secs();
     let self_qq = crate::config::get().self_qq;
     if self_qq == 0 {
         return;
     }
 
-    let mut guard = ACTIVITY_STATE.lock().unwrap();
+    let mut guard = ACTIVITY_STATE.lock_recover();
     let map = match guard.as_mut() {
         Some(m) => m,
         None => return,
@@ -288,11 +154,8 @@ pub fn check_activity_progress() {
     for (&uid, state) in map.iter() {
         if now >= state.expires_at {
             // 活动已完成：记录到完成列表
-            let completed = CompletedActivity {
-                activity: state.activity.clone(),
-                finished_at: now,
-            };
-            let mut completed_list = COMPLETED_ACTIVITIES.lock().unwrap();
+            let completed = CompletedActivity { finished_at: now };
+            let mut completed_list = COMPLETED_ACTIVITIES.lock_recover();
             completed_list.push(completed);
             if completed_list.len() > 5 {
                 completed_list.remove(0);
@@ -313,7 +176,7 @@ pub fn check_activity_progress() {
     }
 
     // 清理过期的完成记录
-    let mut completed_list = COMPLETED_ACTIVITIES.lock().unwrap();
+    let mut completed_list = COMPLETED_ACTIVITIES.lock_recover();
     completed_list.retain(|c| now.saturating_sub(c.finished_at) < COMPLETED_TTL);
 }
 
@@ -371,9 +234,4 @@ fn detect_activity(message: &str) -> Option<ActivityType> {
         return Some(ActivityType::Bathing);
     }
     None
-}
-
-fn is_darling(user_id: u64) -> bool {
-    let darling = crate::config::get().darling_qq;
-    darling > 0 && user_id == darling
 }

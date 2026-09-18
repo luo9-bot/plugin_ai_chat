@@ -261,8 +261,10 @@ fn load_behaviors() -> HashMap<u64, UserBehavior> {
 
 fn save_behaviors(map: &HashMap<u64, UserBehavior>) {
     let path = behaviors_path();
-    if let Ok(json) = serde_json::to_string_pretty(map) {
-        std::fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(map)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
@@ -276,8 +278,10 @@ fn load_correlators() -> HashMap<u64, SerializableCorrelator> {
 
 fn save_correlators(map: &HashMap<u64, SerializableCorrelator>) {
     let path = correlators_path();
-    if let Ok(json) = serde_json::to_string_pretty(map) {
-        std::fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(map)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 

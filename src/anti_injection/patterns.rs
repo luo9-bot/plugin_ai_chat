@@ -869,8 +869,11 @@ pub static COMBO_RULES: &[ComboRule] = &[
 ];
 
 /// 编译后的 Aho-Corasick 自动机
+///
+/// `ac` 为 `None` 表示自动机构建失败（只可能是模式表里有空串这种代码缺陷）：
+/// 那时这一层扫不到任何东西，而不是让消息处理 panic。
 struct CompiledAutomaton {
-    ac: AhoCorasick,
+    ac: Option<AhoCorasick>,
     patterns: Vec<CompiledPattern>,
 }
 
@@ -883,10 +886,19 @@ struct CompiledPattern {
 
 fn build_automaton(patterns: &[WeightedPattern]) -> CompiledAutomaton {
     let keywords: Vec<&str> = patterns.iter().map(|p| p.pattern).collect();
-    let ac = AhoCorasickBuilder::new()
+    let ac = match AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostLongest)
         .build(&keywords)
-        .expect("Failed to build Aho-Corasick automaton");
+    {
+        Ok(ac) => Some(ac),
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "patterns: 模式自动机构建失败，本层不会命中任何模式（检查模式表是否有空串）"
+            );
+            None
+        }
+    };
     let compiled = patterns
         .iter()
         .map(|p| CompiledPattern {
@@ -968,7 +980,10 @@ impl PatternScores {
 /// 在单段文本上执行 Aho-Corasick 模式匹配
 fn match_segment(segment: &str, automaton: &CompiledAutomaton) -> PatternScores {
     let mut scores = PatternScores::default();
-    for mat in automaton.ac.find_iter(segment) {
+    let Some(ac) = &automaton.ac else {
+        return scores;
+    };
+    for mat in ac.find_iter(segment) {
         let pat = &automaton.patterns[mat.pattern()];
         let keyword = &segment[mat.start()..mat.end()];
         // 检查所有 occurrence 是否被抑制

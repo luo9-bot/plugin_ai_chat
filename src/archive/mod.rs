@@ -43,8 +43,10 @@ impl ArchiveStore {
 
     fn save(&self) {
         let path = archive_path();
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            fs::write(path, json).ok();
+        if let Ok(json) = serde_json::to_string_pretty(self)
+            && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+        {
+            tracing::warn!(error = %error, "状态写盘失败");
         }
     }
 }
@@ -52,7 +54,7 @@ impl ArchiveStore {
 // ── 归档操作 ─────────────────────────────────────────────────
 
 /// 归档过期的群聊工作记忆
-pub fn archive_working_memory(entries: Vec<(u64, crate::working_memory::Entry)>) {
+pub(crate) fn archive_working_memory(entries: Vec<(u64, crate::working_memory::Entry)>) {
     if entries.is_empty() {
         return;
     }

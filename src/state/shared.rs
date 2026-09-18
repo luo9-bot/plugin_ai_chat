@@ -27,10 +27,6 @@ pub struct SharedState {
     last_reply_times: HashMap<(u64, u64), Instant>,
     /// 用户对话上下文 (按 (group_id, user_id) 隔离)
     pub contexts: HashMap<CtxKey, UserContext>,
-    /// 活跃群聊集合 (由主线程同步，供管理线程读取)
-    pub active_groups: HashSet<u64>,
-    /// 活跃私聊用户集合 (由主线程同步，供管理线程读取)
-    pub active_users: HashSet<u64>,
     /// 群级对话历史 (group_id → history)，用于群聊中跨用户共享上下文
     pub group_history: HashMap<u64, Vec<(String, String)>>,
 }
@@ -47,16 +43,8 @@ impl SharedState {
             recent_bot_messages: HashMap::new(),
             last_reply_times: HashMap::new(),
             contexts: HashMap::new(),
-            active_groups: HashSet::new(),
-            active_users: HashSet::new(),
             group_history: HashMap::new(),
         }
-    }
-
-    /// 同步活跃对话状态（由主线程调用）
-    pub fn sync_active(&mut self, groups: &HashSet<u64>, users: &HashSet<u64>) {
-        self.active_groups = groups.clone();
-        self.active_users = users.clone();
     }
 
     /// 记录机器人回复了某用户 (group_id=0 表示私聊)

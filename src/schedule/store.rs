@@ -140,8 +140,10 @@ fn load(timeframe: Timeframe) -> Plan {
 }
 
 fn save(timeframe: Timeframe, plan: &Plan) {
-    if let Ok(json) = serde_json::to_string_pretty(plan) {
-        fs::write(path_of(timeframe), json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(plan)
+        && let Err(error) = crate::util::atomic_write(path_of(timeframe), json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
@@ -453,8 +455,10 @@ pub fn record_activity_log(item: &PlanItem, completed: bool) {
     if history.len() > 200 {
         history.drain(0..history.len() - 200);
     }
-    if let Ok(json) = serde_json::to_string_pretty(&history) {
-        fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(&history)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
@@ -469,6 +473,14 @@ pub fn push_history() -> Vec<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::MutexExt;
+
+    /// 落盘路径的测试共用同一个 `data_dir`（进程内只有一个），必须串行。
+    ///
+    /// 这两个测试都会调 `config::init()` 并写真实的计划文件；并发跑会互相
+    /// 覆盖，表现为偶发失败（实测约每十几次一次）。这不是实现的问题，
+    /// 但偶发红灯会让人不再相信红灯，所以在这里显式串行。
+    static DISK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // ── 纯函数部分：不碰文件系统 ──────────────────────────────
 
@@ -570,6 +582,7 @@ mod tests {
 
     #[test]
     fn plan_lifecycle_end_to_end() {
+        let _serial = DISK_LOCK.lock_recover();
         crate::config::init();
 
         // ── 生成：替换而不是追加，空/超长条目被丢掉 ──
@@ -706,6 +719,7 @@ mod tests {
 
     #[test]
     fn stale_period_is_discarded_on_regeneration() {
+        let _serial = DISK_LOCK.lock_recover();
         crate::config::init();
         seed(Timeframe::Week, &["上周的事"]);
         let mut stale = Plan {

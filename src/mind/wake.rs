@@ -159,22 +159,11 @@ fn load_plans() -> Vec<WakePlan> {
 }
 
 fn save_plans(plans: &[WakePlan]) {
-    if let Some(parent) = wake_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "wake: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string_pretty(plans) else {
         warn!("wake: 意图堆序列化失败");
         return;
     };
-    let tmp = wake_path().with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!("wake: 意图堆写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, wake_path()) {
+    if let Err(e) = crate::util::atomic_write(wake_path(), json) {
         warn!(error = %e, "wake: 意图堆落盘失败");
     }
 }
@@ -265,24 +254,12 @@ pub fn purge_loops_about(uid: u64) {
 // ── 夜间门控：她真的睡了 ────────────────────────────────────────
 
 /// 免打扰时段 = 她的睡眠时间（沿用 proactive 配置的免打扰时段）
+///
+/// 复用 `circadian::is_quiet_hours()` 的唯一判定，而不是在这里再写一遍
+/// 同样的 if/else：两份实现只要有一侧改动，"她睡了没"就会在不同模块里
+/// 给出不同答案。
 pub fn is_night() -> bool {
-    let hour = util::current_hour_cst() as i32;
-    let (start, end) = {
-        let cfg = config::get();
-        (
-            cfg.proactive.quiet_start as i32,
-            cfg.proactive.quiet_end as i32,
-        )
-    };
-    if start == end {
-        return false;
-    }
-    if start < end {
-        hour >= start && hour < end
-    } else {
-        // 跨午夜：23 -> 7
-        hour >= start || hour < end
-    }
+    crate::circadian::is_quiet_hours()
 }
 
 // ── 睡前整理：教养兜底 ─────────────────────────────────────────
@@ -298,14 +275,13 @@ pub fn ensure_daily_digest(now: u64) {
     {
         return;
     }
-    // 下一个 23:30（东八区）：取当前本地时刻的天基准再偏移
-    let local_now = now + 8 * 3600;
-    let day_start = (local_now / 86400) * 86400;
-    let today_digest_cst = day_start + 23 * 3600 + 30 * 60;
-    let due_at = if today_digest_cst > local_now {
-        today_digest_cst - 8 * 3600
+    // 下一个 23:30（东八区）。日期边界只在 `util` 里定义，这里不再手工
+    // 做 `now + 8h` / `- 8h` 的偏移运算。
+    let today_digest = util::cst_time_on_same_day(now, 23, 30);
+    let due_at = if today_digest > now {
+        today_digest
     } else {
-        today_digest_cst + 86400 - 8 * 3600
+        today_digest + 86400
     };
     let mut plan = WakePlan::new(WakeKind::Digest, due_at, "睡前把今天过一遍");
     plan.id = util::now_millis() ^ 0xD1_6E_57;

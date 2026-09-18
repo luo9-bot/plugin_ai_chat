@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
 
 /// 日程配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,18 +62,4 @@ fn default_wake_up() -> u32 {
 }
 fn default_sleep() -> u32 {
     23
-}
-
-pub(crate) fn load_config() -> ScheduleConfig {
-    let path = crate::config::data_dir().join("schedule.json");
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => {
-            let config = ScheduleConfig::default();
-            if let Ok(json) = serde_json::to_string_pretty(&config) {
-                fs::write(&path, json).ok();
-            }
-            config
-        }
-    }
 }

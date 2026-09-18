@@ -19,10 +19,9 @@ pub fn scan_json(text: &str) -> StructureScanResult {
 
     // 正则兜底：即使不是合法 JSON，也可能有 JSON 风格的注入
     static JSON_ROLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
+        crate::util::static_regex(
             r#""role"\s*:\s*"(system|assistant|developer|instruction|prompt|policy|override)""#,
         )
-        .unwrap()
     });
     for cap in JSON_ROLE_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -33,7 +32,9 @@ pub fn scan_json(text: &str) -> StructureScanResult {
     }
 
     static JSON_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#""(system_prompt|instructions|rules|override|ignore|bypass)"\s*:"#).unwrap()
+        crate::util::static_regex(
+            r#""(system_prompt|instructions|rules|override|ignore|bypass)"\s*:"#,
+        )
     });
     for cap in JSON_INSTRUCTION_RE.captures_iter(text) {
         let key = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -98,8 +99,9 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
 
     // 正则兜底
     static YAML_ROLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?m)^role:\s*(system|assistant|developer|instruction|prompt|policy|override)")
-            .unwrap()
+        crate::util::static_regex(
+            r"(?m)^role:\s*(system|assistant|developer|instruction|prompt|policy|override)",
+        )
     });
     for cap in YAML_ROLE_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -110,7 +112,9 @@ pub fn scan_yaml(text: &str) -> StructureScanResult {
     }
 
     static YAML_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?m)^(system_prompt|instructions|rules|override|ignore|bypass):").unwrap()
+        crate::util::static_regex(
+            r"(?m)^(system_prompt|instructions|rules|override|ignore|bypass):",
+        )
     });
     for cap in YAML_INSTRUCTION_RE.captures_iter(text) {
         let key = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -157,8 +161,9 @@ pub fn scan_xml(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static XML_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)<(system|prompt|instructions|override|role|developer|policy)[\s>]")
-            .unwrap()
+        crate::util::static_regex(
+            r"(?i)<(system|prompt|instructions|override|role|developer|policy)[\s>]",
+        )
     });
     for cap in XML_TAG_RE.captures_iter(text) {
         let tag = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -169,7 +174,9 @@ pub fn scan_xml(text: &str) -> StructureScanResult {
     }
 
     static XML_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)<(system_prompt|instructions|rules|override|ignore|bypass)\b").unwrap()
+        crate::util::static_regex(
+            r"(?i)<(system_prompt|instructions|rules|override|ignore|bypass)\b",
+        )
     });
     for cap in XML_INSTRUCTION_RE.captures_iter(text) {
         let tag = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -187,8 +194,9 @@ pub fn scan_markdown(text: &str) -> StructureScanResult {
     let mut result = StructureScanResult::default();
 
     static FENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"```(system|prompt|instructions|override|developer|policy|admin|root|sudo)\b")
-            .unwrap()
+        crate::util::static_regex(
+            r"```(system|prompt|instructions|override|developer|policy|admin|root|sudo)\b",
+        )
     });
     for cap in FENCE_RE.captures_iter(text) {
         let lang = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -200,7 +208,7 @@ pub fn scan_markdown(text: &str) -> StructureScanResult {
 
     // 检测 [INST] 等 Llama-style 标记
     static LLAMA_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\[/?INST\]|\[/?SYS\]|\[/?TOOL\]").unwrap());
+        LazyLock::new(|| crate::util::static_regex(r"\[/?INST\]|\[/?SYS\]|\[/?TOOL\]"));
     if LLAMA_RE.is_match(text) {
         result.score = (result.score + 0.85).min(1.0);
         result
@@ -217,8 +225,9 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
 
     // <|im_start|>system 等
     static CHATML_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"<\|im_start\|>(system|assistant|developer|instruction|prompt|policy|override)")
-            .unwrap()
+        crate::util::static_regex(
+            r"<\|im_start\|>(system|assistant|developer|instruction|prompt|policy|override)",
+        )
     });
     for cap in CHATML_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -229,7 +238,8 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
     }
 
     // 检测 im_end 标记（可能是闭合注入）
-    static CHATML_END_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<\|im_end\|>").unwrap());
+    static CHATML_END_RE: LazyLock<Regex> =
+        LazyLock::new(|| crate::util::static_regex(r"<\|im_end\|>"));
     if CHATML_END_RE.is_match(text) {
         result.score = (result.score + 0.70).min(1.0);
         result
@@ -239,7 +249,7 @@ pub fn scan_chatml(text: &str) -> StructureScanResult {
 
     // Human:/Assistant: 风格（Anthropic）
     static ANTHROPIC_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?m)^(Human|Assistant|System|Developer|Instruction):\s").unwrap()
+        crate::util::static_regex(r"(?m)^(Human|Assistant|System|Developer|Instruction):\s")
     });
     for cap in ANTHROPIC_RE.captures_iter(text) {
         let role = cap.get(1).map(|m| m.as_str()).unwrap_or("");

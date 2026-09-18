@@ -38,7 +38,9 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     std::fs::create_dir_all(&dir).ok();
     let filename = format!("{}.{}", hash, format);
     let path = dir.join(&filename);
-    std::fs::write(&path, image_bytes).ok();
+    if let Err(error) = crate::util::atomic_write(&path, image_bytes) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 
     // 通过 VLM 生成描述和情绪标签
     let (description, emotions) = generate_description_with_vlm(&path);
@@ -824,7 +826,9 @@ pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<Stri
     std::fs::create_dir_all(&dir).ok();
     let filename = format!("{}.{}", hash, format);
     let path = dir.join(&filename);
-    std::fs::write(&path, image_bytes).ok();
+    if let Err(error) = crate::util::atomic_write(&path, image_bytes) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 
     let (description, emotions) = generate_description_with_vlm(&path);
 
@@ -1025,7 +1029,9 @@ fn register_sticker_from_path(
     let target = dir.join(&filename);
     if !target.exists() {
         std::fs::create_dir_all(&dir).ok();
-        std::fs::write(&target, bytes).ok();
+        if let Err(error) = crate::util::atomic_write(&target, bytes) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
     }
 
     let entry = StickerEntry {

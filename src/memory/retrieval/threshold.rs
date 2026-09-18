@@ -2,6 +2,11 @@
 //!
 //! 基于分数分布的动态阈值过滤：
 //! threshold = mean(scores) - 0.5 * std(scores)
+//!
+//! 这条规则成立的**前提**是输入分数有绝对尺度。融合分数现在由
+//! `fusion::weighted_rrf_fusion` 归一化到 [0,1]，因此阈值是有意义的；
+//! 在那之前融合分数的取值带是约 `[0.0037, 0.0164]` 而 `min_score` 是 `0.0`，
+//! 阈值恒被下限截断，这个过滤器实际上没有过滤任何东西。
 
 use super::fusion::RetrievalResult;
 
@@ -46,29 +51,4 @@ pub fn adaptive_threshold_filter(results: &mut Vec<RetrievalResult>, config: &Th
     };
 
     results.retain(|r| r.score >= threshold);
-}
-
-/// Min-Max 归一化
-pub fn normalize_scores_minmax(results: &mut [RetrievalResult]) {
-    if results.is_empty() {
-        return;
-    }
-    let min = results
-        .iter()
-        .map(|r| r.score)
-        .fold(f64::INFINITY, f64::min);
-    let max = results
-        .iter()
-        .map(|r| r.score)
-        .fold(f64::NEG_INFINITY, f64::max);
-
-    if (max - min).abs() < 1e-12 {
-        for r in results.iter_mut() {
-            r.score = 1.0;
-        }
-    } else {
-        for r in results.iter_mut() {
-            r.score = (r.score - min) / (max - min);
-        }
-    }
 }

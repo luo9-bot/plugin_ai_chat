@@ -1,75 +1,58 @@
-use super::store::{
-    STORE, SegmentCount, SegmentLogEntry, SegmentMessage, current_max_replies,
-    current_segment_start, get_segment_count, save_store,
-};
+use super::store::{current_max_replies, current_segment_start};
 use crate::config;
 use crate::util::now_secs;
+use tracing::debug;
 
 // ── 核心 API ────────────────────────────────────────────────
 
 /// 检查当前配额段是否还有余量（不扣减）
 pub fn has_quota(group_id: u64) -> bool {
-    let cfg = &config::get().quota;
-    if !cfg.enabled {
+    if !config::get().quota.enabled {
         return true;
     }
-    let max = current_max_replies();
-    if max == 0 {
+    let Some(max) = resolve_max_replies() else {
         return false;
-    }
-    let seg_start = current_segment_start();
-    let store = STORE.lock().unwrap();
-    let store = match store.as_ref() {
-        Some(s) => s,
-        None => return true,
     };
-    let current = get_segment_count(store, group_id, seg_start);
-    current < max
+    let segment_start = current_segment_start();
+    let used = crate::db::db()
+        .quota_segment_count(group_id, segment_start)
+        .unwrap_or(0);
+    used < max
+}
+
+/// 当前小时的配额上限；无时段覆盖时按 0 处理并**留痕**
+///
+/// 留痕是必须的：否则"配置漏了这个小时"与"配额用尽"在日志里长得一样，
+/// 而前者是配置错误、需要人来修。
+fn resolve_max_replies() -> Option<u32> {
+    match current_max_replies() {
+        Some(max) => Some(max),
+        None => {
+            debug!(
+                hour = crate::util::hour_cst_at(now_secs()),
+                "quota: 当前小时没有任何时段覆盖（配置有空档），按 0 余量处理"
+            );
+            None
+        }
+    }
 }
 
 /// 检查配额并扣减。返回 true 表示允许回复。
+///
+/// 检查与扣减在状态库里是一个事务：否则两个线程同时看到"还剩一个名额"
+/// 会都放行（原先靠进程内锁保证，迁到库之后必须靠事务）。
 pub fn check_and_consume(group_id: u64) -> bool {
-    let cfg = &config::get().quota;
-    if !cfg.enabled {
+    if !config::get().quota.enabled {
         return true;
     }
-    let max = current_max_replies();
-    if max == 0 {
+    let Some(max) = resolve_max_replies() else {
         return false;
-    }
-    let seg_start = current_segment_start();
-
-    let mut store_guard = STORE.lock().unwrap();
-    let store = match store_guard.as_mut() {
-        Some(s) => s,
-        None => return true,
     };
-
-    // 跨天检查
-    let today = crate::util::today_str();
-    if store.date != today {
-        store.date = today;
-        store.counts.clear();
-    }
-
-    let counts = store.counts.entry(group_id).or_default();
-    // 找到当前段
-    match counts.iter_mut().find(|s| s.segment_start == seg_start) {
-        Some(seg) => {
-            if seg.count < max {
-                seg.count += 1;
-                save_store(store);
-                true
-            } else {
-                false
-            }
-        }
-        None => {
-            counts.push(SegmentCount {
-                segment_start: seg_start,
-                count: 1,
-            });
-            save_store(store);
+    let segment_start = current_segment_start();
+    match crate::db::db().quota_consume(group_id, segment_start, max) {
+        Ok(allowed) => allowed,
+        Err(error) => {
+            tracing::warn!(%error, group_id, "quota: 扣减失败，按放行处理");
             true
         }
     }
@@ -78,31 +61,14 @@ pub fn check_and_consume(group_id: u64) -> bool {
 // ── 段日志记录 ────────────────────────────────────────────────
 
 pub fn log_segment_message(group_id: u64, user_id: u64, message: &str) {
-    let seg_start = current_segment_start();
-    let mut store_guard = STORE.lock().unwrap();
-    let store = match store_guard.as_mut() {
-        Some(s) => s,
-        None => return,
-    };
-    let logs = store.segment_log.entry(group_id).or_default();
-    match logs.iter_mut().find(|e| e.segment_start == seg_start) {
-        Some(entry) => {
-            entry.messages.push(SegmentMessage {
-                user_id,
-                message: message.to_string(),
-                timestamp: now_secs(),
-            });
-        }
-        None => {
-            logs.push(SegmentLogEntry {
-                segment_start: seg_start,
-                messages: vec![SegmentMessage {
-                    user_id,
-                    message: message.to_string(),
-                    timestamp: now_secs(),
-                }],
-            });
-        }
+    let segment_start = current_segment_start();
+    if let Err(error) = crate::db::db().quota_log_message(
+        group_id,
+        segment_start,
+        user_id,
+        message,
+        now_secs() as i64,
+    ) {
+        tracing::warn!(%error, group_id, "quota: 段日志写入失败");
     }
-    save_store(store);
 }

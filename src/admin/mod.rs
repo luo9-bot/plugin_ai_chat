@@ -9,26 +9,41 @@ use crate::config;
 
 // ── 工具函数 ────────────────────────────────────────────────────
 
+/// 逐个附加响应头；非法头被跳过而不是 panic
+///
+/// 这里的名字与值都是编译期字面量、实际不可能非法，但 `Header::from_bytes`
+/// 的签名是 `Result`，而 admin server 是**单线程**的：一次 panic 会让整个
+/// 后台失效。跳过该头（并留痕）是更便宜的失败方式。
+fn attach_headers(
+    mut response: Response<std::io::Cursor<Vec<u8>>>,
+    headers: &[(&'static str, &'static str)],
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    for (name, value) in headers {
+        match Header::from_bytes(*name, *value) {
+            Ok(header) => response = response.with_header(header),
+            Err(_) => warn!(name, value, "admin: 跳过非法响应头"),
+        }
+    }
+    response
+}
+
 fn json_response(status: u16, body: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
     let body_str = body.to_string();
-    Response::from_string(body_str)
-        .with_status_code(status)
-        .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
-        .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
-        .with_header(
-            Header::from_bytes(
+    attach_headers(
+        Response::from_string(body_str).with_status_code(status),
+        &[
+            ("Content-Type", "application/json; charset=utf-8"),
+            ("Access-Control-Allow-Origin", "*"),
+            (
                 "Access-Control-Allow-Headers",
                 "Authorization, Content-Type",
-            )
-            .unwrap(),
-        )
-        .with_header(
-            Header::from_bytes(
+            ),
+            (
                 "Access-Control-Allow-Methods",
                 "GET, POST, PUT, DELETE, OPTIONS",
-            )
-            .unwrap(),
-        )
+            ),
+        ],
+    )
 }
 
 fn ok(body: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -94,8 +109,10 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
 
     // 静态页面
     if method == Method::Get && (url == "/" || url == "/index.html") {
-        return Response::from_string(ui::HTML)
-            .with_header(Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap());
+        return attach_headers(
+            Response::from_string(ui::HTML),
+            &[("Content-Type", "text/html; charset=utf-8")],
+        );
     }
 
     // 登录端点（不需要 auth）
@@ -165,6 +182,7 @@ fn route(request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Some(&"schedule") => handlers::handle_schedule(&method, &body),
         Some(&"analytics") => handlers::handle_analytics(),
+        Some(&"turn-shadow") => handlers::handle_turn_shadow(),
         Some(&"anti-injection") => handlers::handle_anti_injection(&method, &api_segs[1..]),
         Some(&"conversations") => handlers::handle_conversations(&method, &api_segs[1..]),
         Some(&"config") => handlers::handle_config(&method, &api_segs[1..], &body),

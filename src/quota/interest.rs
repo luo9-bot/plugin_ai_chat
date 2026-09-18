@@ -1,7 +1,7 @@
 use tracing::debug;
 
 use super::segment::{check_and_consume, has_quota};
-use super::store::{STORE, SegmentLogEntry};
+use super::store::{SegmentLogEntry, SegmentMessage};
 use crate::config;
 
 // ── 回复优先级 ───────────────────────────────────────────────
@@ -88,23 +88,39 @@ pub fn try_reply(
 
 // ── Admin API ──────────────────────────────────────────────────
 
+/// 某个群最近若干段的段日志（段起始时间倒序）
 pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .and_then(|s| s.segment_log.get(&group_id))
-        .map(|logs| {
-            let mut sorted = logs.clone();
-            sorted.sort_by(|a, b| b.segment_start.cmp(&a.segment_start));
-            sorted.into_iter().take(limit).collect()
-        })
-        .unwrap_or_default()
+    let messages = crate::db::db()
+        .quota_messages(group_id, limit)
+        .unwrap_or_default();
+
+    // 记录已按「段倒序、段内按写入顺序」返回，这里保持该顺序分组
+    let mut entries: Vec<SegmentLogEntry> = Vec::new();
+    for row in messages {
+        match entries.last_mut() {
+            Some(entry) if entry.segment_start == row.segment_start => {
+                entry.messages.push(SegmentMessage {
+                    user_id: row.user_id,
+                    message: row.message,
+                    timestamp: row.ts.max(0) as u64,
+                });
+            }
+            _ => entries.push(SegmentLogEntry {
+                segment_start: row.segment_start,
+                messages: vec![SegmentMessage {
+                    user_id: row.user_id,
+                    message: row.message,
+                    timestamp: row.ts.max(0) as u64,
+                }],
+            }),
+        }
+    }
+    entries
 }
 
+/// 有段日志的群
 pub fn get_groups_with_logs() -> Vec<u64> {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .map(|s| s.segment_log.keys().copied().collect())
+    crate::db::db()
+        .quota_groups_with_messages()
         .unwrap_or_default()
 }

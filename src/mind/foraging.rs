@@ -68,7 +68,7 @@ pub fn flush() {
     }
     match serde_json::to_string(&snapshot) {
         Ok(json) => {
-            if let Err(e) = fs::write(foraging_path(), json) {
+            if let Err(e) = crate::util::atomic_write(foraging_path(), json) {
                 warn!(error = %e, "foraging: 未读状态落盘失败");
             }
         }

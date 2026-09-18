@@ -34,7 +34,7 @@ impl UtteranceDigest {
         let text = strip_cq_codes(&u.text);
         Self {
             user_id: u.user_id,
-            at_targets: at_targets(&u.text),
+            at_targets: u.at_targets.clone(),
             text,
             ts: u.ts,
             ts_ms: u.ts_ms,
@@ -92,29 +92,13 @@ impl TurnFocus {
     }
 }
 
-/// 剥掉 CQ 码，只留正文
-///
-/// 纯文本层用；含富文本（markdown）与 @ 的消息走
-/// [`crate::conversation::perception::normalize`]，那里会把 @ 还原成人名。
-/// 这里把各种 CQ 码（图片/视频/转发/at）一律剥掉——它们带签名 URL 与
-/// 几百字符的噪声，留在文本里会污染话题匹配与向量检索。
-pub fn strip_cq_codes(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find("[CQ:") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start..];
-        match after.find(']') {
-            Some(end) => rest = &after[end + 1..],
-            // 没有闭合括号：整段丢弃，避免把半截 CQ 码当正文
-            None => return out,
-        }
-    }
-    out.push_str(rest);
-    out.trim().to_string()
-}
+/// 剥掉 CQ 码，只留正文（实现已移到 `util`，检索层也要用）
+pub use crate::util::strip_cq_codes;
 
-/// 从正文里取出被 @ 的 QQ 号
+/// 从**原始 CQ 文本**里取出被 @ 的 QQ 号
+///
+/// 调用方必须传 CQ 原文：归一化后的文本里 `[CQ:at,qq=N]` 已变成 `@名字`，
+/// 在这里解析只会得到空列表（这正是"@ 了却不算叫她"的成因）。
 pub fn at_targets(text: &str) -> Vec<u64> {
     let mut targets = Vec::new();
     let mut rest = text;
@@ -198,6 +182,7 @@ mod tests {
         GroupUtterance {
             user_id,
             text: text.to_string(),
+            at_targets: Vec::new(),
             ts,
             ts_ms: ts * 1000,
         }
@@ -205,6 +190,20 @@ mod tests {
 
     fn never(_: u64) -> bool {
         false
+    }
+
+    /// 构造一条发言：正文是**归一化之后**的样子，@ 的 QQ 号来自 CQ 原文。
+    ///
+    /// 真实管线的顺序就是这样（`perceive_batch_message` → `focus_batch`），
+    /// 所以测试也必须按这个顺序构造，否则会漏掉"@ 在归一化后消失"这类缺陷。
+    fn u_mentioning(user_id: u64, raw: &str, normalized: &str, ts: u64) -> GroupUtterance {
+        GroupUtterance {
+            user_id,
+            text: normalized.to_string(),
+            at_targets: at_targets(raw),
+            ts,
+            ts_ms: ts * 1000,
+        }
     }
 
     #[test]
@@ -229,6 +228,34 @@ mod tests {
     }
 
     #[test]
+    fn at_mention_survives_normalization() {
+        // 这是真实管线里的顺序：perceive_batch_message 先把
+        // `[CQ:at,qq=2000]` 归一成 `@洛玖`，再交给 focus_batch。
+        // 若焦点判定去解析归一化后的文本，@ 就永远消失——
+        // 于是"被 @ "退化成"名字恰好是子串"，被 @ 的人也不再优先。
+        const SELF_QQ: u64 = 2000;
+        let batch = vec![
+            u_mentioning(11, "[CQ:at,qq=2000] 在吗", "@洛玖 在吗", 100),
+            u(22, "我也在", 101),
+        ];
+
+        let focus = focus_batch(&batch, SELF_QQ, "洛玖", &never);
+        assert!(focus.is_called(), "@ 是硬信号，归一化后必须仍然成立");
+        assert_eq!(focus.addressing_strength(), 1.0);
+        assert_eq!(focus.primary, 11, "被 @ 的人优先于最后说话的人");
+    }
+
+    #[test]
+    fn at_mention_counts_even_when_the_name_is_unknown() {
+        // @ 一个名字解析不出来的人时，归一化文本里可能是"@某人"；
+        // QQ 号仍是唯一可靠依据。
+        const SELF_QQ: u64 = 2000;
+        let batch = vec![u_mentioning(11, "[CQ:at,qq=2000] 在吗", "@某人 在吗", 100)];
+        let focus = focus_batch(&batch, SELF_QQ, "洛玖", &never);
+        assert!(focus.is_called());
+    }
+
+    #[test]
     fn primary_is_the_last_person_who_actually_spoke() {
         // 甲说话、乙只发表情：该回甲，而不是"最后一条消息的发送者"乙
         let batch = vec![
@@ -243,7 +270,7 @@ mod tests {
     fn primary_prefers_whoever_called_her() {
         let batch = vec![
             u(11, "随便聊聊", 100),
-            u(22, "[CQ:at,qq=999] 在吗", 101),
+            u_mentioning(22, "[CQ:at,qq=999] 在吗", "@洛玖 在吗", 101),
             u(33, "我也在", 102),
         ];
         let focus = focus_batch(&batch, 999, "洛玖", &never);

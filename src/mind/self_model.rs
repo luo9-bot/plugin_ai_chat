@@ -63,16 +63,8 @@ pub fn kernel() -> Option<Kernel> {
 
 /// 保存 kernel（创作者编辑，原子落盘）
 pub fn save_kernel(k: &Kernel) -> Result<(), String> {
-    let path = kernel_path();
-    if let Some(parent) = path.parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        return Err(format!("创建目录失败: {e}"));
-    }
     let json = serde_json::to_string_pretty(k).map_err(|e| format!("序列化失败: {e}"))?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json).map_err(|e| format!("写入失败: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| format!("落盘失败: {e}"))
+    crate::util::atomic_write(kernel_path(), json).map_err(|e| format!("落盘失败: {e}"))
 }
 
 /// 把 kernel 渲染成第一人称身份文本
@@ -200,20 +192,10 @@ pub fn beliefs() -> Vec<Belief> {
 pub fn add_belief(belief: Belief) {
     let mut all = beliefs();
     all.push(belief);
-    if let Some(parent) = beliefs_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "self_model: 创建目录失败");
-        return;
-    }
     match serde_json::to_string_pretty(&all) {
         Ok(json) => {
-            let tmp = beliefs_path().with_extension("json.tmp");
-            if fs::write(&tmp, json)
-                .and_then(|_| fs::rename(&tmp, beliefs_path()))
-                .is_err()
-            {
-                warn!("self_model: beliefs 落盘失败");
+            if let Err(e) = crate::util::atomic_write(beliefs_path(), json) {
+                warn!(error = %e, "self_model: beliefs 落盘失败");
             }
         }
         Err(e) => warn!(error = %e, "self_model: beliefs 序列化失败"),

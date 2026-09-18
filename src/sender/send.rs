@@ -11,7 +11,6 @@
 
 use luo9_sdk::Bot;
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -58,12 +57,12 @@ fn lock_conversation(key: u64) -> MutexGuard<'static, ()> {
 fn raw_send_msg(group_id: u64, user_id: u64, text: &str) {
     if group_id > 0 {
         info!(group_id, user_id, content = text, "send: group msg");
-        let msg = CString::new(text).unwrap();
+        let msg = crate::util::to_c_string(text);
         Bot::send_group_msg(group_id, msg);
         crate::working_memory::record_bot_reply(group_id, text);
     } else {
         info!(user_id, content = text, "send: private msg");
-        let msg = CString::new(text).unwrap();
+        let msg = crate::util::to_c_string(text);
         Bot::send_private_msg(user_id, msg);
     }
 }
@@ -154,7 +153,7 @@ fn send_msg_rhythmic(group_id: u64, user_id: u64, text: &str) {
 pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
     let full = format!("[CQ:at,qq={}]\n{}", user_id, text);
     info!(group_id, user_id, content = text, "send: at msg");
-    let msg = CString::new(full).unwrap();
+    let msg = crate::util::to_c_string(full);
     Bot::send_group_msg(group_id, msg);
 }
 

@@ -4,6 +4,7 @@ use std::sync::{OnceLock, RwLock};
 use tracing::debug;
 
 use super::structs::*;
+use crate::util::RwLockWriteExt;
 
 // ── 全局实例 ────────────────────────────────────────────────────
 
@@ -48,7 +49,9 @@ pub fn init() {
     // 配置文件: 不存在则自动生成
     let config_path = data_path.join("config.yaml");
     if !config_path.exists() {
-        fs::write(&config_path, DEFAULT_CONFIG_YAML).ok();
+        if let Err(error) = crate::util::atomic_write(&config_path, DEFAULT_CONFIG_YAML) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
         debug!(path = ?config_path, "generated default config");
     }
 
@@ -58,7 +61,7 @@ pub fn init() {
             Err(e) => {
                 let msg = format!("配置文件解析失败，已使用默认值: {}", e);
                 tracing::error!(path = ?config_path, error = %e, "{}", msg);
-                *CONFIG_ERROR.write().unwrap() = msg;
+                *CONFIG_ERROR.write_recover() = msg;
                 Config {
                     search: Default::default(),
                     api_key: String::new(),
@@ -129,7 +132,9 @@ pub fn init() {
     // 提示词文件: 不存在则自动生成
     let prompt_path = data_path.join("prompts").join(&config.prompts);
     if !prompt_path.exists() {
-        fs::write(&prompt_path, DEFAULT_PROMPT_TXT).ok();
+        if let Err(error) = crate::util::atomic_write(&prompt_path, DEFAULT_PROMPT_TXT) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
         debug!(path = ?prompt_path, "generated default prompt");
     }
 
@@ -138,8 +143,8 @@ pub fn init() {
     // 自号自检
     check_self_qq(&mut config, &data_path);
 
-    *CONFIG.write().unwrap() = Some(config);
-    *PROMPT.write().unwrap() = prompt_content;
+    *CONFIG.write_recover() = Some(config);
+    *PROMPT.write_recover() = prompt_content;
 
     load_all();
 }
@@ -190,7 +195,7 @@ fn load_all() {
     let emo_count = crate::emotion::user_count();
     let wm_groups = crate::working_memory::group_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
-    let block_count = crate::blocklist::load_count();
+    let block_count = crate::db::db().blocked_count().unwrap_or(0);
 
     debug!(
         path = ?super::data_dir(),

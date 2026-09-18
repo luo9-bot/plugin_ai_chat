@@ -9,7 +9,7 @@ use tracing::debug;
 
 /// 注意力状态（持久化到 cognitive_state.json）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AttentionState {
+pub(crate) struct AttentionState {
     /// 当前注意力水平 (0.0-1.0)
     pub attention_level: f32,
     /// 对每个用户的注意力权重
@@ -38,7 +38,7 @@ impl AttentionState {
 }
 
 /// 更新注意力状态（每30秒调用一次，由定时器驱动）
-pub fn update_attention(state: &mut AttentionState, user_id: u64, is_active: bool) {
+pub(crate) fn update_attention(state: &mut AttentionState, user_id: u64, is_active: bool) {
     let now = crate::util::now_secs();
     let elapsed = now.saturating_sub(state.last_update) as f32;
 
@@ -88,7 +88,7 @@ pub fn update_attention(state: &mut AttentionState, user_id: u64, is_active: boo
 }
 
 /// 打断心流（新话题出现时调用）
-pub fn interrupt_flow(state: &mut AttentionState, new_topic: &str) {
+pub(crate) fn interrupt_flow(state: &mut AttentionState, new_topic: &str) {
     if state.flow_state > 0.3 && state.focused_topic != new_topic {
         let now = crate::util::now_secs();
         // 心流被打断，设置恢复延迟（30-120秒）
@@ -104,63 +104,32 @@ pub fn interrupt_flow(state: &mut AttentionState, new_topic: &str) {
     state.focused_topic = new_topic.to_string();
 }
 
-/// 获取当前注意力的自然语言描述（用于注入 prompt）
-pub fn get_attention_context(state: &AttentionState) -> String {
-    let mut lines = Vec::new();
-
-    if state.attention_level < 0.3 {
-        lines.push(
-            "- 你现在注意力不太集中，回复可以简短一些，用表情包代替文字也完全可以".to_string(),
-        );
-    } else if state.attention_level < 0.5 {
-        lines.push("- 你现在注意力一般，不需要对每个话题都深入回应".to_string());
-    } else if state.attention_level > 0.8 {
-        lines.push("- 你现在注意力很集中，可以深入思考和回应".to_string());
-    }
-
-    if state.flow_state > 0.7 {
-        lines.push(format!(
-            "- 你当前很投入这个话题（{}），回复可以更长更有深度",
-            state.focused_topic
-        ));
-    } else if state.flow_state < 0.2 && state.flow_recovery_until > 0 {
-        lines.push("- 你刚才的思路被打断了，可能需要一点时间重新集中".to_string());
-    }
-
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("# 当前注意力状态\n{}", lines.join("\n"))
-    }
-}
-
-/// 加载注意力状态
-pub fn load_attention() -> AttentionState {
-    use super::super::memory::cognitive_biases;
-    let path = cognitive_biases::state_path();
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            let store: cognitive_biases::CognitiveStateStore =
-                serde_json::from_str(&content).unwrap_or_default();
-            store
-                .attention_json
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default()
+/// 加载注意力状态（读自己那一行）
+pub(crate) fn load_attention() -> AttentionState {
+    match crate::db::db().singleton_state(crate::db::SingletonState::Attention) {
+        Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
+        Ok(None) => AttentionState::new(),
+        Err(error) => {
+            tracing::warn!(%error, "attention: 读取失败，按新状态处理");
+            AttentionState::new()
         }
-        Err(_) => AttentionState::new(),
     }
 }
 
-/// 保存注意力状态（合并到 cognitive_state.json）
-pub fn save_attention(state: &AttentionState) {
-    use super::super::memory::cognitive_biases;
-    let path = cognitive_biases::state_path();
-    let mut store: cognitive_biases::CognitiveStateStore = match std::fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => cognitive_biases::CognitiveStateStore::default(),
+/// 保存注意力状态（只写自己那一行）
+///
+/// 原先它与认知偏差共用一个 JSON、各自读改写整份，交错写入会互相抹掉。
+pub(crate) fn save_attention(state: &AttentionState) {
+    let json = match serde_json::to_string(state) {
+        Ok(json) => json,
+        Err(error) => {
+            tracing::warn!(%error, "attention: 序列化失败，未写入");
+            return;
+        }
     };
-    store.attention_json = Some(serde_json::to_value(state).unwrap_or_default());
-    if let Ok(json) = serde_json::to_string_pretty(&store) {
-        std::fs::write(path, json).ok();
+    if let Err(error) =
+        crate::db::db().set_singleton_state(crate::db::SingletonState::Attention, &json)
+    {
+        tracing::warn!(%error, "attention: 写库失败");
     }
 }

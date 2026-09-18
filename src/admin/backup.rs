@@ -3,18 +3,51 @@ use tracing::debug;
 
 use crate::config;
 
+/// 已经迁入状态库的数据类型
+///
+/// 这些类型不再有对应的 JSON 文件，备份要走 SQLite 的在线快照
+/// （见 `db::Db::snapshot_into`）。留在这里是因为调用点仍然按
+/// "改之前先备份"调用 `before_modify`。
+const IN_STATE_DB: [&str; 3] = ["emotion", "blocklist", "working_memory"];
+
 fn source_file(data_type: &str) -> Option<std::path::PathBuf> {
     let dir = config::data_dir();
     match data_type {
-        "working_memory" => Some(dir.join("working_memory.json")),
-        "emotion" => Some(dir.join("emotion.json")),
-        "blocklist" => Some(dir.join("blocklist.json")),
         "archive" => Some(dir.join("archive.json")),
         _ => None,
     }
 }
 
+/// 备份路径：`backups/{类型}/{类型}_{时间戳}.{扩展名}`
+fn backup_target(data_type: &str, extension: &str) -> Option<std::path::PathBuf> {
+    let backup_dir = config::data_dir().join("backups").join(data_type);
+    std::fs::create_dir_all(&backup_dir).ok()?;
+    let ts = super::format_timestamp(crate::util::now_secs());
+    Some(backup_dir.join(format!("{data_type}_{ts}.{extension}")))
+}
+
+/// 改状态库里的数据之前先取一份一致快照
+fn backup_state_db(data_type: &str) -> bool {
+    let Some(target) = backup_target(data_type, "db") else {
+        return false;
+    };
+    match crate::db::db().snapshot_into(&target) {
+        Ok(()) => {
+            debug!(path = ?target, data_type, "backup: 状态库快照");
+            true
+        }
+        Err(error) => {
+            tracing::warn!(%error, data_type, "backup: 状态库快照失败");
+            false
+        }
+    }
+}
+
 pub fn before_modify(data_type: &str) {
+    if IN_STATE_DB.contains(&data_type) {
+        backup_state_db(data_type);
+        return;
+    }
     let src = match source_file(data_type) {
         Some(s) => s,
         None => return,

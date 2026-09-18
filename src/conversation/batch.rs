@@ -15,35 +15,26 @@ use std::thread;
 use tracing::{info, warn};
 
 use super::handler::{GroupBatch, process_message};
-use crate::{MESSAGE_QUEUE, ProcessingTask, config, processing_users, with_state};
+use crate::{MESSAGE_QUEUE, ProcessingTask, batches, config, processing_users};
 
 pub fn process_expired_batches() {
     let cfg = config::get();
     let timeout = cfg.conversation.batch_timeout_ms;
 
-    // 收集所有过期批次，跳过正在处理中的用户
+    // 收集所有过期批次，跳过正在处理中的用户。
+    // `take_expired` 一次性返回结果，因此这里不把缓冲借用带出闭包。
     let expired: Vec<GroupBatch> = {
-        let mut result = Vec::new();
-        let processing = processing_users().lock().unwrap();
-        with_state(|s| {
-            let expired_keys: Vec<(u64, u64)> = s
-                .batches
-                .iter()
-                .filter(|(_, batch)| batch.last_update.elapsed().as_millis() >= timeout as u128)
-                .filter(|(key, _)| !processing.contains(key))
-                .map(|(&key, _)| key)
-                .collect();
-            for (gid, uid) in expired_keys {
-                if let Some(taken) = s.take_batch_for_processing(gid, uid) {
-                    result.push(GroupBatch {
-                        group_id: gid,
-                        user_id: uid,
-                        taken,
-                    });
-                }
-            }
-        });
-        result
+        let processing = processing_users()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        batches(|b| b.take_expired(timeout, |key| processing.contains(&key)))
+            .into_iter()
+            .map(|((group_id, user_id), taken)| GroupBatch {
+                group_id,
+                user_id,
+                taken,
+            })
+            .collect()
     };
 
     if expired.is_empty() {

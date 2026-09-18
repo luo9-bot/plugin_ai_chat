@@ -238,25 +238,13 @@ fn load_state_from_disk(group_id: u64) -> SocialState {
     }
 }
 
-/// 落盘一份状态（原子 tmp+rename，中断恢复）
+/// 落盘一份状态（原子写：临时文件 → fsync → rename，中断可恢复）
 fn save_state_to_disk(group_id: u64, state: &SocialState) {
-    let path = social_path(group_id);
-    if let Some(parent) = path.parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(group_id, error = %e, "social: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string(state) else {
         warn!(group_id, "social: 状态序列化失败");
         return;
     };
-    let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!(group_id, "social: 写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, &path) {
+    if let Err(e) = crate::util::atomic_write(social_path(group_id), json) {
         warn!(group_id, error = %e, "social: 状态落盘失败");
     }
 }

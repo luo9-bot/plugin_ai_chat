@@ -3,5 +3,5 @@
 mod manager;
 pub mod renderer;
 
-pub use manager::PromptManager;
-pub use renderer::PromptRenderer;
+pub(crate) use manager::PromptManager;
+pub(crate) use renderer::PromptRenderer;

@@ -209,22 +209,12 @@ pub fn get(uid: u64) -> PersonFile {
     file
 }
 
-/// 保存档案（原子 tmp+rename）
+/// 保存档案（原子写：临时文件 → fsync → rename）
 pub fn save(uid: u64, file: &PersonFile) {
-    if let Some(parent) = person_path(uid).parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "persons: 创建目录失败");
-        return;
-    }
     match serde_json::to_string_pretty(file) {
         Ok(json) => {
-            let tmp = person_path(uid).with_extension("json.tmp");
-            if fs::write(&tmp, json)
-                .and_then(|_| fs::rename(&tmp, person_path(uid)))
-                .is_err()
-            {
-                warn!(uid, "persons: 档案落盘失败");
+            if let Err(e) = crate::util::atomic_write(person_path(uid), json) {
+                warn!(uid, error = %e, "persons: 档案落盘失败");
             }
         }
         Err(e) => warn!(error = %e, "persons: 档案序列化失败"),
