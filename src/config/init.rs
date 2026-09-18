@@ -52,7 +52,7 @@ pub fn init() {
         debug!(path = ?config_path, "generated default config");
     }
 
-    let config: Config = match fs::read_to_string(&config_path) {
+    let mut config: Config = match fs::read_to_string(&config_path) {
         Ok(content) => match serde_yaml::from_str(&content) {
             Ok(c) => c,
             Err(e) => {
@@ -135,10 +135,54 @@ pub fn init() {
 
     let prompt_content = fs::read_to_string(&prompt_path).unwrap_or_default();
 
+    // 自号自检
+    check_self_qq(&mut config, &data_path);
+
     *CONFIG.write().unwrap() = Some(config);
     *PROMPT.write().unwrap() = prompt_content;
 
     load_all();
+}
+
+/// 自号自检：`self_qq` 写错会让"别人 @ 她"永远判不出来
+///
+/// 实测踩过：部署的数据目录是 `data/plugin_ai_chat/512166443`（那才是她），
+/// 而 config.yaml 里 `self_qq` 是另一个号。后果是
+/// `ats_bot()` 拿别人的 `[CQ:at,qq=512166443]` 去比一个不相干的号，
+/// 永远不匹配——她收不到"有人叫我"，而且自己的消息被当成普通用户
+/// 写进记忆（`self_qq` 是过滤自己消息的依据）。
+///
+/// 这里的兜底：`self_qq` 为 0 或缺失时，用数据目录名（本工程的惯例是
+/// `<机器人QQ>`）推断并采用，同时打日志。**已经配了非 0 值时只告警不改**——
+/// 配置是权威，但要把不一致说出来，别让它静默地毁掉认人能力。
+fn check_self_qq(config: &mut Config, data_path: &std::path::Path) {
+    let dir_qq: Option<u64> = data_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.parse().ok());
+
+    match (config.self_qq, dir_qq) {
+        (0, Some(qq)) => {
+            config.self_qq = qq;
+            tracing::warn!(
+                self_qq = qq,
+                "self_qq 未配置，已按数据目录名推断；请核对 config.yaml"
+            );
+        }
+        (0, None) => {
+            tracing::warn!(
+                "self_qq 未配置，且数据目录名不是 QQ 号——无法识别\"别人 @ 我\"，请在 config.yaml 里填上"
+            );
+        }
+        (configured, Some(qq)) if configured != qq => {
+            tracing::warn!(
+                configured,
+                data_dir_qq = qq,
+                "self_qq 与数据目录名不一致：若配置里的号不是本机器人，@ 检测与自身消息过滤都会失效"
+            );
+        }
+        _ => {}
+    }
 }
 
 fn load_all() {

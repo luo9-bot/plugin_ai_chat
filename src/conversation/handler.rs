@@ -164,7 +164,24 @@ fn remember_images(user_id: u64, group_id: u64, descriptions: &[String]) {
     });
 }
 
+/// 把 QQ 号翻成她认得的名字；她自己一定认得
+///
+/// 她本人不一定在 `person_info` 里有档案（那是给"别人"建的），
+/// 所以对自己单独兜底：否则"别人 @ 她"会被标成"你不认识这个人"。
+fn resolve_name(qq: u64, group_id: u64) -> Option<String> {
+    let cfg = config::get();
+    if qq == cfg.self_qq && cfg.self_qq > 0 {
+        return Some(cfg.bot_name);
+    }
+    crate::person_info::get_display_name(qq, group_id)
+}
+
 /// 感知一条批次消息：图片描述回写工作记忆，返回组装好的感知文本
+///
+/// CQ 码在这里统一归一（见 [`crate::conversation::perception`]）：
+/// `[CQ:markdown,…]` 这类富文本此前完全没被处理过，一坨几百字符的
+/// 原始 markup（HTML 转义、`mqqapi://` 链接、图片链接、代码块）直接进了
+/// 她的 prompt——她正是在这种消息里"看不清谁 @ 了谁"。
 fn perceive_batch_message(
     group_id: u64,
     user_id: u64,
@@ -185,7 +202,10 @@ fn perceive_batch_message(
     if !crate::sticker::is_sticker_cq(message) {
         remember_images(user_id, group_id, &descriptions);
     }
-    compose_perception(&descriptions, &text_only)
+    // 归一富文本：@ 还原成人名，转义解码，markup 剥掉
+    let normalized =
+        crate::conversation::perception::normalize(&text_only, &|qq| resolve_name(qq, group_id));
+    compose_perception(&descriptions, &normalized)
 }
 
 // ── 私聊 ────────────────────────────────────────────────────────
@@ -470,12 +490,13 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
         .iter()
         .map(|batch| GroupUtterance {
             user_id: batch.user_id,
-            text: crate::conversation::turn::strip_cq_codes(&perceive_batch_message(
+            // perceive_batch_message 已把 CQ 富文本归一、把 @ 还原成人名
+            text: perceive_batch_message(
                 group_id,
                 batch.user_id,
                 &batch.taken.messages,
                 &batch.taken.record_timestamps,
-            )),
+            ),
             // 用真实到达时刻排序：工作记忆时间戳只有秒级精度，
             // 同一秒内两个人的话谁先谁后会退化成哈希顺序
             ts: batch.first_arrival(),

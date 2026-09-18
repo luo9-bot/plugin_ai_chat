@@ -92,11 +92,12 @@ impl TurnFocus {
     }
 }
 
-/// 剥掉 @ 与 CQ 码，只留正文
+/// 剥掉 CQ 码，只留正文
 ///
-/// `[CQ:at,qq=123]` 是"对谁说话"的结构化信息，不该出现在正文里；
-/// 其它 CQ 码（图片/视频/转发）连同其参数一起剥掉——它们带签名 URL
-/// 与几百字符的噪声，留在文本里会污染话题匹配、向量检索与她的感知。
+/// 纯文本层用；含富文本（markdown）与 @ 的消息走
+/// [`crate::conversation::perception::normalize`]，那里会把 @ 还原成人名。
+/// 这里把各种 CQ 码（图片/视频/转发/at）一律剥掉——它们带签名 URL 与
+/// 几百字符的噪声，留在文本里会污染话题匹配与向量检索。
 pub fn strip_cq_codes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -207,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn strips_at_and_other_cq_codes() {
+    fn strips_cq_codes_including_at() {
         assert_eq!(strip_cq_codes("[CQ:at,qq=123] 你好"), "你好");
         assert_eq!(strip_cq_codes("看这个[CQ:image,file=a.jpg]"), "看这个");
         let video = "[CQ:video,file=x,url=https://example.com/a?rkey=secret]真的";
