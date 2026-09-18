@@ -102,8 +102,8 @@ pub fn save(config: &Config) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::init::DEFAULT_CONFIG_YAML;
     use super::*;
+    use crate::config::init::DEFAULT_CONFIG_YAML;
 
     /// 默认配置的参考实例：默认值的唯一真源就是模板本身
     fn reference_config() -> Config {

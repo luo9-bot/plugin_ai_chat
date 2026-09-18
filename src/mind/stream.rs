@@ -261,7 +261,8 @@ mod tests {
 
     #[test]
     fn event_round_trips_with_optional_fields() {
-        let mut event = event_at(StreamKind::Sensation, "土豆说“在吗”", 1_700_000_000).with_about(42);
+        let mut event =
+            event_at(StreamKind::Sensation, "土豆说“在吗”", 1_700_000_000).with_about(42);
         event.body = Some(BodySignal {
             name: "困倦".into(),
             level: 0.7,

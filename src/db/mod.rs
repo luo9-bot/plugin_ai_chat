@@ -1799,7 +1799,12 @@ mod tests {
 
         // 重开：数据必须还在（WAL 已合并）
         let reopened = Db::open(&path).expect("重开文件库");
-        assert!(reopened.activations(Scope::Group).expect("查询").contains(&4242));
+        assert!(
+            reopened
+                .activations(Scope::Group)
+                .expect("查询")
+                .contains(&4242)
+        );
         assert_eq!(
             reopened.emotion_state(7).expect("查询").as_deref(),
             Some(r#"{"intensity":0.5}"#)
