@@ -21,6 +21,8 @@ use crate::mind::{self, SensoryPacket};
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
 pub enum VoiceAction {
+    /// 请求失败或输出无效，不能算作已处理联想。
+    Failed,
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
     Reply(String),
     /// 这一轮她选择沉默
@@ -379,6 +381,9 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                 crate::schedule::SetStatusOutcome::UnknownId => {
                     ToolOutcome::Continue(format!("清单里没有编号 {id}。用 check_plan 看一下。"))
                 }
+                crate::schedule::SetStatusOutcome::PersistenceFailed(error) => {
+                    ToolOutcome::Continue(format!("计划进展保存失败：{error}。本次没有更新。"))
+                }
             })
         }
         "finish_plan" => {
@@ -402,6 +407,8 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                     crate::schedule::SetStatusOutcome::UnknownId => ToolOutcome::Continue(format!(
                         "清单里没有编号 {id}。用 check_plan 看一下。"
                     )),
+                    crate::schedule::SetStatusOutcome::PersistenceFailed(error) =>
+                        ToolOutcome::Continue(format!("计划状态保存失败：{error}。本次没有完成标注。")),
                 },
             )
         }
@@ -800,12 +807,12 @@ pub fn speak_group(
     match result {
         Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(group_id, error = %e, "voice: group API error");
-            VoiceAction::Silent
+            VoiceAction::Failed
         }
     }
 }
@@ -892,12 +899,12 @@ pub fn speak_private(
     match result {
         Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(user_id, error = %e, "voice: private API error");
-            VoiceAction::Silent
+            VoiceAction::Failed
         }
     }
 }

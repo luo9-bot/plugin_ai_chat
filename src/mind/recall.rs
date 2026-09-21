@@ -14,13 +14,96 @@
 
 use crate::mind::stream::{self, StreamKind};
 use crate::util;
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 const RECALL_COOLDOWN_SECS: u64 = 24 * 3600;
 const MAX_RECALLS_PER_TURN: usize = 3;
 
 static RECENT_RECALLS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+static COMPLETED_RECALLS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn completed_path() -> PathBuf {
+    crate::config::data_dir()
+        .join("mind")
+        .join("recall_status.json")
+}
+
+fn completed_store() -> &'static Mutex<HashMap<String, u64>> {
+    COMPLETED_RECALLS.get_or_init(|| {
+        let loaded = fs::read_to_string(completed_path())
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        Mutex::new(loaded)
+    })
+}
+
+pub fn recall_id(user_id: u64, group_id: u64, content: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{user_id}:{group_id}:").as_bytes());
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+pub fn is_completed(id: &str) -> bool {
+    completed_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains_key(id)
+}
+
+pub fn completed_at(id: &str) -> Option<u64> {
+    completed_store().lock().unwrap_or_else(|e| e.into_inner()).get(id).copied()
+}
+
+pub fn complete_turn(ids: &[String]) {
+    if ids.is_empty() { return; }
+    let now = util::now_secs();
+    let mut store = completed_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut updated = store.clone();
+    for id in ids { updated.entry(id.clone()).or_insert(now); }
+    let path = completed_path();
+    match persist_completed(&path, &updated) {
+        Ok(()) => *store = updated,
+        Err(error) => tracing::warn!(%error, "recall: completion could not be saved"),
+    }
+}
+
+pub fn release_turn(ids: &[String]) {
+    if ids.is_empty() { return; }
+    let mut recent = RECENT_RECALLS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    for id in ids { recent.remove(id); }
+}
+
+fn persist_completed(path: &std::path::Path, records: &HashMap<String, u64>) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    let json = serde_json::to_vec(records)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error.to_string()))?;
+    fs::write(path, json)
+}
+
+pub fn source_for(text: &str) -> Option<&'static str> {
+    if text.starts_with("想起：这话你今天已经说过了") {
+        Some("自己刚说过")
+    } else if text.starts_with("想起：（你在") {
+        Some("日记")
+    } else if text.starts_with("想起：") {
+        Some("长期记忆")
+    } else if text.starts_with("（毫无来由地") {
+        Some("情绪闪回")
+    } else {
+        None
+    }
+}
 
 /// 虚词停用表：这类字出现在哪都不构成"话题相关"
 pub(crate) const STOPWORDS: &str =
@@ -51,18 +134,16 @@ fn has_recall_topic(text: &str) -> bool {
         >= 2
 }
 
-fn recall_key(user_id: u64, group_id: u64, content: &str) -> String {
-    let snippet: String = content.chars().take(120).collect();
-    format!("{user_id}:{group_id}:{snippet}")
-}
-
 /// 同一条联想在短期内只出现一次。
 ///
 /// 这是联想层的节流，不修改长期记忆的访问时间；明确调用 query_memory
 /// 仍然可以正常读取并强化记忆。
 fn should_emit_recall(user_id: u64, group_id: u64, content: &str) -> bool {
     let now = util::now_secs();
-    let key = recall_key(user_id, group_id, content);
+    let key = recall_id(user_id, group_id, content);
+    if is_completed(&key) {
+        return false;
+    }
     let mut recent = RECENT_RECALLS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()

@@ -261,11 +261,17 @@ pub fn process_message(user_id: u64, message: &str) {
     }
 
     // 联想：她能想起什么（转述入流，成为她的经历）
+    let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&ai_message, user_id, 0) {
-        crate::mind::stream::push(
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
-                .with_about(user_id),
-        );
+        let mut event =
+            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line.clone())
+                .with_about(user_id);
+        if let Some(source) = crate::mind::recall::source_for(&line) {
+            let id = crate::mind::recall::recall_id(user_id, 0, &line);
+            recall_ids.push(id.clone());
+            event = event.with_recall(id, source);
+        }
+        crate::mind::stream::push(event);
     }
 
     // 注意力模型
@@ -296,7 +302,14 @@ pub fn process_message(user_id: u64, message: &str) {
         }
     });
 
-    match voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref()) {
+    let action = voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref());
+    if !matches!(&action, VoiceAction::Failed) {
+        crate::mind::recall::complete_turn(&recall_ids);
+    } else {
+        crate::mind::recall::release_turn(&recall_ids);
+    }
+    match action {
+        VoiceAction::Failed => {},
         VoiceAction::Reply(reply) => {
             crate::mind::stream::push(
                 crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
@@ -686,11 +699,17 @@ fn speak_and_deliver_group(
         .map(|u| u.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+    let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&joined_text, primary, group_id) {
-        crate::mind::stream::push(
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
-                .with_about(primary),
-        );
+        let mut event =
+            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line.clone())
+                .with_about(primary);
+        if let Some(source) = crate::mind::recall::source_for(&line) {
+            let id = crate::mind::recall::recall_id(primary, group_id, &line);
+            recall_ids.push(id.clone());
+            event = event.with_recall(id, source);
+        }
+        crate::mind::stream::push(event);
     }
 
     // 注意力模型（以主要发言人计）
@@ -710,7 +729,9 @@ fn speak_and_deliver_group(
         crate::conversation::attention::save_attention(&attn);
     }
 
-    match voice::speak_group(group_id, utterances, focus, force_reply) {
+    let action = voice::speak_group(group_id, utterances, focus, force_reply);
+    match action {
+        VoiceAction::Failed => crate::mind::recall::release_turn(&recall_ids),
         VoiceAction::Reply(reply) => {
             // 概率式中断：生成完、开口前的最后一刻，若处理期间涌进大量新消息，
             // 话题可能已经变了——把到嘴边的话咽回去，带着最新消息重新看一眼
@@ -718,6 +739,7 @@ fn speak_and_deliver_group(
                 && cfg.conversation.interruption_enabled
                 && crate::conversation::interruption::should_swallow(group_id);
             if swallowed {
+                crate::mind::recall::release_turn(&recall_ids);
                 debug!(group_id, "voice: interrupted before speaking");
                 mark_silence(group_id);
                 if cfg.humanity.social_battery_enabled {
@@ -726,6 +748,7 @@ fn speak_and_deliver_group(
                     crate::social_battery::save(&battery);
                 }
             } else {
+                crate::mind::recall::complete_turn(&recall_ids);
                 // 她说的话成为她的经历
                 crate::mind::stream::push(
                     crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
@@ -739,6 +762,7 @@ fn speak_and_deliver_group(
             }
         }
         VoiceAction::Silent => {
+            crate::mind::recall::complete_turn(&recall_ids);
             // 群聊沉默不逐次入流（会淹没她的经历），只做冷却与电量记账
             debug!(group_id, "voice: group silent");
             mark_silence(group_id);

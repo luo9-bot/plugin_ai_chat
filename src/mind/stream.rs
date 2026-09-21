@@ -39,6 +39,13 @@ pub struct BodySignal {
     pub level: f32,
 }
 
+/// 可在 WebUI 中追踪完成状态的联想元数据。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecallMeta {
+    pub id: String,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamEvent {
     pub kind: StreamKind,
@@ -50,6 +57,8 @@ pub struct StreamEvent {
     pub body: Option<BodySignal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall: Option<RecallMeta>,
 }
 
 impl StreamEvent {
@@ -60,6 +69,7 @@ impl StreamEvent {
             time: util::now_secs(),
             body: None,
             about: None,
+            recall: None,
         }
     }
 
@@ -70,6 +80,14 @@ impl StreamEvent {
 
     pub fn with_body(mut self, body: BodySignal) -> Self {
         self.body = Some(body);
+        self
+    }
+
+    pub fn with_recall(mut self, id: impl Into<String>, source: impl Into<String>) -> Self {
+        self.recall = Some(RecallMeta {
+            id: id.into(),
+            source: source.into(),
+        });
         self
     }
 }
@@ -258,6 +276,7 @@ mod tests {
             time,
             body: None,
             about: None,
+            recall: None,
         }
     }
 
