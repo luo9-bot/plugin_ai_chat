@@ -357,9 +357,9 @@ anti_injection:
     max_messages_per_hour: 200
     # 信誉分数阈值 (0.0~1.0)，低于此值会受到限制
     reputation_threshold: 0.3
-    # 自动封禁
+    # 自动封禁（仍要求至少 3 次高严重度违规）
     auto_ban: true
-    # 自动封禁触发次数
+    # 自动封禁触发次数（总违规次数）
     auto_ban_threshold: 10
   # 检测白名单：这些用户仍会进行防注入检测和违规记录，但不会被封禁
   detection_whitelist: []

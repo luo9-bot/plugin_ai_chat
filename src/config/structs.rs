@@ -508,10 +508,10 @@ pub struct BehaviorConfig {
     /// 信誉分数阈值 (低于此值则限制)
     #[serde(default = "default_reputation_threshold")]
     pub reputation_threshold: f32,
-    /// 是否启用自动封禁
+    /// 是否启用自动封禁（仍要求多次高严重度证据）
     #[serde(default = "default_true")]
     pub auto_ban: bool,
-    /// 自动封禁阈值 (触发次数)
+    /// 自动封禁阈值（总违规次数；同时要求至少 3 次高严重度）
     #[serde(default = "default_auto_ban_threshold")]
     pub auto_ban_threshold: u32,
 }
