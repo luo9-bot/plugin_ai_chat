@@ -413,6 +413,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
             crisis_utterances.push(GroupUtterance {
                 user_id: *user_id,
                 text: perceived,
+                at_targets: crate::conversation::turn::at_targets(messages),
                 ts: batch.first_arrival(),
                 ts_ms: batch.sort_key_ms(),
             });
@@ -497,6 +498,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
                 &batch.taken.messages,
                 &batch.taken.record_timestamps,
             ),
+            at_targets: crate::conversation::turn::at_targets(&batch.taken.messages),
             // 用真实到达时刻排序：工作记忆时间戳只有秒级精度，
             // 同一秒内两个人的话谁先谁后会退化成哈希顺序
             ts: batch.first_arrival(),
@@ -602,6 +604,17 @@ fn speak_and_deliver_group(
 
     if asleep {
         debug!(group_id, "handler: 她在睡觉，群消息留到早上");
+        return;
+    }
+
+    if !force_reply && focus.is_solely_for_others() {
+        debug!(group_id, "voice: 群友明确在互相说话，她继续旁听");
+        mark_silence(group_id);
+        if cfg.humanity.social_battery_enabled {
+            let mut battery = crate::social_battery::load();
+            crate::social_battery::record_passive_participation(&mut battery);
+            crate::social_battery::save(&battery);
+        }
         return;
     }
 

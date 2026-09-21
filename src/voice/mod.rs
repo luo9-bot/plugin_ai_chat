@@ -32,6 +32,8 @@ pub struct GroupUtterance {
     pub user_id: u64,
     /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
+    /// 原始消息中的 @ 目标。归一化正文会移除 CQ 码，因此单独保留。
+    pub at_targets: Vec<u64>,
     /// 消息到达时间（unix 秒，转译入流用）
     pub ts: u64,
     /// 到达时刻（毫秒）——排序用，同一秒内的先后靠它区分
@@ -608,6 +610,13 @@ fn scene_line(
             .collect();
         if !callers.is_empty() {
             text.push_str(&format!("\n{}点名找你了，在等你回。", callers.join("、")));
+        }
+        if focus.addresses_others() {
+            if focus.is_solely_for_others() {
+                text.push_str("\n这批消息明确是在叫其他群友，不要为了有消息就抢话。");
+            } else {
+                text.push_str("\n这批里有人在和其他群友说话，别把那条线误当成在问你。");
+            }
         }
         if focus.has_other_speakers() {
             text.push_str("\n这批不止一个人在说话，各自的话分开看。");
