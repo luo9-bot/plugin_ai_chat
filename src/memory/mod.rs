@@ -36,12 +36,45 @@ pub fn search_memories(
     query: &str,
     top_k: usize,
 ) -> Vec<retrieval::RetrievalResult> {
+    search_memories_inner(user_id, current_group_id, query, top_k, true, 0.45, false)
+}
+
+/// 自动联想专用检索：相似度更严格，且不因为旁听式联想而强化记忆。
+pub fn search_memories_for_recall(
+    user_id: u64,
+    current_group_id: u64,
+    query: &str,
+    top_k: usize,
+) -> Vec<retrieval::RetrievalResult> {
+    search_memories_inner(
+        user_id,
+        current_group_id,
+        query,
+        top_k,
+        false,
+        0.62,
+        true,
+    )
+}
+
+fn search_memories_inner(
+    user_id: u64,
+    current_group_id: u64,
+    query: &str,
+    top_k: usize,
+    reinforce: bool,
+    min_vector_similarity: f64,
+    stable_only: bool,
+) -> Vec<retrieval::RetrievalResult> {
     let mut documents: Vec<(String, String)> = Vec::new();
     let mut meta: HashMap<String, retrieval::forgetting::MemoryMeta> = HashMap::new();
 
     // 全局记忆
     let global = store::load_user_memory(user_id);
     for (i, entry) in global.entries.iter().enumerate() {
+        if stable_only && !recall_eligible(entry) {
+            continue;
+        }
         let id = format!("global_{}_{}", user_id, i);
         meta.insert(
             id.clone(),
@@ -59,6 +92,9 @@ pub fn search_memories(
     if current_group_id > 0 {
         let group_user = store::load_group_user_memory(current_group_id, user_id);
         for (i, entry) in group_user.entries.iter().enumerate() {
+            if stable_only && !recall_eligible(entry) {
+                continue;
+            }
             let id = format!("group_{}_{}_{}", current_group_id, user_id, i);
             meta.insert(
                 id.clone(),
@@ -124,6 +160,7 @@ pub fn search_memories(
         vector_weight: 0.7,
         bm25_weight: 0.3,
         rrf_k: 60.0,
+        min_vector_similarity,
         metadata_filter: None,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
@@ -151,7 +188,7 @@ pub fn search_memories(
     retrieval::forgetting::apply(&mut results, |id| meta.get(id).copied(), now, &fcfg);
 
     // 检索即强化：被想起的记忆延长半衰期（下一次更难忘记）
-    if fcfg.enabled && !results.is_empty() {
+    if reinforce && fcfg.enabled && !results.is_empty() {
         let hits: std::collections::HashSet<&str> =
             results.iter().map(|r| r.content.as_str()).collect();
         reinforce_hits(user_id, current_group_id, &hits);
@@ -166,6 +203,34 @@ pub fn search_memories(
     }
 
     results
+}
+
+/// 自动联想只读取稳定信息；普通事件通过显式记忆查询仍可访问。
+fn recall_eligible(entry: &MemoryEntry) -> bool {
+    if entry
+        .emotional_impact
+        .is_some_and(|impact| impact.abs() >= 6.0)
+    {
+        return true;
+    }
+    if matches!(entry.importance, Importance::Permanent) {
+        return true;
+    }
+    if !matches!(entry.importance, Importance::Important) {
+        return false;
+    }
+
+    // 兼容旧数据：过去可能把一次性事件误标成 important。
+    let temporary_markers = [
+        "今天", "刚刚", "刚才", "昨天", "这次", "目前", "现在", "最近",
+    ];
+    let transient_actions = [
+        "喝了", "吃了", "买了", "看了", "去了", "做了", "遇到", "刷到",
+        "听了", "玩了", "睡了",
+    ];
+    let has_transient_action = transient_actions.iter().any(|marker| entry.content.contains(marker));
+    let has_temporary_time = temporary_markers.iter().any(|marker| entry.content.contains(marker));
+    !has_transient_action && !has_temporary_time
 }
 
 /// 检索即强化：命中条目 access_count+1、刷新 last_accessed 并回写
@@ -213,4 +278,27 @@ fn dual_path_bm25_only(
             source: "bm25",
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(content: &str, importance: Importance) -> MemoryEntry {
+        MemoryEntry {
+            content: content.to_string(),
+            importance,
+            created: 0,
+            last_accessed: 0,
+            access_count: 1,
+            emotional_impact: None,
+        }
+    }
+
+    #[test]
+    fn automatic_recall_skips_one_time_drinks() {
+        assert!(!recall_eligible(&entry("用户喝了可乐", Importance::Important)));
+        assert!(recall_eligible(&entry("用户喜欢喝可乐", Importance::Important)));
+        assert!(recall_eligible(&entry("用户要求永久记住这件事", Importance::Permanent)));
+    }
 }
