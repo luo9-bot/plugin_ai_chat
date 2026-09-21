@@ -578,6 +578,28 @@ fn speak_and_deliver_group(
                 .with_about(u.user_id),
         );
     }
+
+    // 群级现场在夜间与回复门控之前记录。
+    // 她这次不插话，也不代表没有看见；下一轮仍应能接住这里发生过的事。
+    for u in utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() {
+            u.text.clone()
+        } else {
+            text_only
+        };
+        let name = crate::person_info::get_display_name(u.user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        with_shared_state(|s| {
+            s.push_group_history(
+                group_id,
+                "user",
+                &format!("[{name}] {stored}"),
+                max_history,
+            );
+        });
+    }
+
     if asleep {
         debug!(group_id, "handler: 她在睡觉，群消息留到早上");
         return;

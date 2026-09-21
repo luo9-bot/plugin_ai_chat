@@ -676,6 +676,39 @@ fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
     crate::mind::style::context_block(group_id, trigger, user_id)
 }
 
+/// 读取本轮之前的群聊现场，避免每次开口都像刚进群。
+fn group_history_block(group_id: u64, current_count: usize) -> Option<String> {
+    if group_id == 0 {
+        return None;
+    }
+    let history = crate::read_shared_state(|s| s.get_group_history_clone(group_id));
+    let previous_len = history.len().saturating_sub(current_count);
+    let previous = &history[..previous_len];
+    if previous.is_empty() {
+        return None;
+    }
+
+    let lines: Vec<String> = previous
+        .iter()
+        .rev()
+        .take(10)
+        .rev()
+        .map(|(role, content)| {
+            if role == "assistant" {
+                format!("[你] {content}")
+            } else {
+                content.clone()
+            }
+        })
+        .collect();
+    (!lines.is_empty()).then(|| {
+        format!(
+            "# 这群最近的聊天（较早现场，只用来接住语境）\n{}",
+            lines.join("\n")
+        )
+    })
+}
+
 // ── 群聊 ────────────────────────────────────────────────────────
 
 /// 群聊开口：她读完整个群的场面，决定说什么、对谁说，或者不说
@@ -718,6 +751,10 @@ pub fn speak_group(
     }
     let new_perceptions = new_lines.join("\n");
     let mut user_content = stream_user_content(&new_perceptions);
+    if let Some(block) = group_history_block(group_id, utterances.len()) {
+        user_content.push_str("\n\n");
+        user_content.push_str(&block);
+    }
     // 社会感知：群里的势——几条线在聊、谁和谁熟、有人在等、她刚说过话没有。
     // 感知语气呈现，说不说、接哪条线仍由她自己决定
     if let Some(block) = mind::social::context_block(group_id) {

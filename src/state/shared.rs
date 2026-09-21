@@ -220,6 +220,14 @@ impl SharedState {
         }
     }
 
+    /// 克隆群级历史，供表达层在锁外组装上下文。
+    pub fn get_group_history_clone(&self, group_id: u64) -> Vec<(String, String)> {
+        self.group_history
+            .get(&group_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// 遗忘用户的所有对话 (共享部分)
     pub fn forget_user_shared(&mut self, user_id: u64) {
         self.contexts.retain(|&(_, uid), _| uid != user_id);
