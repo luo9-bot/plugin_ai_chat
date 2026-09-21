@@ -9,7 +9,7 @@
       <div class="card">
         <div class="stat-value">{{ history.length }}</div>
         <div class="stat-label">状态变更记录</div>
-        <div class="stat-sub">她自己勾选 / 取消的历史</div>
+        <div class="stat-sub">运行时计划状态</div>
       </div>
     </div>
 
@@ -20,8 +20,8 @@
         </div>
         <div v-if="!data[tf].items.length" class="empty">还没有计划</div>
         <div v-else class="goal-list">
-          <div v-for="(g, i) in data[tf].items" :key="g.id" class="goal-item" :class="{ done: g.completed }">
-            <div class="goal-check" @click="toggle(tf, i)" :title="g.completed ? '取消勾选' : '标记完成'">
+          <div v-for="g in data[tf].items" :key="g.id" class="goal-item" :class="{ done: g.completed }">
+            <div class="goal-check" :title="g.completed ? '已自动完成' : '进行中'">
               <svg v-if="g.completed" viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--success)"/><path d="M6 10l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
               <svg v-else viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="7" stroke="var(--text-3)" stroke-width="1.5"/></svg>
             </div>
@@ -64,8 +64,8 @@
         <div class="info-item">每日计划：跨天时自动生成当日的 2-4 件事。</div>
         <div class="info-item">每周计划：跨周时生成周目标并分配到具体某天。</div>
         <div class="info-item">每月计划：跨月时生成本月目标。</div>
-        <div class="info-item">完成判定由她自己做：未完成清单会随场景递给她，她用 finish_plan 勾掉、用 note_progress 记进展、用 add_plan 临时加事。</div>
-        <div class="info-item">这里的勾选框与她走同一条落笔路径，所以两边看到的状态始终一致。</div>
+        <div class="info-item">完成判定由运行时自动记录：她通过 finish_plan 完成、用 note_progress 记进展、用 add_plan 临时加事。</div>
+        <div class="info-item">本页只读展示每日、每周、每月计划，定时从后端重新读取，不维护自己的状态副本。</div>
         <div class="info-item">数据存储于 data/plugin_ai_chat/</div>
       </div>
     </div>
@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 
 /** 展示顺序：越近的跨度越靠前 */
@@ -115,28 +115,16 @@ async function load() {
   } catch {}
 }
 
-async function toggle(tf, index) {
-  const item = data.value[tf]?.items?.[index]
-  if (!item) return
-  try {
-    const res = await api('/api/schedule', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'toggle', kind: tf, index })
-    })
-    if (res && res.ok !== undefined) {
-      // 以服务端返回为准，避免本地状态与落盘不一致
-      item.completed = res.completed
-      item.completed_at = res.completed ? Math.floor(Date.now() / 1000) : 0
-      const frame = data.value[tf]
-      frame.done = frame.items.filter(g => g.completed).length
-      load()
-    }
-  } catch (e) {
-    console.error('toggle plan item failed:', e)
-  }
-}
-
-onMounted(() => { load(); window.addEventListener('refresh-all', load) })
+let poller
+onMounted(() => {
+  load()
+  poller = window.setInterval(load, 5000)
+  window.addEventListener('refresh-all', load)
+})
+onUnmounted(() => {
+  window.clearInterval(poller)
+  window.removeEventListener('refresh-all', load)
+})
 </script>
 
 <style scoped>
@@ -153,7 +141,7 @@ onMounted(() => { load(); window.addEventListener('refresh-all', load) })
 .empty { text-align: center; padding: 24px; color: var(--text-3); font-size: 13px; }
 .goal-list { display: flex; flex-direction: column; gap: 2px; }
 .goal-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; }
-.goal-check { cursor: pointer; flex-shrink: 0; margin-top: 1px; }
+.goal-check { flex-shrink: 0; margin-top: 1px; }
 .goal-body { flex: 1; }
 .goal-content { font-size: 13px; line-height: 1.4; }
 .goal-id { font-family: monospace; font-size: 10px; color: var(--text-3); margin-right: 6px; padding: 1px 4px; border-radius: 3px; background: var(--surface); }
