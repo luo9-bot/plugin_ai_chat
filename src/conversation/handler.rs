@@ -386,6 +386,31 @@ impl GroupBatch {
     }
 }
 
+/// 记录跨用户共享的群聊短期现场。
+///
+/// 这份记录服务于后续表达，不参与是否回复的门控，因此要在沉默冷却
+/// 和 API 决策之前写入；她不插话也仍然知道群里发生过什么。
+fn record_group_history(group_id: u64, utterances: &[GroupUtterance], max_history: usize) {
+    for u in utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() {
+            u.text.clone()
+        } else {
+            text_only
+        };
+        let name = crate::person_info::get_display_name(u.user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        with_shared_state(|s| {
+            s.push_group_history(
+                group_id,
+                "user",
+                &format!("[{name}] {stored}"),
+                max_history,
+            );
+        });
+    }
+}
+
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
 pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
@@ -422,6 +447,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     }
 
     if !crisis_utterances.is_empty() {
+        record_group_history(group_id, &crisis_utterances, cfg.conversation.max_history);
         // 危机路径必然回应，焦点只用来定"回给谁"
         let crisis_focus = crate::conversation::turn::focus_batch(
             &crisis_utterances,
@@ -505,6 +531,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
             ts_ms: batch.sort_key_ms(),
         })
         .collect();
+    record_group_history(group_id, &utterances, cfg.conversation.max_history);
 
     // 轮次焦点：这批消息在跟谁说话（确定性判定，只用 @ / 名字 / 跟进关系）。
     // 回复目标由这里定，而不是"哪个用户的批次先到期"——批次是按
@@ -579,27 +606,6 @@ fn speak_and_deliver_group(
             crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, perception)
                 .with_about(u.user_id),
         );
-    }
-
-    // 群级现场在夜间与回复门控之前记录。
-    // 她这次不插话，也不代表没有看见；下一轮仍应能接住这里发生过的事。
-    for u in utterances {
-        let text_only = crate::vision::strip_image_cq(&u.text);
-        let stored = if text_only.is_empty() {
-            u.text.clone()
-        } else {
-            text_only
-        };
-        let name = crate::person_info::get_display_name(u.user_id, group_id)
-            .unwrap_or_else(|| "群友".to_string());
-        with_shared_state(|s| {
-            s.push_group_history(
-                group_id,
-                "user",
-                &format!("[{name}] {stored}"),
-                max_history,
-            );
-        });
     }
 
     if asleep {
