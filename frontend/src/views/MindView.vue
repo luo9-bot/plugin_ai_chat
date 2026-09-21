@@ -45,10 +45,10 @@
     <div class="card">
       <h3>最近意识流</h3>
       <div v-if="stream.length" class="stream-list">
-        <div v-for="(e, i) in stream" :key="i" class="stream-item" :class="'kind-' + e.kind">
-          <span class="stream-badge" :class="'badge-' + e.kind">{{ streamLabel(e.kind) }}</span>
+        <div v-for="(e, i) in stream" :key="i" class="stream-item" :class="['kind-' + e.kind, { 'is-recall': e.recall }]">
+          <span class="stream-badge" :class="e.recall ? 'badge-recall' : 'badge-' + e.kind">{{ e.recall ? '联想' : streamLabel(e.kind) }}</span>
           <div class="stream-body">
-            <div class="stream-content">{{ e.content }}</div>
+            <div class="stream-content">{{ e.content }}<span v-if="e.recall" class="recall-state">{{ e.recall.completed ? '已自动处理' : '待处理' }}</span></div>
             <div class="stream-time">{{ fmtAbs(e.time) }}</div>
           </div>
         </div>
@@ -204,6 +204,9 @@ onUnmounted(() => {
 .badge-digested { background: var(--border-light); color: var(--text-2); }
 .stream-body { flex: 1; min-width: 0; }
 .stream-content { font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.stream-item.is-recall { padding: 8px; border-left: 3px solid var(--warning); background: var(--warning-subtle); border-radius: var(--radius-xs); }
+.badge-recall { background: var(--warning-subtle); color: var(--warning); }
+.recall-state { margin-left: 8px; font-size: 10px; color: var(--success); }
 .stream-time { margin-top: 4px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .empty { text-align: center; padding: 28px; color: var(--text-3); font-size: 13px; }

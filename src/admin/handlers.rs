@@ -944,6 +944,9 @@ pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor
                     crate::schedule::SetStatusOutcome::UnknownId => {
                         return err(404, "plan item not found");
                     }
+                    crate::schedule::SetStatusOutcome::PersistenceFailed(error) => {
+                        return err(500, &error);
+                    }
                 }
             }
             _ => return err(400, "invalid action or kind"),
@@ -1203,6 +1206,29 @@ fn deep_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
 
 // ── Handler: 心灵（意识流/日记/档案/心事/审计） ────────────────
 
+fn stream_recall_json(event: &crate::mind::StreamEvent) -> Option<serde_json::Value> {
+    let recall = event.recall.as_ref()?;
+    Some(serde_json::json!({
+        "id": recall.id,
+        "source": recall.source,
+        "completed": crate::mind::recall::is_completed(&recall.id),
+        "completed_at": crate::mind::recall::completed_at(&recall.id),
+    }))
+}
+
+fn stream_event_json(event: &crate::mind::StreamEvent) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "kind": event.kind,
+        "content": event.content,
+        "time": event.time,
+        "about": event.about,
+    });
+    if let Some(recall) = stream_recall_json(event) {
+        value["recall"] = recall;
+    }
+    value
+}
+
 fn mind_now() -> serde_json::Value {
     let signals: Vec<serde_json::Value> = crate::mind::body_signals()
         .iter()
@@ -1220,11 +1246,7 @@ fn mind_now() -> serde_json::Value {
         .collect();
     let recent_stream: Vec<serde_json::Value> = crate::mind::recent(2 * 3600, 20)
         .iter()
-        .map(|e| {
-            serde_json::json!({
-                "kind": e.kind, "content": e.content, "time": e.time, "about": e.about,
-            })
-        })
+        .map(stream_event_json)
         .collect();
     let today = crate::util::ts_to_date_str(crate::util::now_secs());
     let diary_today = crate::mind::diary::recent(100)
@@ -1254,12 +1276,7 @@ pub fn handle_mind(
             Some(date) => {
                 let events: Vec<serde_json::Value> = crate::mind::stream::events_on_date(date)
                     .iter()
-                    .map(|e| {
-                        serde_json::json!({
-                            "kind": e.kind, "content": e.content,
-                            "time": e.time, "about": e.about,
-                        })
-                    })
+                    .map(stream_event_json)
                     .collect();
                 ok(serde_json::json!({"date": date, "events": events}))
             }

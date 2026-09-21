@@ -13,9 +13,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::Mutex;
 use tracing::{debug, info};
 
 use crate::config;
+
+static PLAN_LOCK: Mutex<()> = Mutex::new(());
 
 /// 计划跨度
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,10 +142,12 @@ fn load(timeframe: Timeframe) -> Plan {
         .unwrap_or_default()
 }
 
-fn save(timeframe: Timeframe, plan: &Plan) {
-    if let Ok(json) = serde_json::to_string_pretty(plan) {
-        fs::write(path_of(timeframe), json).ok();
-    }
+fn save(timeframe: Timeframe, plan: &Plan) -> std::io::Result<()> {
+    let path = path_of(timeframe);
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    let json = serde_json::to_vec_pretty(plan)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error.to_string()))?;
+    fs::write(path, json)
 }
 
 /// 当前周期标识
@@ -171,6 +176,7 @@ const GENERATION_RETRY_SECS: u64 = 30 * 60;
 ///
 /// 条目为空但刚试过 → 不重试，等间隔到。
 pub fn ensure_plan(timeframe: Timeframe) -> bool {
+    let _guard = PLAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let plan = load(timeframe);
     let period = current_period(timeframe);
     if plan.period == period && !plan.items.is_empty() {
@@ -189,7 +195,10 @@ pub fn ensure_plan(timeframe: Timeframe) -> bool {
             created_at: now,
             reflection: plan.reflection,
         };
-        save(timeframe, &retry);
+        if let Err(error) = save(timeframe, &retry) {
+            tracing::warn!(%error, "schedule: retry state could not be saved");
+            return false;
+        }
         debug!(
             timeframe = timeframe.label(),
             "schedule: 上次生成没出内容，重试"
@@ -198,7 +207,7 @@ pub fn ensure_plan(timeframe: Timeframe) -> bool {
     }
 
     // 跨周期：开一份新的
-    save(
+    if let Err(error) = save(
         timeframe,
         &Plan {
             period,
@@ -206,7 +215,10 @@ pub fn ensure_plan(timeframe: Timeframe) -> bool {
             created_at: now,
             reflection: String::new(),
         },
-    );
+    ) {
+        tracing::warn!(%error, "schedule: period state could not be saved");
+        return false;
+    }
     debug!(
         timeframe = timeframe.label(),
         "schedule: 新周期，等待生成计划"
@@ -219,6 +231,7 @@ pub fn ensure_plan(timeframe: Timeframe) -> bool {
 /// 生成是整体替换而不是追加：跨周/跨月时旧条目已在 `ensure_plan` 里清空，
 /// 同日重跑也不该把同一批目标堆两份。
 pub fn replace_items(timeframe: Timeframe, generated: Vec<GeneratedItem>) {
+    let _guard = PLAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plan = load(timeframe);
     if plan.period != current_period(timeframe) {
         // 生成期间跨了周期：以当前周期为准重开
@@ -251,7 +264,10 @@ pub fn replace_items(timeframe: Timeframe, generated: Vec<GeneratedItem>) {
         })
         .collect();
     let count = plan.items.len();
-    save(timeframe, &plan);
+    if let Err(error) = save(timeframe, &plan) {
+        tracing::warn!(%error, "schedule: generated plan could not be saved");
+        return;
+    }
     info!(timeframe = timeframe.label(), count, "schedule: 计划已生成");
 }
 
@@ -266,12 +282,15 @@ pub struct GeneratedItem {
 
 /// 某个跨度的计划（admin 展示用）
 pub fn plan_of(timeframe: Timeframe) -> Plan {
-    load(timeframe)
+    let _guard = PLAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = load(timeframe);
+    let period = current_period(timeframe);
+    if plan.period == period { plan } else { Plan { period, ..Default::default() } }
 }
 
 /// 当前周期仍未完成的条目
 pub fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
-    load(timeframe)
+    plan_of(timeframe)
         .items
         .into_iter()
         .filter(PlanItem::is_open)
@@ -281,7 +300,7 @@ pub fn open_items(timeframe: Timeframe) -> Vec<PlanItem> {
 /// 今天该做的周计划条目（未完成、安排在今天的）
 pub fn today_week_items() -> Vec<PlanItem> {
     let today = crate::util::current_weekday_eng();
-    load(Timeframe::Week)
+    plan_of(Timeframe::Week)
         .items
         .into_iter()
         .filter(|item| item.is_open() && item.target_day.as_deref() == Some(today.as_str()))
@@ -299,7 +318,7 @@ pub fn open_items_all() -> Vec<PlanItem> {
 pub fn find(item_id: &str) -> Option<PlanItem> {
     let wanted = item_id.trim().to_ascii_lowercase();
     Timeframe::ALL.into_iter().find_map(|timeframe| {
-        load(timeframe)
+        plan_of(timeframe)
             .items
             .into_iter()
             .find(|item| item.id == wanted)
@@ -336,6 +355,7 @@ pub enum SetStatusOutcome {
     },
     /// 找不到这个 id
     UnknownId,
+    PersistenceFailed(String),
 }
 
 /// 写回一条计划的状态（她通过工具调用这里）
@@ -348,9 +368,11 @@ pub fn set_status(
     note: &str,
     progress: &str,
 ) -> SetStatusOutcome {
+    let _guard = PLAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let wanted = item_id.trim().to_ascii_lowercase();
     for timeframe in Timeframe::ALL {
         let mut plan = load(timeframe);
+        if plan.period != current_period(timeframe) { continue; }
         let Some(index) = plan.items.iter().position(|item| item.id == wanted) else {
             continue;
         };
@@ -359,7 +381,7 @@ pub fn set_status(
             let item = &mut plan.items[index];
             if let Some(done) = completed {
                 item.completed = done;
-                item.completed_at = if done { now } else { 0 };
+                item.completed_at = if done { if item.completed_at == 0 { now } else { item.completed_at } } else { 0 };
                 if done && !note.trim().is_empty() {
                     item.completion_note = note.trim().to_string();
                 }
@@ -369,11 +391,14 @@ pub fn set_status(
             }
             if !progress.trim().is_empty() {
                 item.progress.push(progress.trim().to_string());
-                item.progress.truncate(MAX_PROGRESS_LINES);
+                let excess = item.progress.len().saturating_sub(MAX_PROGRESS_LINES);
+                item.progress.drain(..excess);
             }
         }
         let item = plan.items[index].clone();
-        save(timeframe, &plan);
+        if let Err(error) = save(timeframe, &plan) {
+            return SetStatusOutcome::PersistenceFailed(error.to_string());
+        }
         if let Some(done) = completed {
             record_activity_log(&item, done);
         }
@@ -395,6 +420,7 @@ pub fn set_status(
 
 /// 她给自己加一条计划（当日）
 pub fn add_own_item(content: &str) -> Option<PlanItem> {
+    let _guard = PLAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let content = content.trim();
     if content.is_empty() || content.chars().count() > MAX_CONTENT_CHARS {
         return None;
@@ -427,7 +453,10 @@ pub fn add_own_item(content: &str) -> Option<PlanItem> {
         created_at: crate::util::now_secs(),
     };
     plan.items.push(item.clone());
-    save(Timeframe::Day, &plan);
+    if let Err(error) = save(Timeframe::Day, &plan) {
+        tracing::warn!(%error, "schedule: new item could not be saved");
+        return None;
+    }
     info!(id = %item.id, content, "schedule: 她给自己加了一件事");
     Some(item)
 }

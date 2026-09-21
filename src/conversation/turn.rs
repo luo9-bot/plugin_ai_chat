@@ -34,7 +34,11 @@ impl UtteranceDigest {
         let text = strip_cq_codes(&u.text);
         Self {
             user_id: u.user_id,
-            at_targets: at_targets(&u.text),
+            at_targets: if u.at_targets.is_empty() {
+                at_targets(&u.text)
+            } else {
+                u.at_targets.clone()
+            },
             text,
             ts: u.ts,
             ts_ms: u.ts_ms,
@@ -61,6 +65,8 @@ pub struct TurnFocus {
     pub called_by: Vec<u64>,
     /// 她最近回过、且这批里继续说的人（软信号）
     pub followed_up_by: Vec<u64>,
+    /// 明确 @ 了其他人的发言者。
+    pub other_targeted_by: Vec<u64>,
     /// 建议的回复目标：优先叫她的人里最后一位，其次最后一位说话的人
     pub primary: u64,
 }
@@ -76,6 +82,27 @@ impl TurnFocus {
         self.digests
             .iter()
             .any(|d| d.has_text() && d.user_id != self.primary)
+    }
+
+    /// 这批消息是否明确在叫其他群友。
+    pub fn addresses_others(&self) -> bool {
+        !self.other_targeted_by.is_empty()
+    }
+
+    /// 所有有内容的消息都在叫别人，且没有跟她继续说话。
+    /// 这种场景她应该继续旁听，不该为了“有消息”而抢话。
+    pub fn is_solely_for_others(&self) -> bool {
+        if self.is_called() || !self.followed_up_by.is_empty() {
+            return false;
+        }
+        let text_digests: Vec<&UtteranceDigest> =
+            self.digests.iter().filter(|digest| digest.has_text()).collect();
+        !text_digests.is_empty()
+            && text_digests.iter().all(|digest| {
+                !digest.at_targets.is_empty()
+                    && digest.at_targets.iter().all(|target| *target != 0)
+            })
+            && self.addresses_others()
     }
 
     /// 评分用的"被点名"加成：叫她的人或刚回过的人越多越该说话。
@@ -166,6 +193,17 @@ pub fn focus_batch(
         .map(|d| d.user_id)
         .collect();
 
+    let other_targeted_by: Vec<u64> = digests
+        .iter()
+        .filter(|d| {
+            d.has_text()
+                && d.at_targets
+                    .iter()
+                    .any(|target| *target != 0 && *target != self_qq)
+        })
+        .map(|d| d.user_id)
+        .collect();
+
     // 回复目标：叫她的人里最后一个开口的；没人叫她时取最后一位"说了话"的人。
     // 纯表情/空消息不参与——回一个只发了表情的人等于答非所问。
     let primary = called_by
@@ -185,6 +223,7 @@ pub fn focus_batch(
         digests,
         called_by,
         followed_up_by,
+        other_targeted_by,
         primary,
     }
 }
@@ -198,6 +237,7 @@ mod tests {
         GroupUtterance {
             user_id,
             text: text.to_string(),
+            at_targets: Vec::new(),
             ts,
             ts_ms: ts * 1000,
         }
@@ -286,5 +326,23 @@ mod tests {
         let batch = vec![u(11, "甲", 100), u(22, "乙", 101)];
         let focus = focus_batch(&batch, 999, "洛玖", &never);
         assert!(focus.has_other_speakers());
+    }
+
+    #[test]
+    fn does_not_interrupt_messages_addressed_to_other_members() {
+        let batch = vec![u(11, "[CQ:at,qq=22] 你看这个", 100)];
+        let focus = focus_batch(&batch, 999, "洛玖", &never);
+        assert!(focus.addresses_others());
+        assert!(focus.is_solely_for_others());
+        assert!(!focus.is_called());
+    }
+
+    #[test]
+    fn bot_mention_wins_when_message_mentions_bot_and_another_member() {
+        let batch = vec![u(11, "[CQ:at,qq=999][CQ:at,qq=22] 一起看看", 100)];
+        let focus = focus_batch(&batch, 999, "洛玖", &never);
+        assert!(focus.is_called());
+        assert!(focus.addresses_others());
+        assert!(!focus.is_solely_for_others());
     }
 }

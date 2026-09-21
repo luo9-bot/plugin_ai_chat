@@ -21,6 +21,8 @@ use crate::mind::{self, SensoryPacket};
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
 pub enum VoiceAction {
+    /// 请求失败或输出无效，不能算作已处理联想。
+    Failed,
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
     Reply(String),
     /// 这一轮她选择沉默
@@ -32,6 +34,8 @@ pub struct GroupUtterance {
     pub user_id: u64,
     /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
+    /// 原始消息中的 @ 目标。归一化正文会移除 CQ 码，因此单独保留。
+    pub at_targets: Vec<u64>,
     /// 消息到达时间（unix 秒，转译入流用）
     pub ts: u64,
     /// 到达时刻（毫秒）——排序用，同一秒内的先后靠它区分
@@ -377,6 +381,9 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                 crate::schedule::SetStatusOutcome::UnknownId => {
                     ToolOutcome::Continue(format!("清单里没有编号 {id}。用 check_plan 看一下。"))
                 }
+                crate::schedule::SetStatusOutcome::PersistenceFailed(error) => {
+                    ToolOutcome::Continue(format!("计划进展保存失败：{error}。本次没有更新。"))
+                }
             })
         }
         "finish_plan" => {
@@ -400,6 +407,8 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                     crate::schedule::SetStatusOutcome::UnknownId => ToolOutcome::Continue(format!(
                         "清单里没有编号 {id}。用 check_plan 看一下。"
                     )),
+                    crate::schedule::SetStatusOutcome::PersistenceFailed(error) =>
+                        ToolOutcome::Continue(format!("计划状态保存失败：{error}。本次没有完成标注。")),
                 },
             )
         }
@@ -609,6 +618,13 @@ fn scene_line(
         if !callers.is_empty() {
             text.push_str(&format!("\n{}点名找你了，在等你回。", callers.join("、")));
         }
+        if focus.addresses_others() {
+            if focus.is_solely_for_others() {
+                text.push_str("\n这批消息明确是在叫其他群友，不要为了有消息就抢话。");
+            } else {
+                text.push_str("\n这批里有人在和其他群友说话，别把那条线误当成在问你。");
+            }
+        }
         if focus.has_other_speakers() {
             text.push_str("\n这批不止一个人在说话，各自的话分开看。");
         }
@@ -676,6 +692,39 @@ fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
     crate::mind::style::context_block(group_id, trigger, user_id)
 }
 
+/// 读取本轮之前的群聊现场，避免每次开口都像刚进群。
+fn group_history_block(group_id: u64, current_count: usize) -> Option<String> {
+    if group_id == 0 {
+        return None;
+    }
+    let history = crate::read_shared_state(|s| s.get_group_history_clone(group_id));
+    let previous_len = history.len().saturating_sub(current_count);
+    let previous = &history[..previous_len];
+    if previous.is_empty() {
+        return None;
+    }
+
+    let lines: Vec<String> = previous
+        .iter()
+        .rev()
+        .take(10)
+        .rev()
+        .map(|(role, content)| {
+            if role == "assistant" {
+                format!("[你] {content}")
+            } else {
+                content.clone()
+            }
+        })
+        .collect();
+    (!lines.is_empty()).then(|| {
+        format!(
+            "# 这群最近的聊天（较早现场，只用来接住语境）\n{}",
+            lines.join("\n")
+        )
+    })
+}
+
 // ── 群聊 ────────────────────────────────────────────────────────
 
 /// 群聊开口：她读完整个群的场面，决定说什么、对谁说，或者不说
@@ -718,6 +767,10 @@ pub fn speak_group(
     }
     let new_perceptions = new_lines.join("\n");
     let mut user_content = stream_user_content(&new_perceptions);
+    if let Some(block) = group_history_block(group_id, utterances.len()) {
+        user_content.push_str("\n\n");
+        user_content.push_str(&block);
+    }
     // 社会感知：群里的势——几条线在聊、谁和谁熟、有人在等、她刚说过话没有。
     // 感知语气呈现，说不说、接哪条线仍由她自己决定
     if let Some(block) = mind::social::context_block(group_id) {
@@ -754,12 +807,12 @@ pub fn speak_group(
     match result {
         Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(group_id, error = %e, "voice: group API error");
-            VoiceAction::Silent
+            VoiceAction::Failed
         }
     }
 }
@@ -846,12 +899,12 @@ pub fn speak_private(
     match result {
         Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Ok(None) => VoiceAction::Silent,
         Err(e) => {
             info!(user_id, error = %e, "voice: private API error");
-            VoiceAction::Silent
+            VoiceAction::Failed
         }
     }
 }

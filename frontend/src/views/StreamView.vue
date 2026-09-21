@@ -25,16 +25,18 @@
 
       <div v-if="loading" class="empty">读取中…</div>
       <div v-else-if="filtered.length" class="timeline">
-        <div v-for="(e, i) in filtered" :key="i" class="tl-item" :class="'kind-' + e.kind">
+        <div v-for="(e, i) in filtered" :key="i" class="tl-item" :class="['kind-' + e.kind, { 'is-recall': isRecall(e), 'is-recall-completed': e.recall?.completed }]">
           <div class="tl-rail">
             <span class="tl-dot"></span>
             <span class="tl-line" v-if="i < filtered.length - 1"></span>
           </div>
           <div class="tl-body">
             <div class="tl-head">
-              <span class="tl-badge" :class="'badge-' + e.kind">{{ kindLabel(e.kind) }}</span>
+              <span class="tl-badge" :class="'badge-' + displayKind(e)">{{ kindLabel(displayKind(e)) }}</span>
               <span class="tl-time">{{ fmtAbs(e.time) }}</span>
               <span class="tl-about" v-if="e.about">关于 {{ e.about }}</span>
+              <span class="recall-source" v-if="e.recall">{{ e.recall.source }}</span>
+              <span class="recall-status" v-if="e.recall">{{ e.recall.completed ? '已自动处理' : '待处理' }}</span>
             </div>
             <div class="tl-content">{{ e.content }}</div>
           </div>
@@ -46,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 
 const dates = ref([])
@@ -60,14 +62,23 @@ const KINDS = [
   { value: 'inner', label: '内心' },
   { value: 'acted', label: '行动' },
   { value: 'digested', label: '沉淀' },
+  { value: 'recall', label: '联想' },
 ]
 const LABELS = Object.fromEntries(KINDS.map(k => [k.value, k.label]))
 
 function kindLabel(kind) { return LABELS[kind] || kind }
 
-const filtered = computed(() =>
-  filter.value === 'all' ? events.value : events.value.filter(e => e.kind === filter.value)
-)
+function isRecall(e) {
+  return Boolean(e.recall) || String(e.content || '').startsWith('想起：') || String(e.content || '').startsWith('（毫无来由地')
+}
+function displayKind(e) {
+  return isRecall(e) ? 'recall' : e.kind
+}
+const filtered = computed(() => {
+  if (filter.value === 'all') return events.value
+  if (filter.value === 'recall') return events.value.filter(isRecall)
+  return events.value.filter(e => e.kind === filter.value && !isRecall(e))
+})
 
 function fmtAbs(secs) {
   if (!secs) return ''
@@ -84,9 +95,7 @@ async function loadDates() {
   } catch {}
 }
 
-async function select(date) {
-  selected.value = date
-  filter.value = 'all'
+async function loadDate(date) {
   loading.value = true
   try {
     const j = await api(`/api/mind/stream/${encodeURIComponent(date)}`)
@@ -95,7 +104,20 @@ async function select(date) {
   loading.value = false
 }
 
-onMounted(loadDates)
+async function select(date) {
+  selected.value = date
+  filter.value = 'all'
+  await loadDate(date)
+}
+
+let poller
+onMounted(async () => {
+  await loadDates()
+  poller = window.setInterval(() => {
+    if (selected.value) loadDate(selected.value)
+  }, 5000)
+})
+onUnmounted(() => window.clearInterval(poller))
 </script>
 
 <style scoped>
@@ -137,6 +159,7 @@ onMounted(loadDates)
 .tl-item.kind-inner .tl-dot { background: var(--primary); }
 .tl-item.kind-acted .tl-dot { background: var(--accent); }
 .tl-item.kind-sensation .tl-dot { background: var(--info); }
+.tl-item.is-recall .tl-dot { background: var(--warning); }
 .tl-line { flex: 1; width: 2px; background: var(--border-light); min-height: 14px; }
 .tl-body { flex: 1; min-width: 0; padding-bottom: 16px; }
 .tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -150,11 +173,18 @@ onMounted(loadDates)
 .badge-digested { background: var(--border-light); color: var(--text-2); }
 .tl-time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .tl-about { font-size: 11px; color: var(--text-3); }
+.recall-source, .recall-status {
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: var(--warning-subtle); color: var(--warning);
+}
+.recall-status { background: var(--success-subtle); color: var(--success); }
 .tl-content {
   margin-top: 5px; font-size: 13px; line-height: 1.55;
   white-space: pre-wrap; word-break: break-word;
 }
 .tl-item.kind-inner .tl-content { color: var(--text); }
+.tl-item.is-recall .tl-content { padding: 8px 10px; border-left: 3px solid var(--warning); background: var(--warning-subtle); border-radius: 4px; }
+.tl-item.is-recall-completed .tl-content { opacity: .72; }
 
 .empty { text-align: center; padding: 32px; color: var(--text-3); font-size: 13px; }
 </style>
