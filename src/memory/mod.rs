@@ -36,12 +36,33 @@ pub(crate) fn search_memories(
     query: &str,
     top_k: usize,
 ) -> Vec<retrieval::RetrievalResult> {
+    search_memories_inner(user_id, current_group_id, query, top_k, false, 0.45)
+}
+
+pub(crate) fn search_memories_for_recall(
+    user_id: u64,
+    current_group_id: u64,
+    query: &str,
+    top_k: usize,
+) -> Vec<retrieval::RetrievalResult> {
+    search_memories_inner(user_id, current_group_id, query, top_k, true, 0.62)
+}
+
+fn search_memories_inner(
+    user_id: u64,
+    current_group_id: u64,
+    query: &str,
+    top_k: usize,
+    stable_only: bool,
+    min_vector_similarity: f64,
+) -> Vec<retrieval::RetrievalResult> {
     let mut documents: Vec<(String, String)> = Vec::new();
     let mut meta: HashMap<String, retrieval::forgetting::MemoryMeta> = HashMap::new();
 
     // 全局记忆
     let global = store::load_user_memory(user_id);
     for (i, entry) in global.entries.iter().enumerate() {
+        if stable_only && !recall_eligible(entry) { continue; }
         let id = format!("global_{}_{}", user_id, i);
         meta.insert(
             id.clone(),
@@ -59,6 +80,7 @@ pub(crate) fn search_memories(
     if current_group_id > 0 {
         let group_user = store::load_group_user_memory(current_group_id, user_id);
         for (i, entry) in group_user.entries.iter().enumerate() {
+            if stable_only && !recall_eligible(entry) { continue; }
             let id = format!("group_{}_{}_{}", current_group_id, user_id, i);
             meta.insert(
                 id.clone(),
@@ -124,6 +146,7 @@ pub(crate) fn search_memories(
         vector_weight: 0.7,
         bm25_weight: 0.3,
         rrf_k: 60.0,
+        min_vector_similarity,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
     };
@@ -165,6 +188,17 @@ pub(crate) fn search_memories(
     }
 
     results
+}
+
+fn recall_eligible(entry: &MemoryEntry) -> bool {
+    if entry.importance == Importance::Permanent
+        || entry.emotional_impact.is_some_and(|impact| impact.abs() >= 6.0)
+    {
+        return true;
+    }
+    if entry.importance != Importance::Important { return false; }
+    let transient = [\"喝了\", \"吃了\", \"买了\", \"看了\", \"去了\", \"做了\", \"遇到\", \"刷到\", \"听了\", \"玩了\", \"睡了\"];
+    !transient.iter().any(|marker| entry.content.contains(marker))
 }
 
 /// 检索即强化：命中条目 access_count+1、刷新 last_accessed 并回写

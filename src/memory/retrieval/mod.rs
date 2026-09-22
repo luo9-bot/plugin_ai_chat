@@ -25,6 +25,7 @@ pub(crate) struct RetrievalConfig {
     pub vector_weight: f64,
     pub bm25_weight: f64,
     pub rrf_k: f64,
+    pub min_vector_similarity: f64,
     pub threshold_config: Option<ThresholdConfig>,
     pub posterior_graph_config: Option<PosteriorGraphConfig>,
 }
@@ -36,6 +37,7 @@ impl Default for RetrievalConfig {
             vector_weight: 0.7,
             bm25_weight: 0.3,
             rrf_k: 60.0,
+            min_vector_similarity: 0.45,
             threshold_config: None,
             posterior_graph_config: None,
         }
@@ -63,12 +65,13 @@ pub(crate) fn dual_path_retrieve(
     let bm25_results = bm25::search(query, memories, config.top_k * 2);
 
     // 步骤2: 向量语义检索（只使用缓存的查询向量，不阻塞调用 API）
-    let vector_results = if let Some(query_embedding) = vector::get_cached_query_embedding(query) {
+    let mut vector_results = if let Some(query_embedding) = vector::get_cached_query_embedding(query) {
         vector::search(&query_embedding, embeddings, config.top_k * 2)
     } else {
         // 没有缓存的查询向量，跳过向量检索，纯 BM25 结果
         Vec::new()
     };
+    vector_results.retain(|result| result.score >= config.min_vector_similarity);
 
     // 步骤3: Weighted RRF 融合
     let mut fused = fusion::weighted_rrf_fusion(
