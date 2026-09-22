@@ -550,4 +550,22 @@ mod tests {
         rep.content = 0.0;
         assert_eq!(rep.penalty_multiplier(), 6.0);
     }
+
+    #[test]
+    fn silent_ban_requires_repeated_high_severity_evidence() {
+        let mut behavior = UserBehavior::default();
+        behavior.reputation.content = 0.1;
+        behavior.high_severity_count = 2;
+        assert!(!behavior.should_silent_ban());
+        behavior.high_severity_count = 3;
+        assert!(behavior.should_silent_ban());
+    }
+
+    #[test]
+    fn single_low_severity_violation_keeps_reputation_nearby() {
+        let mut behavior = UserBehavior::default();
+        behavior.record_violation(1.0);
+        assert!(behavior.reputation.content > 0.9);
+        assert_eq!(behavior.high_severity_count, 0);
+    }
 }

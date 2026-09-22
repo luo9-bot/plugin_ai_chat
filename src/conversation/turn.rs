@@ -62,6 +62,8 @@ pub(crate) struct TurnFocus {
     pub called_by: Vec<u64>,
     /// 她最近回过、且这批里继续说的人（软信号）
     pub followed_up_by: Vec<u64>,
+    /// 明确 @ 了其他人的发言者。
+    pub other_targeted_by: Vec<u64>,
     /// 建议的回复目标：优先叫她的人里最后一位，其次最后一位说话的人
     pub primary: u64,
 }
@@ -157,6 +159,17 @@ pub(crate) fn focus_batch(
         .map(|d| d.user_id)
         .collect();
 
+    let other_targeted_by: Vec<u64> = digests
+        .iter()
+        .filter(|d| {
+            d.has_text()
+                && d.at_targets
+                    .iter()
+                    .any(|target| *target != 0 && *target != self_qq)
+        })
+        .map(|d| d.user_id)
+        .collect();
+
     // 回复目标：叫她的人里最后一个开口的；没人叫她时取最后一位"说了话"的人。
     // 纯表情/空消息不参与——回一个只发了表情的人等于答非所问。
     let primary = called_by
@@ -176,6 +189,7 @@ pub(crate) fn focus_batch(
         digests,
         called_by,
         followed_up_by,
+        other_targeted_by,
         primary,
     }
 }
@@ -320,5 +334,23 @@ mod tests {
         let batch = vec![u(11, "甲", 100), u(22, "乙", 101)];
         let focus = focus_batch(&batch, 999, "洛玖", &never);
         assert!(focus.has_other_speakers());
+    }
+
+    #[test]
+    fn does_not_interrupt_messages_addressed_to_other_members() {
+        let batch = vec![u(11, "[CQ:at,qq=22] 你看这个", 100)];
+        let focus = focus_batch(&batch, 999, "洛玖", &never);
+        assert!(focus.addresses_others());
+        assert!(focus.is_solely_for_others());
+        assert!(!focus.is_called());
+    }
+
+    #[test]
+    fn bot_mention_wins_when_message_mentions_bot_and_another_member() {
+        let batch = vec![u(11, "[CQ:at,qq=999][CQ:at,qq=22] 一起看看", 100)];
+        let focus = focus_batch(&batch, 999, "洛玖", &never);
+        assert!(focus.is_called());
+        assert!(focus.addresses_others());
+        assert!(!focus.is_solely_for_others());
     }
 }

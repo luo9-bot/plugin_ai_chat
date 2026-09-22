@@ -1020,6 +1020,9 @@ pub(crate) fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io:
                     crate::schedule::SetStatusOutcome::UnknownId => {
                         return err(404, "plan item not found");
                     }
+                    crate::schedule::SetStatusOutcome::PersistenceFailed(error) => {
+                        return err(500, &error);
+                    }
                 }
             }
             _ => return err(400, "invalid action or kind"),

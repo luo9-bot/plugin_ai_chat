@@ -259,4 +259,11 @@ mod tests {
         // 完全无关的话题零命中
         assert_eq!(topic_overlap(topic, "今晚吃火锅吗"), 0);
     }
+
+    #[test]
+    fn short_social_noise_has_no_recall_topic() {
+        assert!(!has_recall_topic("嗯"));
+        assert!(!has_recall_topic("今天"));
+        assert!(has_recall_topic("今晚喝可乐"));
+    }
 }

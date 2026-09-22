@@ -252,6 +252,7 @@ pub(crate) fn process_message(user_id: u64, message: &str) {
     }
 
     // 联想：她能想起什么（转述入流，成为她的经历）
+    let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&ai_message, user_id, 0) {
         let mut event = crate::mind::StreamEvent::new(
             crate::mind::StreamKind::Sensation,
@@ -295,7 +296,14 @@ pub(crate) fn process_message(user_id: u64, message: &str) {
         }
     });
 
-    match voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref()) {
+    let action = voice::speak_private(user_id, &ai_message, &history, extra_system.as_deref());
+    if !matches!(&action, VoiceAction::Failed) {
+        crate::mind::recall::complete_turn(&recall_ids);
+    } else {
+        crate::mind::recall::release_turn(&recall_ids);
+    }
+    match action {
+        VoiceAction::Failed => {},
         VoiceAction::Reply(reply) => {
             crate::mind::stream::push(
                 crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
@@ -385,6 +393,31 @@ impl GroupBatch {
     }
 }
 
+/// 记录跨用户共享的群聊短期现场。
+///
+/// 这份记录服务于后续表达，不参与是否回复的门控，因此要在沉默冷却
+/// 和 API 决策之前写入；她不插话也仍然知道群里发生过什么。
+fn record_group_history(group_id: u64, utterances: &[GroupUtterance], max_history: usize) {
+    for u in utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() {
+            u.text.clone()
+        } else {
+            text_only
+        };
+        let name = crate::person_info::get_display_name(u.user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        with_shared_state(|s| {
+            s.push_group_history(
+                group_id,
+                "user",
+                &format!("[{name}] {stored}"),
+                max_history,
+            );
+        });
+    }
+}
+
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
 pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
@@ -422,6 +455,7 @@ pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     }
 
     if !crisis_utterances.is_empty() {
+        record_group_history(group_id, &crisis_utterances, cfg.conversation.max_history);
         // 危机路径必然回应，焦点只用来定"回给谁"
         let crisis_focus = crate::conversation::turn::focus_batch(
             &crisis_utterances,
@@ -506,6 +540,7 @@ pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
             ts_ms: batch.sort_key_ms(),
         })
         .collect();
+    record_group_history(group_id, &utterances, cfg.conversation.max_history);
 
     // 群级现场在沉默冷却和表达决策前记录，下一轮才能接住她错过的上下文。
     for u in &utterances {
@@ -601,8 +636,20 @@ fn speak_and_deliver_group(
                 .with_about(u.user_id),
         );
     }
+
     if asleep {
         debug!(group_id, "handler: 她在睡觉，群消息留到早上");
+        return;
+    }
+
+    if !force_reply && focus.is_solely_for_others() {
+        debug!(group_id, "voice: 群友明确在互相说话，她继续旁听");
+        mark_silence(group_id);
+        if cfg.humanity.social_battery_enabled {
+            let mut battery = crate::social_battery::load();
+            crate::social_battery::record_passive_participation(&mut battery);
+            crate::social_battery::save(&battery);
+        }
         return;
     }
 
@@ -668,6 +715,7 @@ fn speak_and_deliver_group(
         .map(|u| u.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+    let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&joined_text, primary, group_id) {
         let mut event = crate::mind::StreamEvent::new(
             crate::mind::StreamKind::Sensation,
@@ -700,7 +748,9 @@ fn speak_and_deliver_group(
         crate::conversation::attention::save_attention(&attn);
     }
 
-    match voice::speak_group(group_id, utterances, focus, force_reply) {
+    let action = voice::speak_group(group_id, utterances, focus, force_reply);
+    match action {
+        VoiceAction::Failed => crate::mind::recall::release_turn(&recall_ids),
         VoiceAction::Reply(reply) => {
             // 概率式中断：生成完、开口前的最后一刻，若处理期间涌进大量新消息，
             // 话题可能已经变了——把到嘴边的话咽回去，带着最新消息重新看一眼
@@ -708,6 +758,7 @@ fn speak_and_deliver_group(
                 && cfg.conversation.interruption_enabled
                 && crate::conversation::interruption::should_swallow(group_id);
             if swallowed {
+                crate::mind::recall::release_turn(&recall_ids);
                 debug!(group_id, "voice: interrupted before speaking");
                 mark_silence(group_id);
                 if cfg.humanity.social_battery_enabled {
@@ -716,6 +767,7 @@ fn speak_and_deliver_group(
                     crate::social_battery::save(&battery);
                 }
             } else {
+                crate::mind::recall::complete_turn(&recall_ids);
                 // 她说的话成为她的经历
                 crate::mind::stream::push(
                     crate::mind::StreamEvent::new(crate::mind::StreamKind::Acted, reply.clone())
@@ -729,6 +781,7 @@ fn speak_and_deliver_group(
             }
         }
         VoiceAction::Silent => {
+            crate::mind::recall::complete_turn(&recall_ids);
             // 群聊沉默不逐次入流（会淹没她的经历），只做冷却与电量记账
             debug!(group_id, "voice: group silent");
             mark_silence(group_id);

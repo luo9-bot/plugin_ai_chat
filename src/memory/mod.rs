@@ -246,3 +246,26 @@ fn dual_path_bm25_only(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(content: &str, importance: Importance) -> MemoryEntry {
+        MemoryEntry {
+            content: content.to_string(),
+            importance,
+            created: 0,
+            last_accessed: 0,
+            access_count: 1,
+            emotional_impact: None,
+        }
+    }
+
+    #[test]
+    fn automatic_recall_skips_one_time_drinks() {
+        assert!(!recall_eligible(&entry("用户喝了可乐", Importance::Important)));
+        assert!(recall_eligible(&entry("用户喜欢喝可乐", Importance::Important)));
+        assert!(recall_eligible(&entry("用户要求永久记住这件事", Importance::Permanent)));
+    }
+}

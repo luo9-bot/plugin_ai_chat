@@ -404,6 +404,9 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                 crate::schedule::SetStatusOutcome::UnknownId => {
                     ToolOutcome::Continue(format!("清单里没有编号 {id}。用 check_plan 看一下。"))
                 }
+                crate::schedule::SetStatusOutcome::PersistenceFailed(error) => {
+                    ToolOutcome::Continue(format!("计划进展保存失败：{error}。本次没有更新。"))
+                }
             })
         }
         "finish_plan" => {
@@ -427,6 +430,8 @@ fn execute_plan_tool(name: &str, args: &serde_json::Value) -> Option<ToolOutcome
                     crate::schedule::SetStatusOutcome::UnknownId => ToolOutcome::Continue(format!(
                         "清单里没有编号 {id}。用 check_plan 看一下。"
                     )),
+                    crate::schedule::SetStatusOutcome::PersistenceFailed(error) =>
+                        ToolOutcome::Continue(format!("计划状态保存失败：{error}。本次没有完成标注。")),
                 },
             )
         }
@@ -636,6 +641,13 @@ fn scene_line(
         if !callers.is_empty() {
             text.push_str(&format!("\n{}点名找你了，在等你回。", callers.join("、")));
         }
+        if focus.addresses_others() {
+            if focus.is_solely_for_others() {
+                text.push_str("\n这批消息明确是在叫其他群友，不要为了有消息就抢话。");
+            } else {
+                text.push_str("\n这批里有人在和其他群友说话，别把那条线误当成在问你。");
+            }
+        }
         if focus.has_other_speakers() {
             text.push_str("\n这批不止一个人在说话，各自的话分开看。");
         }
@@ -801,7 +813,7 @@ pub(crate) fn speak_group(
     match result {
         Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Utterance::Silent(cause) => {
             report_silence("group", &cause, group_id);
@@ -887,7 +899,7 @@ pub(crate) fn speak_private(
     match result {
         Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
-            None => VoiceAction::Silent,
+            None => VoiceAction::Failed,
         },
         Utterance::Silent(cause) => {
             report_silence("private", &cause, user_id);

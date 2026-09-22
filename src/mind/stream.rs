@@ -86,6 +86,14 @@ impl StreamEvent {
         });
         self
     }
+
+    pub fn with_recall(mut self, id: impl Into<String>, source: impl Into<String>) -> Self {
+        self.recall = Some(RecallMeta {
+            id: id.into(),
+            source: source.into(),
+        });
+        self
+    }
 }
 
 // ── 写入 ────────────────────────────────────────────────────────
