@@ -717,6 +717,14 @@ pub(crate) fn render_context_block(
         .collect();
     topics.sort_by(|a, b| b.intensity.total_cmp(&a.intensity));
 
+    if topics.len() >= 2 {
+        lines.push("群里有几条话题线同时在走，别把不同人的话揉成一条".to_string());
+    } else if topics.first().is_some_and(|topic| topic.intensity >= 0.6) {
+        lines.push("群里现在比较热，大家接话很快".to_string());
+    } else if !topics.is_empty() {
+        lines.push("群里这会儿不算吵，接话可以自然一点".to_string());
+    }
+
     for (i, t) in topics.iter().enumerate() {
         let names: Vec<String> = t
             .participants
