@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use tracing::{debug, warn};
 
 use super::embedding::l2_normalize;
+use crate::util::MutexExt;
 use sha1::Digest;
 
 // ── 文件格式 v2 ─────────────────────────────────────────────────
@@ -97,7 +98,7 @@ impl QuantParams {
 }
 
 /// 向量存储
-pub struct VectorStore {
+pub(crate) struct VectorStore {
     dim: usize,
     trained: bool,
     quant_params: Option<QuantParams>,
@@ -246,80 +247,6 @@ impl VectorStore {
         );
     }
 
-    /// 搜索 top_k 最相似向量（余弦相似度，未训练时使用）
-    fn search(&self, query: &[f32], top_k: usize) -> Vec<SearchResult> {
-        if self.raw_vectors.is_empty() || query.is_empty() {
-            return Vec::new();
-        }
-
-        let query_norm: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if query_norm < 1e-10 {
-            return Vec::new();
-        }
-
-        let mut results: Vec<SearchResult> = self
-            .raw_vectors
-            .iter()
-            .map(|(content, vec)| {
-                let dot: f32 = query.iter().zip(vec.iter()).map(|(a, b)| a * b).sum();
-                let score = (dot / query_norm) as f64;
-                SearchResult {
-                    content: content.clone(),
-                    score,
-                }
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        results.truncate(top_k);
-        results
-    }
-
-    /// 使用 SQ8 近似搜索（直接在量化空间计算，避免临时分配）
-    fn search_quantized(&self, query: &[f32], top_k: usize) -> Vec<SearchResult> {
-        let params = match &self.quant_params {
-            Some(p) => p,
-            None => return self.search(query, top_k),
-        };
-
-        if self.quantized_vectors.is_empty() || query.is_empty() {
-            return Vec::new();
-        }
-
-        // 量化查询向量（只量化一次）
-        let quantized_query = params.quantize(query);
-
-        // 直接在量化空间计算点积（近似但避免为每个向量 dequantize）
-        let mut results: Vec<SearchResult> = self
-            .quantized_vectors
-            .iter()
-            .map(|(content, qvec)| {
-                // 在 u8 空间直接计算点积，然后用量化参数缩放
-                let dot: u32 = quantized_query
-                    .iter()
-                    .zip(qvec.iter())
-                    .map(|(&a, &b)| a as u32 * b as u32)
-                    .sum();
-                SearchResult {
-                    content: content.clone(),
-                    score: dot as f64,
-                }
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        results.truncate(top_k);
-        results
-    }
-
     /// 移除向量
     fn remove(&mut self, content: &str) {
         if let Some(id) = self
@@ -332,22 +259,6 @@ impl VectorStore {
         self.raw_vectors.remove(content);
         self.quantized_vectors.remove(content);
     }
-
-    /// 返回数据量
-    fn len(&self) -> usize {
-        if self.trained {
-            self.quantized_vectors.len()
-        } else {
-            self.raw_vectors.len()
-        }
-    }
-}
-
-/// 搜索结果
-#[derive(Debug, Clone)]
-pub struct SearchResult {
-    pub content: String,
-    pub score: f64,
 }
 
 // ── 持久化 ──────────────────────────────────────────────────────
@@ -557,7 +468,9 @@ fn save_to_disk(store: &VectorStore) {
         }
     }
 
-    std::fs::write(&path, buf).ok();
+    if let Err(error) = crate::util::atomic_write(&path, buf) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 }
 
 // ── 全局单例 ────────────────────────────────────────────────────
@@ -565,8 +478,8 @@ fn save_to_disk(store: &VectorStore) {
 static STORE: Mutex<Option<VectorStore>> = Mutex::new(None);
 
 /// 初始化向量存储
-pub fn init() {
-    let mut guard = STORE.lock().unwrap();
+pub(crate) fn init() {
+    let mut guard = STORE.lock_recover();
     if guard.is_some() {
         return;
     }
@@ -607,9 +520,14 @@ pub fn init() {
 }
 
 /// 添加向量（content 作为唯一键）
-pub fn add_vector(content: &str, embedding: Vec<f32>) {
-    let mut guard = STORE.lock().unwrap();
-    let store = guard.as_mut().expect("vector_store not initialized");
+pub(crate) fn add_vector(content: &str, embedding: Vec<f32>) {
+    let mut guard = STORE.lock_recover();
+    let Some(store) = guard.as_mut() else {
+        // 向量库未初始化：丢一条向量比 panic 好——检索会退化成纯 BM25，
+        // 而 panic 会让整条回复路径消失（原先这里是 expect）
+        tracing::warn!("vector_store: 未初始化，丢弃向量写入");
+        return;
+    };
     store.add(content, embedding);
     // 每 BUFFER_SIZE 次写入刷新磁盘
     if store.write_buffer.len() >= BUFFER_SIZE || store.total_added.is_multiple_of(10) {
@@ -619,8 +537,8 @@ pub fn add_vector(content: &str, embedding: Vec<f32>) {
 }
 
 /// 按内容获取向量（训练后返回反量化向量）
-pub fn get_vector(content: &str) -> Option<Vec<f32>> {
-    let guard = STORE.lock().unwrap();
+pub(crate) fn get_vector(content: &str) -> Option<Vec<f32>> {
+    let guard = STORE.lock_recover();
     let store = guard.as_ref()?;
     if store.trained {
         // 训练后，从量化向量反量化
@@ -632,41 +550,13 @@ pub fn get_vector(content: &str) -> Option<Vec<f32>> {
     }
 }
 
-/// 搜索最相似向量
-pub fn search(query: &[f32], top_k: usize) -> Vec<SearchResult> {
-    let guard = STORE.lock().unwrap();
-    let store = guard.as_ref().expect("vector_store not initialized");
-    if store.trained {
-        store.search_quantized(query, top_k)
-    } else {
-        store.search(query, top_k)
-    }
-}
-
 /// 移除向量
-pub fn remove_vector(content: &str) {
-    let mut guard = STORE.lock().unwrap();
-    let store = guard.as_mut().expect("vector_store not initialized");
+pub(crate) fn remove_vector(content: &str) {
+    let mut guard = STORE.lock_recover();
+    let Some(store) = guard.as_mut() else {
+        tracing::debug!("vector_store: 未初始化，忽略删除请求");
+        return;
+    };
     store.remove(content);
     save_to_disk(store);
-}
-
-/// 向量总数
-pub fn count() -> usize {
-    let guard = STORE.lock().unwrap();
-    guard.as_ref().map_or(0, |s| s.len())
-}
-
-/// 是否已训练 SQ8
-pub fn is_trained() -> bool {
-    let guard = STORE.lock().unwrap();
-    guard.as_ref().is_some_and(|s| s.trained)
-}
-
-/// 强制刷新到磁盘
-pub fn flush() {
-    let guard = STORE.lock().unwrap();
-    if let Some(store) = guard.as_ref() {
-        save_to_disk(store);
-    }
 }

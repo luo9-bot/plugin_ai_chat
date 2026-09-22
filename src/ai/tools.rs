@@ -2,136 +2,8 @@ use super::types::{FunctionDef, Tool};
 
 // ── Function Call 工具定义 ────────────────────────────────────
 
-/// decide_reply: 判断是否回复群消息
-pub fn decide_reply_tool() -> Tool {
-    Tool {
-        tool_type: "function".to_string(),
-        function: FunctionDef {
-            name: "decide_reply".to_string(),
-            description: "判断是否回复群聊中的消息".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "reply": {
-                        "type": "boolean",
-                        "description": "是否回复"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "简短原因"
-                    }
-                },
-                "required": ["reply"]
-            }),
-        },
-    }
-}
-
-/// 批量决策：从多条消息中选择值得回复的用户
-pub fn batch_decide_tool() -> Tool {
-    Tool {
-        tool_type: "function".to_string(),
-        function: FunctionDef {
-            name: "batch_decide".to_string(),
-            description: "从群聊的多条消息中，选择最值得回复的用户".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "reply_to": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "user_id": { "type": "integer", "description": "要回复的用户ID" },
-                                "reason": { "type": "string", "description": "回复原因" }
-                            },
-                            "required": ["user_id"]
-                        },
-                        "description": "要回复的用户列表，按优先级排序。大部分情况应该为空或只包含1个用户"
-                    }
-                },
-                "required": ["reply_to"]
-            }),
-        },
-    }
-}
-
-/// post_analyze: 记忆提取 + 情绪分析 + 记忆纠错
-pub fn post_analyze_tool() -> Tool {
-    Tool {
-        tool_type: "function".to_string(),
-        function: FunctionDef {
-            name: "post_analyze".to_string(),
-            description: "分析对话，提取记忆、分析情绪、检测纠错".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "memories": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string", "description": "记忆内容" },
-                                "importance": { "type": "string", "enum": ["permanent", "important", "normal"], "description": "重要性" }
-                            },
-                            "required": ["content", "importance"]
-                        },
-                        "description": "值得长期记忆的信息"
-                    },
-                    "emotion": {
-                        "type": "string",
-                        "enum": ["neutral", "happy", "sad", "thinking", "surprised", "angry", "shy", "worried", "tired", "excited"],
-                        "description": "用户情绪状态"
-                    },
-                    "intensity": {
-                        "type": "number",
-                        "description": "情绪强度 0.0~1.0"
-                    },
-                    "corrections": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "old": { "type": "string", "description": "需要修正的旧记忆内容" },
-                                "new": { "type": "string", "description": "修正后的正确内容" },
-                                "target": { "type": "string", "enum": ["user", "self"], "description": "修正目标" }
-                            },
-                            "required": ["old", "new", "target"]
-                        },
-                        "description": "记忆纠错"
-                    },
-                    "concerns": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string", "description": "担忧内容" },
-                                "category": { "type": "string", "enum": ["social", "task", "emotional", "self"], "description": "担忧类别" }
-                            },
-                            "required": ["content", "category"]
-                        },
-                        "description": "从对话中产生的担忧，没有则为空数组"
-                    },
-                    "deliberations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string", "description": "考量内容" }
-                            },
-                            "required": ["content"]
-                        },
-                        "description": "从对话中积累的内部考量，没有则为空数组"
-                    }
-                },
-                "required": ["memories", "emotion", "intensity", "corrections"]
-            }),
-        },
-    }
-}
-
 /// memory_review: 记忆审查与整理
-pub fn memory_review_tool() -> Tool {
+pub(crate) fn memory_review_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -184,7 +56,7 @@ pub fn memory_review_tool() -> Tool {
 }
 
 /// 每日计划生成工具
-pub fn daily_plan_tool() -> Tool {
+pub(crate) fn daily_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -211,7 +83,7 @@ pub fn daily_plan_tool() -> Tool {
 ///
 /// 计划清单本身会随场景一起递给她（见 `voice::plan_block`），这个工具用于
 /// 她想再确认一遍、或清单被截断时按需查全。
-pub fn check_plan_tool() -> Tool {
+pub(crate) fn check_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -226,7 +98,7 @@ pub fn check_plan_tool() -> Tool {
 }
 
 /// 给自己加一件事（当日）
-pub fn add_plan_tool() -> Tool {
+pub(crate) fn add_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -244,7 +116,7 @@ pub fn add_plan_tool() -> Tool {
 }
 
 /// 记下自己做到了哪一步（不动完成状态）
-pub fn note_progress_tool() -> Tool {
+pub(crate) fn note_progress_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -267,7 +139,7 @@ pub fn note_progress_tool() -> Tool {
 ///
 /// 判断由她做：她不靠关键词匹配自己有没有做过，而是看完今天发生的事
 /// 之后自己落笔。id 由系统分配，所以"哪一件"没有歧义。
-pub fn finish_plan_tool() -> Tool {
+pub(crate) fn finish_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -288,7 +160,7 @@ pub fn finish_plan_tool() -> Tool {
 }
 
 /// 从对话中提取 bot 自己需要推进的真实事项。
-pub fn task_progress_tool() -> Tool {
+pub(crate) fn task_progress_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -318,7 +190,7 @@ pub fn task_progress_tool() -> Tool {
 }
 
 /// 周计划生成工具
-pub fn weekly_plan_tool() -> Tool {
+pub(crate) fn weekly_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {
@@ -347,7 +219,7 @@ pub fn weekly_plan_tool() -> Tool {
 }
 
 /// 月计划生成工具
-pub fn monthly_plan_tool() -> Tool {
+pub(crate) fn monthly_plan_tool() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionDef {

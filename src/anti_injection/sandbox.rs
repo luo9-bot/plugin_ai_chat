@@ -6,80 +6,28 @@ const GRAY_ZONE_LOW: f32 = 0.35;
 /// 灰区上限
 const GRAY_ZONE_HIGH: f32 = 0.75;
 
-/// Shadow Sandbox 决策
-#[derive(Debug, Clone)]
-pub struct SandboxDecision {
-    pub action: Action,
-    pub risk_level: f32,
-    pub explanation: Option<String>,
-}
-
 /// Shadow Sandbox：对灰区风险消息做精细处理
 ///
 /// 风险分 < 0.35: Allow
-/// 0.35 <= 风险分 < 0.75: Warn（灰区，注入 sanitized explanation）
+/// 0.35 <= 风险分 < 0.75: Warn（灰区）
 /// 风险分 >= 0.75: Block/Replace
-pub fn evaluate(score: &RiskScore, sensitive_action: &str) -> SandboxDecision {
+///
+/// 这里只返回处置动作。它曾经还带一个 `risk_level` 和一段"灰区解释"（"检测到
+/// 风险信号：可能包含指令注入"），但唯一的调用方
+/// （[`super::decision::determine_action`]）只取动作——那段解释既没进 prompt
+/// 也没进日志，只有它自己的单元测试读过。产出没人读的东西不是预留，是把
+/// "这里做过判断"伪装成事实，所以删掉；真要让运维看见，就在调用点重新长出来。
+pub(crate) fn evaluate(score: &RiskScore, sensitive_action: &str) -> Action {
     let risk = score.combined_risk();
 
     if risk < GRAY_ZONE_LOW {
-        SandboxDecision {
-            action: Action::Allow,
-            risk_level: risk,
-            explanation: None,
-        }
+        Action::Allow
     } else if risk < GRAY_ZONE_HIGH {
-        // 灰区：Warn + 注入解释
-        let explanation = build_gray_zone_explanation(score);
-        SandboxDecision {
-            action: Action::Warn,
-            risk_level: risk,
-            explanation: Some(explanation),
-        }
+        Action::Warn
+    } else if sensitive_action == "block" {
+        Action::Block
     } else {
-        // 高风险：Block 或 Replace
-        let action = if sensitive_action == "block" {
-            Action::Block
-        } else {
-            Action::Replace
-        };
-        SandboxDecision {
-            action,
-            risk_level: risk,
-            explanation: None,
-        }
-    }
-}
-
-/// 构建灰区解释
-fn build_gray_zone_explanation(score: &RiskScore) -> String {
-    let mut reasons = Vec::new();
-    if score.sexual > 0.3 {
-        reasons.push("可能包含不当内容");
-    }
-    if score.violence > 0.3 {
-        reasons.push("可能包含暴力内容");
-    }
-    if score.illegal > 0.3 {
-        reasons.push("可能包含违法内容");
-    }
-    if score.jailbreak > 0.3 {
-        reasons.push("可能包含指令注入");
-    }
-    if score.structured > 0.3 {
-        reasons.push("可能包含结构化攻击");
-    }
-    if score.prompt_leak > 0.3 {
-        reasons.push("可能尝试获取系统信息");
-    }
-    if score.emotional > 0.3 {
-        reasons.push("可能包含情感操控");
-    }
-
-    if reasons.is_empty() {
-        "消息内容需要进一步审查".to_string()
-    } else {
-        format!("检测到风险信号: {}", reasons.join("、"))
+        Action::Replace
     }
 }
 
@@ -91,9 +39,7 @@ mod tests {
     #[test]
     fn test_low_risk_allow() {
         let score = RiskScore::default();
-        let decision = evaluate(&score, "replace");
-        assert!(matches!(decision.action, Action::Allow));
-        assert!(decision.explanation.is_none());
+        assert!(matches!(evaluate(&score, "replace"), Action::Allow));
     }
 
     #[test]
@@ -107,9 +53,7 @@ mod tests {
             structured: 0.0,
             prompt_leak: 0.0,
         };
-        let decision = evaluate(&score, "replace");
-        assert!(matches!(decision.action, Action::Warn));
-        assert!(decision.explanation.is_some());
+        assert!(matches!(evaluate(&score, "replace"), Action::Warn));
     }
 
     #[test]
@@ -123,8 +67,7 @@ mod tests {
             structured: 0.0,
             prompt_leak: 0.0,
         };
-        let decision = evaluate(&score, "block");
-        assert!(matches!(decision.action, Action::Block));
+        assert!(matches!(evaluate(&score, "block"), Action::Block));
     }
 
     #[test]
@@ -138,8 +81,7 @@ mod tests {
             structured: 0.0,
             prompt_leak: 0.0,
         };
-        let decision = evaluate(&score, "replace");
-        assert!(matches!(decision.action, Action::Replace));
+        assert!(matches!(evaluate(&score, "replace"), Action::Replace));
     }
 
     #[test]
@@ -154,7 +96,6 @@ mod tests {
             prompt_leak: 0.0,
         };
         // 0.47 * 0.75 = 0.3525, should be in gray zone
-        let decision = evaluate(&score, "replace");
-        assert!(matches!(decision.action, Action::Warn));
+        assert!(matches!(evaluate(&score, "replace"), Action::Warn));
     }
 }

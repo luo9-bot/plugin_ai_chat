@@ -4,12 +4,19 @@
 //! 使用视觉模型（VLM）进行表情包选择和描述生成。
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, info, warn};
 
 use super::store::*;
 
+/// 内容过滤临时文件的序号
+///
+/// 原先是纳秒时间戳：同一 tick 内的两次调用可能拿到同一个名字而互相覆盖，
+/// 而且墙钟可被回拨。计数器不会重复，也不需要读时钟。
+static FILTRATION_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// 表情包选择结果
-pub struct StickerSelection {
+pub(crate) struct StickerSelection {
     pub hash: String,
     pub path: String,
     pub description: String,
@@ -21,7 +28,7 @@ pub struct StickerSelection {
 /// 注册表情包（从用户发送的图片）
 ///
 /// 流程：哈希去重 → 保存文件 → VLM 生成描述 → 原子注册
-pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
+pub(crate) fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
 
     // 去重检查（持锁）
@@ -38,7 +45,9 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     std::fs::create_dir_all(&dir).ok();
     let filename = format!("{}.{}", hash, format);
     let path = dir.join(&filename);
-    std::fs::write(&path, image_bytes).ok();
+    if let Err(error) = crate::util::atomic_write(&path, image_bytes) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 
     // 通过 VLM 生成描述和情绪标签
     let (description, emotions) = generate_description_with_vlm(&path);
@@ -70,7 +79,7 @@ pub fn register_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
 /// 区分方式：
 /// - sub_type=1 + summary=[动画表情] → 表情包，自动注册
 /// - sub_type=0 → 普通图片，跳过
-pub fn register_from_cq(cq_message: &str) -> Option<String> {
+pub(crate) fn register_from_cq(cq_message: &str) -> Option<String> {
     // 只处理表情包，跳过普通图片
     if !is_sticker_cq(cq_message) {
         debug!("sticker: not an sticker CQ code, skipping registration");
@@ -79,10 +88,8 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
-        // 下载图片
-        if let Ok(mut resp) = ureq::get(url).call()
-            && let Ok(bytes) = resp.body_mut().read_to_vec()
-        {
+        // 下载图片（超时由 util::http 统一强制，不在这里手工拼请求）
+        if let Ok(bytes) = crate::util::get_bytes(url) {
             let format = detect_format(&bytes);
 
             // 内容过滤
@@ -114,17 +121,12 @@ pub fn register_from_cq(cq_message: &str) -> Option<String> {
 /// 优先使用 stickers.json 中已持久化的描述，避免重复 VLM 调用。
 /// 与 register_from_cq 不同，此函数不执行内容过滤和完整注册，
 /// 仅用于 handler.rs 中为 AI 上下文提供图片描述。
-pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
+pub(crate) fn describe_sticker_cq(cq_message: &str) -> Option<String> {
     let urls = crate::vision::extract_image_urls(cq_message);
     for url in &urls {
         // 1. 下载文件
-        let resp = match ureq::get(url).call() {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let bytes = match resp.into_body().read_to_vec() {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(bytes) = crate::util::get_bytes(url) else {
+            continue;
         };
         let hash = compute_hash(&bytes);
 
@@ -152,7 +154,7 @@ pub fn describe_sticker_cq(cq_message: &str) -> Option<String> {
 /// 判断 CQ 码是否为表情包（而非普通图片）
 ///
 /// 表情包特征：sub_type=1，或 summary 包含 [动画表情]
-pub fn is_sticker_cq(cq_message: &str) -> bool {
+pub(crate) fn is_sticker_cq(cq_message: &str) -> bool {
     // sub_type=1 表示表情包
     if cq_message.contains("sub_type=1") {
         return true;
@@ -172,7 +174,10 @@ pub fn is_sticker_cq(cq_message: &str) -> bool {
 /// 2. 加载图片
 /// 3. 发送给 VLM 让它选择
 /// 4. 解析选择结果
-pub fn select_sticker_vlm(context: &str, exclude_hashes: &[String]) -> Option<StickerSelection> {
+pub(crate) fn select_sticker_vlm(
+    context: &str,
+    exclude_hashes: &[String],
+) -> Option<StickerSelection> {
     let store = load_store();
     let candidates: Vec<&StickerEntry> = store
         .stickers
@@ -292,21 +297,27 @@ fn content_filtration(image_bytes: &[u8], format: &str) -> bool {
         return true;
     }
 
-    // 保存临时文件
-    let temp_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("data")
-        .join("plugin_ai_chat")
-        .join("temp");
-    std::fs::create_dir_all(&temp_dir).ok();
+    // 保存临时文件（VLM 需要一个路径而不是字节）
+    //
+    // 目录必须来自 `config::data_dir()`：原先这里自己拼 `current_dir()/data/
+    // plugin_ai_chat/temp`，等于绕开了数据目录的唯一来源——工作目录一变就写到
+    // 别处，测试也会污染真实目录。
+    let temp_dir = crate::config::data_dir().join("temp");
+    if let Err(error) = std::fs::create_dir_all(&temp_dir) {
+        warn!(error = %error, dir = ?temp_dir, "sticker: 临时目录创建失败，跳过内容过滤");
+        return false;
+    }
 
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let tmp_path = temp_dir.join(format!("sticker_filtration_{}.{}", timestamp, format));
+    let seq = FILTRATION_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = temp_dir.join(format!("sticker_filtration_{seq}.{format}"));
     debug!("文件写入路径: {:?}", tmp_path);
-    std::fs::write(&tmp_path, image_bytes).ok();
+
+    // 写不进去就没法过滤。与"VLM 调用失败"同样按保守处理（拒绝），
+    // 而不是带着一个不存在的路径继续往下走
+    if let Err(error) = std::fs::write(&tmp_path, image_bytes) {
+        warn!(error = %error, path = ?tmp_path, "sticker: 临时文件写入失败，跳过内容过滤");
+        return false;
+    }
 
     let prompt = if format == "gif" {
         format!(
@@ -389,9 +400,14 @@ fn select_with_vlm(image_paths: &[String], context: &str) -> Option<(usize, Stri
         "max_output_tokens": 256
     });
 
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-
-    let result = call_vlm_api(&url, &cfg.vision.api_key, &request_body);
+    let result =
+        match crate::vision::call_vlm(&cfg.vision.base_url, &cfg.vision.api_key, &request_body) {
+            Ok(response) => Some(response),
+            Err(error) => {
+                debug!(error = %error, "sticker: VLM 选择调用失败");
+                None
+            }
+        };
 
     match result {
         Some(response) => {
@@ -597,63 +613,19 @@ fn call_vlm_with_image(image_path: &std::path::Path, prompt: &str) -> Option<Str
         "max_output_tokens": cfg.vision.max_tokens
     });
 
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-    call_vlm_api(&url, &cfg.vision.api_key, &request_body)
-}
-
-/// 通用 VLM API 调用
-fn call_vlm_api(url: &str, api_key: &str, body: &serde_json::Value) -> Option<String> {
-    let json_body = serde_json::to_string(body).ok()?;
-
-    let mut resp = ureq::post(url)
-        .header("Authorization", &format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-        .ok()?;
-
-    let resp_str = resp.body_mut().read_to_string().ok()?;
-
-    // 解析响应
-    serde_json::from_str::<serde_json::Value>(&resp_str)
-        .ok()
-        .and_then(|v| {
-            // responses 格式
-            v.get("output")
-                .and_then(|o| o.as_array())
-                .and_then(|output| {
-                    output.iter().find_map(|item| {
-                        item.get("content")
-                            .and_then(|c| c.as_array())
-                            .and_then(|contents| {
-                                contents.iter().find_map(|content| {
-                                    content
-                                        .get("text")
-                                        .and_then(|t| t.as_str())
-                                        .map(|s| s.to_string())
-                                })
-                            })
-                    })
-                })
-                // chat completions 格式
-                .or_else(|| {
-                    v.get("choices")
-                        .and_then(|c| c.as_array())
-                        .and_then(|choices| {
-                            choices.first().and_then(|c| {
-                                c.get("message")
-                                    .and_then(|m| m.get("content"))
-                                    .and_then(|c| c.as_str())
-                                    .map(|s| s.to_string())
-                            })
-                        })
-                })
-        })
+    match crate::vision::call_vlm(&cfg.vision.base_url, &cfg.vision.api_key, &request_body) {
+        Ok(text) => Some(text),
+        Err(error) => {
+            debug!(error = %error, "sticker: VLM 描述调用失败");
+            None
+        }
+    }
 }
 
 // ── 工具函数 ────────────────────────────────────────────────────
 
 /// 更新表情包使用次数
-pub fn update_usage(hash: &str) {
+pub(crate) fn update_usage(hash: &str) {
     let mut store = load_store();
     if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
         entry.query_count += 1;
@@ -662,23 +634,8 @@ pub fn update_usage(hash: &str) {
     }
 }
 
-/// 获取表情包文件路径
-pub fn get_sticker_path(hash: &str) -> Option<String> {
-    let store = load_store();
-    store
-        .stickers
-        .iter()
-        .find(|e| e.hash == hash && e.is_registered && !e.is_banned)
-        .map(|e| {
-            crate::config::data_dir()
-                .join(&e.path)
-                .to_string_lossy()
-                .to_string()
-        })
-}
-
 /// 获取表情包统计
-pub fn get_stats() -> (usize, usize) {
+pub(crate) fn get_stats() -> (usize, usize) {
     let store = load_store();
     let total = store.stickers.len();
     let registered = store
@@ -690,7 +647,7 @@ pub fn get_stats() -> (usize, usize) {
 }
 
 /// 维护：清理无效条目
-pub fn maintenance() {
+pub(crate) fn maintenance() {
     let mut store = load_store();
     let data_dir = crate::config::data_dir();
     let before = store.stickers.len();
@@ -807,7 +764,7 @@ fn detect_format(bytes: &[u8]) -> String {
 /// 注册内置表情包（ne_sticker），跳过内容审查
 ///
 /// 内置表情已经过用户人工筛选，不经过 VLM 内容过滤。
-pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
+pub(crate) fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<String> {
     let hash = compute_hash(image_bytes);
 
     // 去重检查
@@ -824,7 +781,9 @@ pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<Stri
     std::fs::create_dir_all(&dir).ok();
     let filename = format!("{}.{}", hash, format);
     let path = dir.join(&filename);
-    std::fs::write(&path, image_bytes).ok();
+    if let Err(error) = crate::util::atomic_write(&path, image_bytes) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 
     let (description, emotions) = generate_description_with_vlm(&path);
 
@@ -852,7 +811,7 @@ pub fn register_builtin_sticker(image_bytes: &[u8], format: &str) -> Option<Stri
 ///
 /// 已注册过的文件通过路径比对跳过，不读文件、不计算哈希。
 /// 在插件启动时自动调用。
-pub fn init_ne_stickers() {
+pub(crate) fn init_ne_stickers() {
     let dir = super::store::builtin_sticker_dir();
     if !dir.exists() {
         std::fs::create_dir_all(&dir).ok();
@@ -938,7 +897,7 @@ pub fn init_ne_stickers() {
 /// 扫描 sticker/ 目录，自动注册未入库的表情包（steal_emoji）
 ///
 /// 只处理那些文件存在但尚未注册的表情包图片。
-pub fn steal_emoji_scan() -> usize {
+pub(crate) fn steal_emoji_scan() -> usize {
     let dir = super::store::sticker_dir();
     if !dir.exists() {
         return 0;
@@ -1025,7 +984,9 @@ fn register_sticker_from_path(
     let target = dir.join(&filename);
     if !target.exists() {
         std::fs::create_dir_all(&dir).ok();
-        std::fs::write(&target, bytes).ok();
+        if let Err(error) = crate::util::atomic_write(&target, bytes) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
     }
 
     let entry = StickerEntry {
@@ -1051,7 +1012,7 @@ fn register_sticker_from_path(
 ///
 /// 当注册的非内置表情包超过 max_reg_num 时，
 /// 按使用次数升序 + 最后使用时间升序排序，淘汰超额的条目。
-pub fn do_replace_eviction(max_reg_num: usize) -> usize {
+pub(crate) fn do_replace_eviction(max_reg_num: usize) -> usize {
     let mut store = load_store();
     let data_dir = crate::config::data_dir();
 

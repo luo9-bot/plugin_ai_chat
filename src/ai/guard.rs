@@ -12,7 +12,7 @@
 /// 守门必须知道她能调用的每一个工具名，否则模型把没列进本次
 /// 请求的工具名写成文字时就会漏网。这里是唯一权威清单：新增工具
 /// 时同步补充，不必回查各处工具定义。
-pub const ALL_TOOL_NAMES: &[&str] = &[
+pub(crate) const ALL_TOOL_NAMES: &[&str] = &[
     // 表达 / 回神决策
     "say",
     "finish",
@@ -73,7 +73,7 @@ fn is_cjk(ch: char) -> bool {
 /// 后三种是真实日志里泄漏过的形态：模型一边想调用工具、一边把
 /// 理由写成了正文。只要工具名出现在句首且紧跟正文，就认定整条
 /// 不可信——宁可这轮沉默，也不能把内部语法发到群里。
-pub fn detect_leaked_tool_call<'n>(text: &str, tool_names: &[&'n str]) -> Option<&'n str> {
+pub(crate) fn detect_leaked_tool_call<'n>(text: &str, tool_names: &[&'n str]) -> Option<&'n str> {
     let text = text.trim();
     if text.is_empty() {
         return None;
@@ -130,7 +130,7 @@ pub fn detect_leaked_tool_call<'n>(text: &str, tool_names: &[&'n str]) -> Option
 /// 另一种形态是意识流渲染的 `[15:16] 内容`（无名字、无引号）——
 /// 她的内心活动也是这样出现在"最近的经历"里的。复读它等于把
 /// 内心独白当发言说出来，同样不该外发。
-pub fn is_transcribed_echo(text: &str) -> bool {
+pub(crate) fn is_transcribed_echo(text: &str) -> bool {
     let text = text.trim();
     if let Some(rest) = leading_timestamp_echo(text) {
         return rest;

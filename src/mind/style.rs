@@ -18,13 +18,13 @@ use crate::config;
 // ── 权重模型 ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-pub struct HeadDef {
+pub(crate) struct HeadDef {
     pub name: String,
     pub classes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct StyleNet {
+pub(crate) struct StyleNet {
     pub feature_dim: usize,
     pub hidden: usize,
     pub heads: Vec<HeadDef>,
@@ -35,7 +35,7 @@ pub struct StyleNet {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct StyleCorpus {
+pub(crate) struct StyleCorpus {
     pub patterns: Vec<String>,
     pub catchphrases: Vec<serde_json::Value>,
 }
@@ -133,7 +133,7 @@ fn style_dir() -> std::path::PathBuf {
 }
 
 /// 这一番的手感语块（voice 的 user_content 追加项）
-pub fn context_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
+pub(crate) fn context_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
     let nn_path = style_dir().join(format!("{group_id}.nn.json"));
     let Ok(nn_text) = std::fs::read_to_string(&nn_path) else {
         return None;

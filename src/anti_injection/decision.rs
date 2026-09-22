@@ -4,26 +4,21 @@ use crate::config::AntiInjectionConfig;
 
 /// 检测到的安全问题
 #[derive(Debug, Clone, PartialEq)]
-pub enum SecurityIssue {
+pub(crate) enum SecurityIssue {
     Sexual,
     Violence,
     Illegal,
-    RoleplayInjection,
     EmotionalManipulation,
-    InjectionOverride,
-    InjectionRoleSwitch,
     InjectionPromptLeak,
-    InjectionEncoding,
     InjectionJailbreak,
     RateLimitExceeded,
     LowReputation,
-    AiReviewFlagged,
     StructuredInjection,
 }
 
 /// 处置动作
 #[derive(Debug, Clone, PartialEq)]
-pub enum Action {
+pub(crate) enum Action {
     Allow,
     Warn,
     Replace,
@@ -36,7 +31,7 @@ pub enum Action {
 
 /// 检测结果
 #[derive(Debug, Clone)]
-pub struct DetectionResult {
+pub(crate) struct DetectionResult {
     pub passed: bool,
     pub issues: Vec<SecurityIssue>,
     pub action: Action,
@@ -44,7 +39,7 @@ pub struct DetectionResult {
 }
 
 /// 从 RiskScore 生成 SecurityIssue 列表
-pub fn score_to_issues(score: &RiskScore) -> Vec<SecurityIssue> {
+pub(crate) fn score_to_issues(score: &RiskScore) -> Vec<SecurityIssue> {
     let mut issues = Vec::new();
     if score.sexual >= 0.60 {
         issues.push(SecurityIssue::Sexual);
@@ -71,23 +66,18 @@ pub fn score_to_issues(score: &RiskScore) -> Vec<SecurityIssue> {
 }
 
 /// 计算违规严重度
-pub fn calculate_severity(issues: &[SecurityIssue]) -> f32 {
+pub(crate) fn calculate_severity(issues: &[SecurityIssue]) -> f32 {
     let mut severity = 0.0;
     for issue in issues {
         severity += match issue {
             SecurityIssue::Sexual => 3.0,
             SecurityIssue::Violence => 2.5,
             SecurityIssue::Illegal => 2.5,
-            SecurityIssue::RoleplayInjection => 1.5,
             SecurityIssue::EmotionalManipulation => 1.0,
-            SecurityIssue::InjectionOverride => 4.0,
-            SecurityIssue::InjectionRoleSwitch => 3.5,
             SecurityIssue::InjectionPromptLeak => 3.0,
-            SecurityIssue::InjectionEncoding => 2.0,
             SecurityIssue::InjectionJailbreak => 4.0,
             SecurityIssue::RateLimitExceeded => 0.5,
             SecurityIssue::LowReputation => 1.0,
-            SecurityIssue::AiReviewFlagged => 3.0,
             SecurityIssue::StructuredInjection => 3.5,
         };
     }
@@ -95,7 +85,7 @@ pub fn calculate_severity(issues: &[SecurityIssue]) -> f32 {
 }
 
 /// 确定处置动作
-pub fn determine_action(score: &RiskScore, config: &AntiInjectionConfig) -> Action {
+pub(crate) fn determine_action(score: &RiskScore, config: &AntiInjectionConfig) -> Action {
     // 结构化注入和越狱：强拦截
     if score.jailbreak >= 0.40 || score.structured >= 0.50 {
         return Action::Block;
@@ -108,12 +98,11 @@ pub fn determine_action(score: &RiskScore, config: &AntiInjectionConfig) -> Acti
         };
     }
     // 使用 Shadow Sandbox 做精细决策
-    let sandbox_decision = sandbox::evaluate(score, &config.input.sensitive_action);
-    sandbox_decision.action
+    sandbox::evaluate(score, &config.input.sensitive_action)
 }
 
 /// 生成替换消息
-pub fn get_sanitized_message(action: &Action) -> Option<String> {
+pub(crate) fn get_sanitized_message(action: &Action) -> Option<String> {
     match action {
         Action::Replace => Some("".to_string()),
         Action::SilentBan => Some("".to_string()),

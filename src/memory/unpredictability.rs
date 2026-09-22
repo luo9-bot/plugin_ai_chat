@@ -11,7 +11,7 @@ use crate::config;
 
 /// 不可预测性引擎状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnpredictabilityState {
+pub(crate) struct UnpredictabilityState {
     /// 心血来潮概率
     pub whim_probability: f32,
     /// 观点漂移率
@@ -28,7 +28,7 @@ pub struct UnpredictabilityState {
 
 /// 观点漂移记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpinionDrift {
+pub(crate) struct OpinionDrift {
     /// 话题
     pub topic: String,
     /// 旧立场
@@ -72,15 +72,17 @@ fn load_state() -> UnpredictabilityState {
 
 fn save_state(state: &UnpredictabilityState) {
     let path = state_path();
-    if let Ok(json) = serde_json::to_string_pretty(state) {
-        fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(state)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
 /// 每日遗忘扫描
 ///
 /// 随机标记低重要性记忆为"模糊"（不是删除，检索时降权）
-pub fn run_forgetting_scan() {
+pub(crate) fn run_forgetting_scan() {
     let cfg = config::get();
     if !cfg.humanity.unpredictability_enabled {
         return;
@@ -135,61 +137,4 @@ pub fn run_forgetting_scan() {
         forgotten_count,
         "unpredictability: forgetting scan completed"
     );
-}
-
-/// 检查是否应该触发联想跳跃
-///
-/// 对话中有概率突然联想到不直接相关但有记忆关联的话题
-pub fn should_association_jump() -> bool {
-    let cfg = config::get();
-    if !cfg.humanity.unpredictability_enabled {
-        return false;
-    }
-    let state = load_state();
-    fastrand::f32() < state.association_jump_probability
-}
-
-/// 记录观点漂移
-///
-/// 每次生成回复后，检查是否暗示了与现有偏好矛盾的倾向
-pub fn record_opinion_drift(topic: &str, old_stance: &str, new_stance: &str, reason: Option<&str>) {
-    let cfg = config::get();
-    if !cfg.humanity.unpredictability_enabled {
-        return;
-    }
-
-    let mut state = load_state();
-    if fastrand::f32() >= state.opinion_drift_rate {
-        return;
-    }
-
-    state.opinion_drifts.push(OpinionDrift {
-        topic: topic.to_string(),
-        old_stance: old_stance.to_string(),
-        new_stance: new_stance.to_string(),
-        drift_strength: fastrand::f32() * 0.3 + 0.1,
-        reason: reason.map(|s| s.to_string()),
-        created_at: crate::util::now_secs(),
-    });
-
-    // 保留最近20条
-    if state.opinion_drifts.len() > 20 {
-        state.opinion_drifts.remove(0);
-    }
-
-    save_state(&state);
-    debug!(
-        topic,
-        old_stance, new_stance, "unpredictability: opinion drift recorded"
-    );
-}
-
-/// 心血来潮检查
-pub fn should_whim() -> bool {
-    let cfg = config::get();
-    if !cfg.humanity.unpredictability_enabled {
-        return false;
-    }
-    let state = load_state();
-    fastrand::f32() < state.whim_probability
 }

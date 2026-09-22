@@ -1,13 +1,13 @@
 //! 消息分段处理：规范化分隔符、分割消息
 
 /// 消息分段分隔符
-pub const SEGMENT_SEP: &str = "|^|";
+pub(crate) const SEGMENT_SEP: &str = "|^|";
 
 /// 单次发送最多拆分的消息条数：真人连发一般不会超过 3~4 条
 const MAX_SEGMENT_COUNT: usize = 4;
 
 /// 规范化消息分段分隔符：将 AI 生成的不完整 "|^" 或 "^|" 补全为 "|^|"
-pub fn normalize_segment_sep(reply: &str) -> String {
+pub(crate) fn normalize_segment_sep(reply: &str) -> String {
     let mut normalized = reply.replace("\r\n", "\n");
     while normalized.contains("\n\n") {
         normalized = normalized.replace("\n\n", "\n");
@@ -59,7 +59,7 @@ pub fn normalize_segment_sep(reply: &str) -> String {
 ///
 /// 所有 AI 生成的消息发送前都应经过此函数。
 /// 不改动她的文字本身——空格是自然的停顿，语气由她自己控制。
-pub fn clean_reply(reply: &str) -> String {
+pub(crate) fn clean_reply(reply: &str) -> String {
     // 1. 移除自记忆分类标签 [经历] [反思] [计划] [感受]
     const SELF_TAGS: &[&str] = &["[经历]", "[反思]", "[计划]", "[感受]"];
     let mut result = reply.to_string();
@@ -75,7 +75,7 @@ pub fn clean_reply(reply: &str) -> String {
 }
 
 /// 将已规范化的消息按 `|^|` 和换行分割为最终发送片段
-pub fn split_segments(normalized_reply: &str) -> Vec<String> {
+pub(crate) fn split_segments(normalized_reply: &str) -> Vec<String> {
     let mut segments: Vec<String> = if normalized_reply.contains(SEGMENT_SEP) {
         normalized_reply
             .split(SEGMENT_SEP)

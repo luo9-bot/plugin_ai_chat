@@ -2,21 +2,19 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing::{debug, warn};
 
 /// 全局 PromptManager 单例
 static PROMPTS: OnceLock<PromptManager> = OnceLock::new();
 
-pub struct PromptManager {
+pub(crate) struct PromptManager {
     templates: HashMap<String, String>,
-    data_dir: PathBuf,
 }
 
 impl PromptManager {
     /// 初始化：扫描 prompts/ 目录，加载所有 .prompt 和 .txt 文件
-    pub fn init(data_dir: &Path) {
+    pub(crate) fn init(data_dir: &Path) {
         let prompts_dir = data_dir.join("prompts");
         std::fs::create_dir_all(&prompts_dir).ok();
 
@@ -44,26 +42,29 @@ impl PromptManager {
         // 内置默认 prompt：如果文件不存在则从编译时嵌入的内容生成
         Self::ensure_defaults(&prompts_dir, &mut templates);
 
-        let _ = PROMPTS.set(PromptManager {
-            templates,
-            data_dir: data_dir.to_path_buf(),
-        });
-        debug!(
-            count = PROMPTS.get().unwrap().templates.len(),
-            "prompt: manager initialized"
-        );
+        let count = templates.len();
+        let _ = PROMPTS.set(PromptManager { templates });
+        debug!(count, "prompt: manager initialized");
     }
 
-    /// 获取全局实例（未初始化时 panic）
-    pub fn get() -> &'static PromptManager {
-        PROMPTS.get().expect("PromptManager not initialized")
+    /// 获取全局实例
+    ///
+    /// 未初始化时惰性建一个空管理器，而不是 panic：prompt 缺失应当表现为
+    /// "这一层没有内容"，不该让整条回复路径消失。
+    pub(crate) fn get() -> &'static PromptManager {
+        PROMPTS.get_or_init(|| {
+            tracing::warn!("prompt: 未初始化即被访问，使用空管理器（prompt 内容为空）");
+            PromptManager {
+                templates: HashMap::new(),
+            }
+        })
     }
 
     /// 获取 prompt 模板并替换占位符
     ///
     /// 占位符格式：`{key}`，从 `vars` 映射中查找替换。
     /// 无匹配的占位符保持原样。
-    pub fn render(&self, name: &str, vars: &HashMap<&str, &str>) -> String {
+    pub(crate) fn render(&self, name: &str, vars: &HashMap<&str, &str>) -> String {
         let template = match self.templates.get(name) {
             Some(t) => t.as_str(),
             None => {
@@ -79,7 +80,7 @@ impl PromptManager {
     }
 
     /// 获取原始模板（不替换占位符）
-    pub fn raw(&self, name: &str) -> &str {
+    pub(crate) fn raw(&self, name: &str) -> &str {
         self.templates
             .get(name)
             .map(|s| s.as_str())
@@ -87,28 +88,6 @@ impl PromptManager {
                 warn!(name, "prompt: template not found for raw()");
                 ""
             })
-    }
-
-    /// 热重载指定 prompt（供 admin API 使用）
-    pub fn reload(&mut self, name: &str) -> Result<(), String> {
-        let dir = self.data_dir.join("prompts");
-        // 尝试 .prompt 和 .txt 两种扩展名
-        for ext in &["prompt", "txt"] {
-            let path = dir.join(format!("{}.{}", name, ext));
-            if path.exists() {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("read {}: {}", path.display(), e))?;
-                self.templates.insert(name.to_string(), content);
-                debug!(name, "prompt: reloaded");
-                return Ok(());
-            }
-        }
-        Err(format!("prompt file not found: {}", name))
-    }
-
-    /// 列出所有已加载的 prompt 名称
-    pub fn list(&self) -> Vec<&str> {
-        self.templates.keys().map(|s| s.as_str()).collect()
     }
 
     /// 内置默认 prompt：文件不存在时写入；存在时判断能否随版本升级刷新
@@ -131,13 +110,17 @@ impl PromptManager {
 
             match on_disk {
                 None => {
-                    std::fs::write(&path, current).ok();
+                    if let Err(error) = crate::util::atomic_write(&path, current) {
+                        tracing::warn!(error = %error, "写盘失败");
+                    }
                     templates.insert(name.to_string(), current.to_string());
                 }
                 Some(content) => {
                     let decision = decide_default(&content, current, &previous);
                     if decision.writes_file() {
-                        std::fs::write(&path, current).ok();
+                        if let Err(error) = crate::util::atomic_write(&path, current) {
+                            tracing::warn!(error = %error, "写盘失败");
+                        }
                         if decision == DefaultDecision::Upgrade {
                             tracing::info!(name, "prompt: 内置模板已升级到当前版本");
                         }

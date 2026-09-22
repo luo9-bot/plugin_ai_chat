@@ -91,7 +91,7 @@ where
 }
 
 /// 归档一条群友消息（防注入放行的才进库）
-pub fn record_message(group_id: u64, user_id: u64, user_name: &str, content: &str) {
+pub(crate) fn record_message(group_id: u64, user_id: u64, user_name: &str, content: &str) {
     let ts = util::now_secs();
     let day = util::ts_to_date_str(ts);
     let stored = with_conn(group_id, "messages", SCHEMA_MESSAGES, |conn| {
@@ -111,7 +111,7 @@ pub fn record_message(group_id: u64, user_id: u64, user_name: &str, content: &st
 /// 归档一条她的回复（与触发消息配对——训练监督信号的形状）
 ///
 /// 返回新行 id，供回复效果追踪把 reward 精确写回这一行。
-pub fn record_reply(
+pub(crate) fn record_reply(
     group_id: u64,
     user_id: u64,
     trigger_content: &str,
@@ -144,7 +144,7 @@ pub fn record_reply(
 
 /// 把回复效果（ASI 0~100 → reward 0~1）写回对应归档行——
 /// 强化训练的样本权重来源："获得互动的回复"概率上升
-pub fn set_reward(group_id: u64, reply_id: i64, reward: f32) {
+pub(crate) fn set_reward(group_id: u64, reply_id: i64, reward: f32) {
     let reward = reward.clamp(0.0, 1.0);
     let stored = with_conn(group_id, "replies", SCHEMA_REPLIES, |conn| {
         Some(
@@ -158,35 +158,6 @@ pub fn set_reward(group_id: u64, reply_id: i64, reward: f32) {
     if stored != Some(true) {
         warn!(group_id, reply_id, "archive: reward 写回失败");
     }
-}
-
-/// 归档统计（admin 用）：各群已归档的消息/回复条数
-pub fn stats() -> Vec<(u64, u64, u64)> {
-    let dir = config::data_dir().join("mind").join("archive");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let gid: u64 = entry.file_name().to_str()?.parse().ok()?;
-            let count = |db: &str, table: &str| -> u64 {
-                let path = dir.join(gid.to_string()).join(format!("{db}.db"));
-                let Ok(conn) = Connection::open(&path) else {
-                    return 0;
-                };
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap_or(0) as u64
-            };
-            Some((
-                gid,
-                count("messages", "messages"),
-                count("replies", "replies"),
-            ))
-        })
-        .collect()
 }
 
 #[cfg(test)]

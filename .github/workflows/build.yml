@@ -32,6 +32,20 @@ jobs:
           key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-cargo-
 
+      - name: 安装 Node 工具链
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # 前端产物不入版本控制（frontend/dist/ 被 gitignore），而 src/admin/ui.rs
+      # 用 include_str! 引用它，build.rs 会在缺失时执行 npm run build——所以
+      # CI 必须先装好前端依赖，否则 vite: not found 会让整个构建失败。
+      - name: 安装前端依赖
+        run: npm ci
+        working-directory: frontend
+
       - name: 构建 Release
         run: cargo build --release
 
@@ -61,6 +75,17 @@ jobs:
             target
           key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: windows-cargo-
+
+      - name: 安装 Node 工具链
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装前端依赖
+        run: npm ci
+        working-directory: frontend
 
       - name: 构建 Release
         run: cargo build --release

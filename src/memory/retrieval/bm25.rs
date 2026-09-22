@@ -9,7 +9,7 @@ const K1: f64 = 1.5;
 const B: f64 = 0.75;
 
 /// BM25 检索结果
-pub struct Bm25Result {
+pub(crate) struct Bm25Result {
     pub id: String,
     pub score: f64,
     /// 匹配到的 token 数量（预留用于调试和分析）
@@ -17,7 +17,7 @@ pub struct Bm25Result {
 }
 
 /// BM25 搜索
-pub fn search(
+pub(crate) fn search(
     query: &str,
     documents: &[(String, String)], // (id, content)
     top_k: usize,

@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
+use crate::util::MutexExt;
 use crate::voice::{self, GroupUtterance, VoiceAction};
 use crate::{ProcessingGuard, config, processing_users, read_shared_state, with_shared_state};
 
@@ -182,21 +183,11 @@ fn resolve_name(qq: u64, group_id: u64) -> Option<String> {
 /// `[CQ:markdown,…]` 这类富文本此前完全没被处理过，一坨几百字符的
 /// 原始 markup（HTML 转义、`mqqapi://` 链接、图片链接、代码块）直接进了
 /// 她的 prompt——她正是在这种消息里"看不清谁 @ 了谁"。
-fn perceive_batch_message(
-    group_id: u64,
-    user_id: u64,
-    message: &str,
-    record_timestamps: &[u64],
-) -> String {
+fn perceive_batch_message(group_id: u64, user_id: u64, message: &str, entry_ids: &[u64]) -> String {
     let (descriptions, text_only) = perceive_images(user_id, message);
     if !descriptions.is_empty() && group_id > 0 {
         // 用精确时间戳把工作记忆中的 [图片] 替换为实际描述
-        crate::working_memory::update_image_content(
-            group_id,
-            user_id,
-            &descriptions,
-            record_timestamps,
-        );
+        crate::working_memory::update_image_content(group_id, user_id, &descriptions, entry_ids);
     }
     // 表情包是语气不是信息：只有普通图片才沉淀记忆
     if !crate::sticker::is_sticker_cq(message) {
@@ -211,10 +202,10 @@ fn perceive_batch_message(
 // ── 私聊 ────────────────────────────────────────────────────────
 
 /// 私聊消息处理：感知 → 表达 → 落地
-pub fn process_message(user_id: u64, message: &str) {
+pub(crate) fn process_message(user_id: u64, message: &str) {
     // 标记用户为处理中，防止并发处理同一用户的消息
     {
-        let mut processing = processing_users().lock().unwrap();
+        let mut processing = processing_users().lock_recover();
         if processing.contains(&(0, user_id)) {
             info!(user_id, "process_message: 用户消息正在处理中，跳过");
             return;
@@ -263,13 +254,16 @@ pub fn process_message(user_id: u64, message: &str) {
     // 联想：她能想起什么（转述入流，成为她的经历）
     let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&ai_message, user_id, 0) {
-        let mut event =
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line.clone())
-                .with_about(user_id);
+        let mut event = crate::mind::StreamEvent::new(
+            crate::mind::StreamKind::Sensation,
+            line.clone(),
+        )
+        .with_about(user_id);
         if let Some(source) = crate::mind::recall::source_for(&line) {
-            let id = crate::mind::recall::recall_id(user_id, 0, &line);
-            recall_ids.push(id.clone());
-            event = event.with_recall(id, source);
+            event = event.with_recall(
+                crate::mind::recall::recall_id(user_id, 0, &line),
+                source,
+            );
         }
         crate::mind::stream::push(event);
     }
@@ -379,7 +373,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
 /// 结构化而不是元组：字段多了以后 `(u64, String, Vec<u64>, Vec<u64>)`
 /// 在调用点完全读不出含义，传参顺序写错编译器也帮不上忙。
 #[derive(Debug, Clone)]
-pub struct GroupBatch {
+pub(crate) struct GroupBatch {
     /// 群号（私聊为 0）
     pub group_id: u64,
     pub user_id: u64,
@@ -389,12 +383,12 @@ pub struct GroupBatch {
 
 impl GroupBatch {
     /// 这批消息最早到达的时刻（秒）
-    pub fn first_arrival(&self) -> u64 {
+    pub(crate) fn first_arrival(&self) -> u64 {
         self.taken.first_arrival()
     }
 
     /// 排序用的到达时刻（毫秒）
-    pub fn sort_key_ms(&self) -> u64 {
+    pub(crate) fn sort_key_ms(&self) -> u64 {
         self.taken.sort_key_ms()
     }
 }
@@ -425,7 +419,7 @@ fn record_group_history(group_id: u64, utterances: &[GroupUtterance], max_histor
 }
 
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
-pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
+pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
     let self_qq = cfg.self_qq;
 
@@ -436,7 +430,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     for batch in user_msgs {
         let user_id = &batch.user_id;
         let messages = &batch.taken.messages;
-        let timestamps = &batch.taken.record_timestamps;
+        let timestamps = &batch.taken.entry_ids;
         let mut level = crate::emotion::get_state(*user_id).crisis_level;
         if !level.is_crisis()
             && crate::crisis::detect_crisis(messages).is_crisis()
@@ -451,6 +445,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
             crisis_utterances.push(GroupUtterance {
                 user_id: *user_id,
                 text: perceived,
+                // @ 必须从原始文本取：perceive 已把 CQ 码还原成人名
                 at_targets: crate::conversation::turn::at_targets(messages),
                 ts: batch.first_arrival(),
                 ts_ms: batch.sort_key_ms(),
@@ -535,8 +530,9 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
                 group_id,
                 batch.user_id,
                 &batch.taken.messages,
-                &batch.taken.record_timestamps,
+                &batch.taken.entry_ids,
             ),
+            // @ 的判定必须走原始文本，归一化后 parse 不出 `[CQ:at,qq=…]`
             at_targets: crate::conversation::turn::at_targets(&batch.taken.messages),
             // 用真实到达时刻排序：工作记忆时间戳只有秒级精度，
             // 同一秒内两个人的话谁先谁后会退化成哈希顺序
@@ -545,6 +541,22 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
         })
         .collect();
     record_group_history(group_id, &utterances, cfg.conversation.max_history);
+
+    // 群级现场在沉默冷却和表达决策前记录，下一轮才能接住她错过的上下文。
+    for u in &utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() { u.text.clone() } else { text_only };
+        let name = crate::person_info::get_display_name(u.user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        with_shared_state(|s| {
+            s.push_group_history(
+                group_id,
+                "user",
+                &format!("[{name}] {stored}"),
+                cfg.conversation.max_history,
+            );
+        });
+    }
 
     // 轮次焦点：这批消息在跟谁说话（确定性判定，只用 @ / 名字 / 跟进关系）。
     // 回复目标由这里定，而不是"哪个用户的批次先到期"——批次是按
@@ -558,7 +570,11 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
         });
 
     // 冷却是"这会儿不太想插话"，不是"听不见"：点名/叫名字必须能穿透
-    if silence_cooling(group_id) && !focus.is_called() && !addressed {
+    if focus.is_solely_for_others() {
+        debug!(group_id, "voice: 本批明确对其他群友说话，继续旁听");
+        return;
+    }
+    if silence_cooling(group_id) && !focus.is_called() && !addressed && focus.followed_up_by.is_empty() {
         debug!(group_id, "voice: silence cooldown, skipping");
         return;
     }
@@ -701,13 +717,16 @@ fn speak_and_deliver_group(
         .join("\n");
     let mut recall_ids = Vec::new();
     for line in crate::mind::recall::recall_for(&joined_text, primary, group_id) {
-        let mut event =
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line.clone())
-                .with_about(primary);
+        let mut event = crate::mind::StreamEvent::new(
+            crate::mind::StreamKind::Sensation,
+            line.clone(),
+        )
+        .with_about(primary);
         if let Some(source) = crate::mind::recall::source_for(&line) {
-            let id = crate::mind::recall::recall_id(primary, group_id, &line);
-            recall_ids.push(id.clone());
-            event = event.with_recall(id, source);
+            event = event.with_recall(
+                crate::mind::recall::recall_id(primary, group_id, &line),
+                source,
+            );
         }
         crate::mind::stream::push(event);
     }

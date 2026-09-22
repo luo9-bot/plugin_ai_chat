@@ -69,11 +69,9 @@ const LABELS = Object.fromEntries(KINDS.map(k => [k.value, k.label]))
 function kindLabel(kind) { return LABELS[kind] || kind }
 
 function isRecall(e) {
-  return Boolean(e.recall) || String(e.content || '').startsWith('想起：') || String(e.content || '').startsWith('（毫无来由地')
+  return Boolean(e.recall)
 }
-function displayKind(e) {
-  return isRecall(e) ? 'recall' : e.kind
-}
+function displayKind(e) { return isRecall(e) ? 'recall' : e.kind }
 const filtered = computed(() => {
   if (filter.value === 'all') return events.value
   if (filter.value === 'recall') return events.value.filter(isRecall)
@@ -173,10 +171,7 @@ onUnmounted(() => window.clearInterval(poller))
 .badge-digested { background: var(--border-light); color: var(--text-2); }
 .tl-time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .tl-about { font-size: 11px; color: var(--text-3); }
-.recall-source, .recall-status {
-  font-size: 10px; padding: 2px 6px; border-radius: 4px;
-  background: var(--warning-subtle); color: var(--warning);
-}
+.recall-source, .recall-status { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--warning-subtle); color: var(--warning); }
 .recall-status { background: var(--success-subtle); color: var(--success); }
 .tl-content {
   margin-top: 5px; font-size: 13px; line-height: 1.55;

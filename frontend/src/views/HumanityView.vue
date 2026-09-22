@@ -62,7 +62,6 @@
         <h3>认知偏差</h3>
         <div class="kv-grid">
           <div class="kv"><span>确认偏误</span><strong>{{ data.cognitive_biases.confirmation_bias.toFixed(2) }}</strong></div>
-          <div class="kv"><span>近因效应</span><strong>{{ data.cognitive_biases.recency_bias.toFixed(2) }}</strong></div>
           <div class="kv"><span>情绪一致性</span><strong>{{ data.cognitive_biases.mood_congruence.toFixed(2) }}</strong></div>
           <div class="kv"><span>锚定效应</span><strong>{{ data.cognitive_biases.anchoring_strength.toFixed(2) }}</strong></div>
           <div class="kv"><span>可得性启发</span><strong>{{ data.cognitive_biases.availability_heuristic.toFixed(2) }}</strong></div>

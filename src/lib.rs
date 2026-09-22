@@ -1,38 +1,58 @@
-pub mod activity;
-pub mod admin;
-pub mod ai;
-pub mod anti_injection;
-pub mod archive;
-pub mod blocklist;
-pub mod circadian;
-pub mod config;
-pub mod conversation;
-pub mod conversation_end;
-pub mod crisis;
+//! ai_chat —— QQ 聊天机器人插件
+//!
+//! ## 生产代码不得 panic
+//!
+//! `AGENTS.md` §硬性要求 5 要求生产代码不使用可能由外部输入、文件、网络或
+//! 数据库状态触发的 `unwrap`/`expect`/`panic`。这条规则曾经只是纪律，本仓
+//! 有过 143 处；现在由编译器执行：
+//!
+//! 插件入口是 `extern "C"`，一次 panic 不会刷新日志，而在 1ms 轮询模型下
+//! 它会让**整条消息路径消失**。测试代码不在此列——那里的 `unwrap` 就是断言。
+//!
+//! ## 可见性不该是纪律
+//!
+//! 这个 crate 只被 `extern "C"` 入口和它自己使用，没有外部 Rust 消费者。
+//! 但 `pub` 有一层副作用：**它对 dead_code 分析隐身**。曾经满仓 `pub` 让
+//! 约 1100 行死代码长期不被报告（设计文档 §13.3）。`unreachable_pub` 把
+//! "这个 `pub` 其实没人能用到"变成编译期错误，于是清理不会随时间回流。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![warn(unreachable_pub)]
+
+pub(crate) mod activity;
+pub(crate) mod admin;
+pub(crate) mod ai;
+pub(crate) mod anti_injection;
+pub(crate) mod archive;
+pub(crate) mod circadian;
+pub(crate) mod config;
+pub(crate) mod conversation;
+pub(crate) mod conversation_end;
+pub(crate) mod crisis;
 #[cfg(feature = "plugin")]
-pub mod cron;
-pub mod emoji;
-pub mod emotion;
-pub mod learner;
-pub mod memory;
-pub mod mind;
-pub mod person_info;
-pub mod personal_tasks;
-pub mod prompt;
-pub mod quota;
-pub mod reply_effect;
-pub mod runtime;
-pub mod schedule;
+pub(crate) mod cron;
+pub(crate) mod db;
+pub(crate) mod emoji;
+pub(crate) mod emotion;
+pub(crate) mod learner;
+pub(crate) mod memory;
+pub(crate) mod mind;
+pub(crate) mod person_info;
+pub(crate) mod personal_tasks;
+pub(crate) mod prompt;
+pub(crate) mod quota;
+pub(crate) mod reply_effect;
+pub(crate) mod runtime;
+pub(crate) mod schedule;
 #[cfg(feature = "plugin")]
-pub mod sender;
-pub mod social_battery;
-pub mod state;
-pub mod sticker;
-pub mod tracking;
-pub mod util;
-pub mod vision;
-pub mod voice;
-pub mod working_memory;
+pub(crate) mod sender;
+pub(crate) mod social_battery;
+pub(crate) mod state;
+pub(crate) mod sticker;
+pub(crate) mod tracking;
+pub(crate) mod util;
+pub(crate) mod vision;
+pub(crate) mod voice;
+pub(crate) mod working_memory;
 
 // ── 测试模式下的 stub ────────────────────────────────────────
 #[cfg(not(feature = "plugin"))]
@@ -55,18 +75,19 @@ mod sender {
     }
 }
 
+use crate::util::{MutexExt, RwLockReadExt, RwLockWriteExt};
 #[cfg(feature = "plugin")]
 use luo9_sdk::bus::Bus;
 #[cfg(feature = "plugin")]
 use luo9_sdk::payload::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
 /// 正在处理中的用户集合 (group_id, user_id)，防止同一用户的消息被并发处理
 static PROCESSING_USERS: OnceLock<Mutex<HashSet<(u64, u64)>>> = OnceLock::new();
@@ -107,8 +128,7 @@ pub(crate) struct ProcessingGuard {
 impl Drop for ProcessingGuard {
     fn drop(&mut self) {
         processing_users()
-            .lock()
-            .unwrap()
+            .lock_recover()
             .remove(&(self.group_id, self.user_id));
     }
 }
@@ -127,7 +147,7 @@ pub(crate) fn with_shared_state<F, R>(f: F) -> R
 where
     F: FnOnce(&mut state::SharedState) -> R,
 {
-    let mut s = shared_state().write().unwrap();
+    let mut s = shared_state().write_recover();
     f(&mut s)
 }
 
@@ -135,19 +155,83 @@ pub(crate) fn read_shared_state<F, R>(f: F) -> R
 where
     F: FnOnce(&state::SharedState) -> R,
 {
-    let s = shared_state().read().unwrap();
+    let s = shared_state().read_recover();
     f(&s)
 }
 
-thread_local! {
-    static STATE: RefCell<state::State> = RefCell::new(state::State::new());
+/// 门禁状态（谁在对话、谁被拉黑）。
+///
+/// 进程级共享：admin 线程、消息队列线程、主循环线程看到的必须是同一份。
+/// 读多写少，因此用 `RwLock`；锁中毒只意味着某次写入中断，内存里的集合
+/// 仍是自洽的，所以取回内部值继续用，而不是 panic（主循环不能因它停摆）。
+static GATE: OnceLock<RwLock<state::GateState>> = OnceLock::new();
+
+fn gate() -> &'static RwLock<state::GateState> {
+    GATE.get_or_init(|| RwLock::new(state::GateState::load()))
 }
 
-pub(crate) fn with_state<F, R>(f: F) -> R
+pub(crate) fn gate_read<F, R>(f: F) -> R
 where
-    F: FnOnce(&mut state::State) -> R,
+    F: FnOnce(&state::GateState) -> R,
 {
-    STATE.with(|s| f(&mut s.borrow_mut()))
+    let guard = gate().read_recover();
+    f(&guard)
+}
+
+pub(crate) fn gate_write<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut state::GateState) -> R,
+{
+    let mut guard = gate().write_recover();
+    f(&mut guard)
+}
+
+/// 运行时拉黑/解禁的唯一入口
+///
+/// 三步顺序是刻意的：先改内存（权威、立即可见），再写状态库（持久），
+/// 最后留审计。状态库写入失败只留痕，不阻断内存改动——拉黑一个正在发
+/// 注入的人是安全操作，不该因为磁盘问题而失败。
+pub(crate) fn set_blacklisted(actor: db::Actor, user_id: u64, blocked: bool) {
+    if !gate_write(|g| g.set_blacklisted(user_id, blocked)) {
+        return;
+    }
+    let db = db::db();
+    let persisted = if blocked {
+        db.add_blocked(user_id, "")
+    } else {
+        db.remove_blocked(user_id)
+    };
+    if let Err(error) = persisted {
+        warn!(%error, user_id, "state: 黑名单写库失败（内存已生效）");
+    }
+    if let Err(error) = db.record_audit(
+        actor,
+        if blocked {
+            "blocklist_add"
+        } else {
+            "blocklist_remove"
+        },
+        &format!("user={user_id}"),
+    ) {
+        warn!(%error, "state: 审计写入失败");
+    }
+}
+
+/// 运行时黑名单快照（供 admin 与管理命令读取）
+pub fn get_blacklist() -> Vec<u64> {
+    gate_read(|g| g.blacklisted().collect())
+}
+
+thread_local! {
+    /// 批次缓冲属于主循环线程：后台线程不得触碰（见 `state::BatchBuffer`）
+    static BATCHES: RefCell<state::BatchBuffer> = RefCell::new(state::BatchBuffer::default());
+}
+
+pub(crate) fn batches<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut state::BatchBuffer) -> R,
+{
+    BATCHES.with(|b| f(&mut b.borrow_mut()))
 }
 
 /// 上次主动消息检查时间
@@ -177,11 +261,9 @@ pub extern "C" fn plugin_main() {
     use tracing_appender::rolling;
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-    let log_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("data")
-        .join("plugin_ai_chat")
-        .join("logs");
+    // 与 config 用同一份数据目录推导：这里早于 config::init()，
+    // 不能走 data_dir()（DATA_DIR 还没设置），但也不能各写一遍路径
+    let log_dir = crate::config::default_data_path().join("logs");
     std::fs::create_dir_all(&log_dir).ok();
     let file_appender = rolling::daily(&log_dir, "ai_chat.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
@@ -247,14 +329,46 @@ pub extern "C" fn plugin_main() {
     // 初始化配额系统
     quota::init();
 
+    // 状态库（激活/黑名单/审计的唯一权威）。必须在门禁状态之前：
+    // `gate()` 会从它载入快照。
+    if let Err(error) = db::init() {
+        error!(%error, "db: 状态库初始化失败，本次运行的激活与黑名单不会持久化");
+    }
+    // 旧 blocklist.json / emotion.json 只导入一次：不导入会让先前被拉黑的人
+    // 静默恢复发言，也会让所有用户的情绪状态一起归零
+    if let Err(error) = db::migrate_legacy_blocklist() {
+        error!(%error, "db: 旧黑名单迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_emotion() {
+        error!(%error, "db: 旧情绪状态迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_working_memory() {
+        error!(%error, "db: 旧工作记忆迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_api_usage() {
+        error!(%error, "db: 旧用量记录迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_cognitive_state() {
+        error!(%error, "db: 旧认知状态迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_quota() {
+        error!(%error, "db: 旧配额记录迁移失败");
+    }
+    if let Err(error) = db::migrate_legacy_per_user_files() {
+        error!(%error, "db: 旧人物/关系档案迁移失败");
+    }
+
+    // 门禁状态提前初始化：不能让后台线程在配置未就绪时惰性创建它
+    let _ = gate();
+
     // ── 同步 config.blacklist 到运行时黑名单 ──
+    // 逐个走唯一入口（内存 + 状态库 + 审计）：配置里的名单也是状态的一部分，
+    // 跳过写库会让"配置里拉黑了但运行时没有"重新出现
     {
         let cfg = config::get();
-        with_state(|s| {
-            for &uid in &cfg.blacklist {
-                s.add_blacklist(uid);
-            }
-        });
+        for &uid in &cfg.blacklist {
+            set_blacklisted(db::Actor::Boot, uid, true);
+        }
     }
 
     // ── 默认启动对话用户 ──
@@ -275,10 +389,8 @@ pub extern "C" fn plugin_main() {
                 continue;
             }
 
-            // 自动开启对话
-            with_state(|s| {
-                s.active.insert(user_id);
-            });
+            // 自动开启对话（走唯一入口：内存 + 状态库 + 审计）
+            toggle_private_chat(db::Actor::Boot, user_id, true);
             info!(user_id, "auto_start: 活跃用户私聊");
         }
     }
@@ -288,9 +400,7 @@ pub extern "C" fn plugin_main() {
     {
         let cfg = config::get();
         for &group_id in &cfg.auto_start_groups {
-            with_state(|s| {
-                s.active_groups.insert(group_id);
-            });
+            toggle_group_chat(db::Actor::Boot, group_id, true);
             info!(group_id, "auto_start: 活跃群聊");
         }
     }
@@ -321,9 +431,26 @@ pub extern "C" fn plugin_main() {
     LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
     LAST_MEMORY_REVIEW.store(now, Ordering::Relaxed);
 
-    let msg_sub = Bus::topic("luo9_message").subscribe().unwrap();
-    let task_sub = Bus::topic("luo9_task").subscribe().unwrap();
-    let ver_sub = Bus::topic("luo9_version").subscribe().unwrap();
+    // 订阅失败不再 panic：原先三处 `unwrap()` 意味着任何一次失败都让
+    // **整个循环从未开始**，而外部只看到日志里一条 panic——既不知道
+    // 哪些能力可用，也无法重试（见 .docs/counter-world-design.md §1.2）。
+    // 现在失败是一个具名的可观测状态：逐主题记录，然后空转。
+    let (msg_sub, task_sub, ver_sub) = match (
+        Bus::topic("luo9_message").subscribe(),
+        Bus::topic("luo9_task").subscribe(),
+        Bus::topic("luo9_version").subscribe(),
+    ) {
+        (Ok(msg), Ok(task), Ok(ver)) => (msg, task, ver),
+        (msg, task, ver) => {
+            error!(
+                message_topic = msg.is_ok(),
+                task_topic = task.is_ok(),
+                version_topic = ver.is_ok(),
+                "plugin: 消息总线订阅失败，业务能力不可用"
+            );
+            idle_loop();
+        }
+    };
     let msg_topic = Bus::topic("luo9_message");
     let task_topic = Bus::topic("luo9_task");
     let ver_topic = Bus::topic("luo9_version");
@@ -353,18 +480,8 @@ pub extern "C" fn plugin_main() {
 
         conversation::batch::process_expired_batches();
 
-        // 每60秒检查一次主动消息和情绪衰减
-        check_periodic();
-
-        // 每5秒同步活跃对话状态到共享内存（供管理线程读取）
-        {
-            static LAST_SYNC: AtomicU64 = AtomicU64::new(0);
-            let now = util::now_secs();
-            if now.saturating_sub(LAST_SYNC.load(Ordering::Relaxed)) >= 5 {
-                LAST_SYNC.store(now, Ordering::Relaxed);
-                sync_active_to_shared();
-            }
-        }
+        // 周期性维护：这里只做判定与投递，维护本身在后台线程
+        schedule_periodic_maintenance();
 
         // ── 版本查询 ──
         if let Some(json) = ver_topic.pop(ver_sub)
@@ -377,9 +494,46 @@ pub extern "C" fn plugin_main() {
     }
 }
 
+/// 订阅失败时的兜底：保持线程存活，并周期性记录状态
+///
+/// 不 panic 是为了让"插件活着但能力不可用"成为一个**可观测状态**，
+/// 而不是一条 panic 之后的静默。心跳存在是为了让运维能看出
+/// "还在空转"与"已经死掉"的区别。
+fn idle_loop() -> ! {
+    warn!("plugin: 进入空转——消息总线不可用，业务能力全部关闭");
+    loop {
+        thread::sleep(Duration::from_secs(60));
+        warn!("plugin: 仍处于空转（消息总线不可用）");
+    }
+}
+
 // ── 周期性检查 ──────────────────────────────────────────────────
 
-fn check_periodic() {
+/// 一次周期维护是否还在跑
+///
+/// 维护包含整文件读写与模型调用，可能比周期本身还长。没有这个开关时，
+/// 下一轮 tick 会在上一轮还没结束时再起一个线程，负载翻倍叠加。
+static MAINTENANCE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// 释放单飞标志的 RAII 守卫
+///
+/// 用 `Drop` 而不是在调用点末尾复位：维护线程一旦 panic，末尾那行永远不会
+/// 执行，标志会永久为真——周期维护从此静默停摆，而这件事没有任何外部症状。
+struct MaintenanceGuard;
+
+impl Drop for MaintenanceGuard {
+    fn drop(&mut self) {
+        MAINTENANCE_ACTIVE.store(false, Ordering::Release);
+    }
+}
+
+/// 周期维护的调度器：**只做判定与投递，不做事**
+///
+/// 1ms 轮询循环是全进程唯一的驱动器，它的循环体必须是常数时间的
+/// （见 `.docs/counter-world-design.md` §1）。而周期维护里有整文件读写
+/// （emotion.json 每用户、social 每群、working_memory 全群共用一份）和
+/// 最多 3 次同步模型调用（日/周/月计划生成），任何一项都不能留在循环体上。
+fn schedule_periodic_maintenance() {
     let now = util::now_secs();
     let last = LAST_PROACTIVE_CHECK.load(Ordering::Relaxed);
     let interval = config::get().proactive.check_interval;
@@ -387,6 +541,21 @@ fn check_periodic() {
         return;
     }
     LAST_PROACTIVE_CHECK.store(now, Ordering::Relaxed);
+
+    // 上一轮还没跑完就跳过本轮：宁可少一次维护，也不叠加负载
+    if MAINTENANCE_ACTIVE.swap(true, Ordering::AcqRel) {
+        debug!("periodic: 上一轮维护尚未结束，跳过本轮");
+        return;
+    }
+    thread::spawn(|| {
+        let _guard = MaintenanceGuard;
+        run_periodic_maintenance();
+    });
+}
+
+/// 周期维护的实际内容，运行在后台线程上
+fn run_periodic_maintenance() {
+    let now = util::now_secs();
     debug!("periodic: starting check cycle");
 
     // 社交电量更新
@@ -397,7 +566,7 @@ fn check_periodic() {
     }
 
     // 社会世界模型周期维护：注意力全表衰减 + 线程生命周期 + 落盘
-    let active_groups: Vec<u64> = with_state(|s| s.active_groups.iter().copied().collect());
+    let active_groups: Vec<u64> = gate_read(|g| g.active_groups().collect());
     for group_id in active_groups {
         mind::social::tick(group_id);
     }
@@ -581,27 +750,26 @@ fn check_periodic() {
         mind::foraging::flush();
     }
 
-    // 情绪衰减（轻量，主循环执行）。
+    // 情绪衰减（一次载入、一次落盘）。
+    //
     // 主动消息不再由规则触发器驱动：她主动不主动，由她自己的想起（意图堆）决定。
-    let mut known_users: Vec<u64> = Vec::new();
-    with_state(|s| {
-        for &uid in &s.active {
-            known_users.push(uid);
-        }
-    });
-    read_shared_state(|s| {
-        for (&(gid, uid), ctx) in &s.contexts {
-            if gid > 0 && uid == config::get().self_qq {
-                continue;
+    // 这里刻意收集成一批再推进：`emotion.json` 是"每用户一个条目"的单一文件，
+    // 逐用户调用会让每次维护产生 3N 次文件操作（N = 已知用户数）。
+    let known_users: Vec<u64> = {
+        let mut users: Vec<u64> = gate_read(|g| g.active_users().collect());
+        read_shared_state(|s| {
+            for (&(gid, uid), ctx) in &s.contexts {
+                if gid > 0 && uid == config::get().self_qq {
+                    continue;
+                }
+                if !ctx.history.is_empty() && !users.contains(&uid) {
+                    users.push(uid);
+                }
             }
-            if !ctx.history.is_empty() && !known_users.contains(&uid) {
-                known_users.push(uid);
-            }
-        }
-    });
-    for uid in &known_users {
-        emotion::decay(*uid);
-    }
+        });
+        users
+    };
+    emotion::decay_many(&known_users);
 
     // 定期记忆审查 (每小时一次，移到后台线程避免阻塞主循环)
     let last_review = LAST_MEMORY_REVIEW.load(Ordering::Relaxed);
@@ -610,6 +778,15 @@ fn check_periodic() {
         std::thread::spawn(|| {
             memory::ai_review_all();
         });
+
+        // Turn 契约的影子观测：每小时把最近 24 小时的分布写进日志，
+        // 并裁掉 7 天前的记录。这是"严格 Turn 会失败多少"的可见出口，
+        // 没有它这份观测就只是躺在库里没人看。
+        let report = ai::shadow::report(24 * 3600);
+        if report.rounds > 0 {
+            info!(summary = %report.summary_line(), "turn_shadow: 24h 观测");
+        }
+        ai::shadow::prune(7 * 24 * 3600);
     }
 
     // 每日遗忘扫描
@@ -622,7 +799,7 @@ fn check_periodic() {
     // SharedState 清理不活跃条目（释放内存）
     {
         let inactive_groups: std::collections::HashSet<u64> =
-            with_state(|s| s.active_groups.clone());
+            gate_read(|g| g.active_groups().collect());
         with_shared_state(|s| s.cleanup_inactive(&inactive_groups));
     }
 
@@ -766,73 +943,60 @@ fn do_monthly_plan_generation() {
     schedule::replace_items(schedule::Timeframe::Month, items);
 }
 
-// ── 对话管理 API（供 admin.rs 调用） ──────────────────────────
+// ── 对话管理 API（供 admin.rs 与消息队列线程调用） ─────────────
+//
+// 这些入口直接读/写进程级门禁状态，因此后台的改动对主循环**立即生效**。
+// 早先它们读的是每 5 秒同步一次的 `SharedState` 快照、写的是 admin 线程
+// 自己的 `thread_local` 副本，结果是"对话开关功能从未生效过"。
 
-/// 获取所有活跃群聊 ID（从共享内存读取，管理线程可用）
+/// 获取所有活跃群聊 ID
 pub fn get_active_groups() -> Vec<u64> {
-    read_shared_state(|s| s.active_groups.iter().copied().collect())
+    gate_read(|g| g.active_groups().collect())
 }
 
-/// 获取所有活跃私聊用户 ID（从共享内存读取，管理线程可用）
+/// 获取所有活跃私聊用户 ID
 pub fn get_active_users() -> Vec<u64> {
-    read_shared_state(|s| s.active_users.iter().copied().collect())
+    gate_read(|g| g.active_users().collect())
 }
 
 /// 开启/关闭群聊，返回是否改变了状态
-pub fn toggle_group_chat(group_id: u64, enable: bool) -> bool {
-    let changed = if enable {
-        let already = with_state(|s| s.active_groups.contains(&group_id));
-        if already {
-            return false;
-        }
-        with_state(|s| {
-            s.active_groups.insert(group_id);
-        });
-        true
-    } else {
-        let active = with_state(|s| s.active_groups.contains(&group_id));
-        if !active {
-            return false;
-        }
-        with_state(|s| {
-            s.active_groups.remove(&group_id);
-        });
-        true
-    };
-    sync_active_to_shared();
-    changed
+///
+/// 与 [`set_blacklisted`] 同样的三步：内存 → 状态库 → 审计。
+/// 先前的实现只改内存，于是**激活状态从不落盘**：后台开的对话重启即失。
+pub fn toggle_group_chat(actor: db::Actor, group_id: u64, enable: bool) -> bool {
+    apply_activation(actor, db::Scope::Group, group_id, enable)
 }
 
 /// 开启/关闭私聊，返回是否改变了状态
-pub fn toggle_private_chat(user_id: u64, enable: bool) -> bool {
-    let changed = if enable {
-        let already = with_state(|s| s.active.contains(&user_id));
-        if already {
-            return false;
-        }
-        with_state(|s| {
-            s.active.insert(user_id);
-        });
-        true
-    } else {
-        let active = with_state(|s| s.active.contains(&user_id));
-        if !active {
-            return false;
-        }
-        with_state(|s| {
-            s.active.remove(&user_id);
-            s.batches.remove(&(0, user_id));
-        });
-        true
-    };
-    sync_active_to_shared();
-    changed
+///
+/// 关闭时不去动批次缓冲：那是主循环线程独有的状态，而缓冲到期后
+/// 仍会在入口处被门禁拦下（`handle_private_msg` 检查是否活跃）。
+pub fn toggle_private_chat(actor: db::Actor, user_id: u64, enable: bool) -> bool {
+    apply_activation(actor, db::Scope::Private, user_id, enable)
 }
 
-/// 同步活跃对话状态到 SharedState（供管理线程读取）
-fn sync_active_to_shared() {
-    let (groups, users) = with_state(|s| (s.active_groups.clone(), s.active.clone()));
-    with_shared_state(|s| s.sync_active(&groups, &users));
+/// 两个作用域共用的写路径
+fn apply_activation(actor: db::Actor, scope: db::Scope, id: u64, enable: bool) -> bool {
+    let changed = gate_write(|g| match scope {
+        db::Scope::Group => g.set_group_active(id, enable),
+        db::Scope::Private => g.set_private_active(id, enable),
+    });
+    if !changed {
+        return false;
+    }
+
+    let db = db::db();
+    if let Err(error) = db.set_activation(scope, id, enable) {
+        warn!(%error, id, scope = scope.as_str(), "state: 激活状态写库失败（内存已生效）");
+    }
+    if let Err(error) = db.record_audit(
+        actor,
+        "set_activation",
+        &format!("scope={} id={id} enabled={enable}", scope.as_str()),
+    ) {
+        warn!(%error, "state: 审计写入失败");
+    }
+    true
 }
 
 // ── 消息处理 ────────────────────────────────────────────────────
@@ -841,4 +1005,128 @@ fn sync_active_to_shared() {
 pub(crate) fn is_admin(user_id: u64) -> bool {
     let admin = config::get().admin_qq;
     admin == 0 || admin == user_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 后台线程改门禁、主循环线程读到的必须是同一份状态。
+    ///
+    /// 这是 F1.2 的回归测试：状态曾经放在 `thread_local`，于是 admin 线程
+    /// 只改到自己的副本——"从网页开启/关闭一个对话"从未对消息处理生效。
+    #[test]
+    fn gate_changes_are_visible_across_threads() {
+        const GROUP_ID: u64 = 990_001;
+
+        let changed_on_admin_thread =
+            std::thread::spawn(move || toggle_group_chat(db::Actor::Admin, GROUP_ID, true))
+                .join()
+                .expect("admin 线程不应 panic");
+
+        assert!(changed_on_admin_thread, "首次开启应报告状态已改变");
+        assert!(
+            gate_read(|g| g.is_group_active(GROUP_ID)),
+            "主循环线程必须看到后台线程写入的门禁状态"
+        );
+        assert!(get_active_groups().contains(&GROUP_ID));
+
+        // 幂等：重复开启不再报告改变，且状态仍然一致
+        assert!(!toggle_group_chat(db::Actor::Admin, GROUP_ID, true));
+        assert!(toggle_group_chat(db::Actor::Admin, GROUP_ID, false));
+        assert!(!gate_read(|g| g.is_group_active(GROUP_ID)));
+        assert!(!toggle_group_chat(db::Actor::Admin, GROUP_ID, false));
+    }
+
+    /// 私聊开关同理，且不依赖批次缓冲（批次只属于主循环线程）
+    #[test]
+    fn private_toggle_is_visible_across_threads() {
+        const USER_ID: u64 = 990_002;
+
+        assert!(
+            std::thread::spawn(move || toggle_private_chat(db::Actor::Admin, USER_ID, true))
+                .join()
+                .expect("admin 线程不应 panic")
+        );
+        assert!(gate_read(|g| g.is_private_active(USER_ID)));
+        assert!(get_active_users().contains(&USER_ID));
+        assert!(toggle_private_chat(db::Actor::Admin, USER_ID, false));
+        assert!(!gate_read(|g| g.is_private_active(USER_ID)));
+    }
+
+    /// 维护线程即使 panic，单飞标志也必须释放。
+    ///
+    /// 否则周期维护会永久停摆：`MAINTENANCE_ACTIVE` 永远为真，后续每轮
+    /// 都被当成"上一轮还没结束"跳过，而外部看不出任何异常。
+    #[test]
+    fn maintenance_flag_is_released_even_on_panic() {
+        MAINTENANCE_ACTIVE.store(true, Ordering::Release);
+
+        let outcome = std::panic::catch_unwind(|| {
+            let _guard = MaintenanceGuard;
+            panic!("模拟维护线程 panic");
+        });
+
+        assert!(outcome.is_err(), "这里应该捕获到 panic");
+        assert!(
+            !MAINTENANCE_ACTIVE.load(Ordering::Acquire),
+            "标志未释放：周期维护将永久停止"
+        );
+    }
+
+    /// 激活状态必须**落盘**：重启（从状态库重新载入）之后仍然有效。
+    ///
+    /// 这是 F2.4/F2.7 的回归测试：先前激活只存在于内存，`toggle_*` 连写库
+    /// 都没有，于是"从后台开启一个对话"在重启后消失，而配置里的
+    /// `auto_start_*` 会把它再打开一次——缺陷被这层巧合掩盖着。
+    #[test]
+    fn activation_survives_a_restart() {
+        const GROUP_ID: u64 = 990_101;
+        const USER_ID: u64 = 990_102;
+
+        // 测试共用同一个 data 目录（进程内只有一份），状态库里可能残留
+        // 上一次运行的数据，因此先把本用例自己的条目清干净再开始断言
+        toggle_group_chat(db::Actor::Admin, GROUP_ID, false);
+        toggle_private_chat(db::Actor::Admin, USER_ID, false);
+
+        assert!(toggle_group_chat(db::Actor::Admin, GROUP_ID, true));
+        assert!(toggle_private_chat(db::Actor::Admin, USER_ID, true));
+
+        // 模拟重启：从状态库重新载入门禁快照
+        let reloaded = state::GateState::load();
+        assert!(reloaded.is_group_active(GROUP_ID), "群聊激活状态没有落盘");
+        assert!(reloaded.is_private_active(USER_ID), "私聊激活状态没有落盘");
+
+        // 关闭同样要落盘，否则"关掉的对话重启后又回来了"
+        assert!(toggle_group_chat(db::Actor::Admin, GROUP_ID, false));
+        assert!(
+            !state::GateState::load().is_group_active(GROUP_ID),
+            "关闭状态没有落盘"
+        );
+
+        // 收拾干净，避免影响其它用例
+        toggle_private_chat(db::Actor::Admin, USER_ID, false);
+    }
+
+    /// 拉黑同样要落盘，且留下审计
+    #[test]
+    fn blocklist_is_persisted_and_audited() {
+        const USER_ID: u64 = 990_103;
+
+        // 同 activation 测试：先清掉可能残留的本用例条目
+        set_blacklisted(db::Actor::Admin, USER_ID, false);
+
+        set_blacklisted(db::Actor::Admin, USER_ID, true);
+        assert!(state::GateState::load().is_blacklisted(USER_ID));
+
+        let audit = db::db().recent_audit(50).expect("审计必须可读");
+        assert!(
+            audit.iter().any(|entry| entry.command == "blocklist_add"
+                && entry.detail.contains(&USER_ID.to_string())),
+            "拉黑必须留下审计记录"
+        );
+
+        set_blacklisted(db::Actor::Admin, USER_ID, false);
+        assert!(!state::GateState::load().is_blacklisted(USER_ID));
+    }
 }

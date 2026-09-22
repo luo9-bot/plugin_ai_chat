@@ -1,11 +1,12 @@
 //! 洛玖表情包数据结构和持久化
 
+use crate::util::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 /// 表情包条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StickerEntry {
+pub(crate) struct StickerEntry {
     /// SHA256 哈希（唯一标识）
     pub hash: String,
     /// 文件路径（相对 data 目录）
@@ -33,7 +34,7 @@ pub struct StickerEntry {
 
 /// 表情包存储
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StickerStore {
+pub(crate) struct StickerStore {
     pub stickers: Vec<StickerEntry>,
 }
 
@@ -45,10 +46,14 @@ pub(crate) fn store_path() -> std::path::PathBuf {
 
 /// 原子性地添加条目到存储（加载→修改→保存，持锁防止竞态）
 pub(crate) fn add_entry_and_save(entry: StickerEntry) {
-    let mut guard = STORE.lock().unwrap();
-    let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
-    store.stickers.push(entry);
-    crate::util::save_json(&store_path(), store);
+    let snapshot = {
+        let mut guard = STORE.lock_recover();
+        let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
+        store.stickers.push(entry);
+        store.clone()
+        // 锁在这里释放：磁盘延迟不该决定锁的持有时间
+    };
+    persist(&snapshot);
 }
 
 pub(crate) fn sticker_dir() -> std::path::PathBuf {
@@ -61,7 +66,7 @@ pub(crate) fn builtin_sticker_dir() -> std::path::PathBuf {
 }
 
 pub(crate) fn load_store() -> StickerStore {
-    let mut guard = STORE.lock().unwrap();
+    let mut guard = STORE.lock_recover();
     if guard.is_none() {
         *guard = Some(crate::util::load_json(&store_path()));
     }
@@ -69,23 +74,41 @@ pub(crate) fn load_store() -> StickerStore {
 }
 
 /// 按哈希查找表情包条目
-pub fn find_entry_by_hash(hash: &str) -> Option<StickerEntry> {
+pub(crate) fn find_entry_by_hash(hash: &str) -> Option<StickerEntry> {
     let store = load_store();
     store.stickers.into_iter().find(|e| e.hash == hash)
 }
 
 /// 更新表情包的 VLM 自然语言描述
-pub fn update_vlm_description(hash: &str, description: &str) {
-    let mut guard = STORE.lock().unwrap();
-    let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
-    if let Some(entry) = store.stickers.iter_mut().find(|e| e.hash == hash) {
-        entry.vlm_description = Some(description.to_string());
-        crate::util::save_json(&store_path(), store);
+pub(crate) fn update_vlm_description(hash: &str, description: &str) {
+    let snapshot = {
+        let mut guard = STORE.lock_recover();
+        let store = guard.get_or_insert_with(|| crate::util::load_json(&store_path()));
+        match store.stickers.iter_mut().find(|e| e.hash == hash) {
+            Some(entry) => {
+                entry.vlm_description = Some(description.to_string());
+                Some(store.clone())
+            }
+            None => None,
+        }
+    };
+    if let Some(store) = snapshot {
+        persist(&store);
     }
 }
 
 pub(crate) fn save_store(store: &StickerStore) {
-    let mut guard = STORE.lock().unwrap();
-    *guard = Some(store.clone());
-    crate::util::save_json(&store_path(), store);
+    {
+        let mut guard = STORE.lock_recover();
+        *guard = Some(store.clone());
+        // 锁在这里释放：磁盘延迟不该决定锁的持有时间
+    }
+    persist(store);
+}
+
+/// 落盘是缓存之外的第二步：失败必须留痕，而不是被 `.ok()` 吞掉
+fn persist(store: &StickerStore) {
+    if let Err(error) = crate::util::save_json(&store_path(), store) {
+        tracing::warn!(error = %error, path = %store_path().display(), "sticker: 持久化失败");
+    }
 }

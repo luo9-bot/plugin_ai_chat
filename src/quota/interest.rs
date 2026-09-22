@@ -1,7 +1,7 @@
 use tracing::debug;
 
 use super::segment::{check_and_consume, has_quota};
-use super::store::{STORE, SegmentLogEntry};
+use super::store::{SegmentLogEntry, SegmentMessage};
 use crate::config;
 
 // ── 回复优先级 ───────────────────────────────────────────────
@@ -12,7 +12,7 @@ use crate::config;
 /// - darling + bot 刚回复(2min内) → 0.45，无需 @即可延续对话
 /// - 2 分钟后窗口关闭 → 0.25，需要 @bot 才能突破
 /// - 普通用户 @bot + bot 活跃 → 0.35，仍无法突破（阈值 0.45）
-pub fn calculate_priority(
+pub(crate) fn calculate_priority(
     user_id: u64,
     group_id: u64,
     message: &str,
@@ -57,7 +57,7 @@ pub fn calculate_priority(
 /// - 配额充足 → 消费配额，返回 true
 /// - 配额耗尽 + 优先级 >= 0.45 → 突破配额（不消费），返回 true
 /// - 配额耗尽 + 优先级 < 0.45 → 返回 false
-pub fn try_reply(
+pub(crate) fn try_reply(
     group_id: u64,
     user_id: u64,
     message: &str,
@@ -88,23 +88,39 @@ pub fn try_reply(
 
 // ── Admin API ──────────────────────────────────────────────────
 
-pub fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .and_then(|s| s.segment_log.get(&group_id))
-        .map(|logs| {
-            let mut sorted = logs.clone();
-            sorted.sort_by(|a, b| b.segment_start.cmp(&a.segment_start));
-            sorted.into_iter().take(limit).collect()
-        })
-        .unwrap_or_default()
+/// 某个群最近若干段的段日志（段起始时间倒序）
+pub(crate) fn get_segment_logs(group_id: u64, limit: usize) -> Vec<SegmentLogEntry> {
+    let messages = crate::db::db()
+        .quota_messages(group_id, limit)
+        .unwrap_or_default();
+
+    // 记录已按「段倒序、段内按写入顺序」返回，这里保持该顺序分组
+    let mut entries: Vec<SegmentLogEntry> = Vec::new();
+    for row in messages {
+        match entries.last_mut() {
+            Some(entry) if entry.segment_start == row.segment_start => {
+                entry.messages.push(SegmentMessage {
+                    user_id: row.user_id,
+                    message: row.message,
+                    timestamp: row.ts.max(0) as u64,
+                });
+            }
+            _ => entries.push(SegmentLogEntry {
+                segment_start: row.segment_start,
+                messages: vec![SegmentMessage {
+                    user_id: row.user_id,
+                    message: row.message,
+                    timestamp: row.ts.max(0) as u64,
+                }],
+            }),
+        }
+    }
+    entries
 }
 
-pub fn get_groups_with_logs() -> Vec<u64> {
-    let store_guard = STORE.lock().unwrap();
-    store_guard
-        .as_ref()
-        .map(|s| s.segment_log.keys().copied().collect())
+/// 有段日志的群
+pub(crate) fn get_groups_with_logs() -> Vec<u64> {
+    crate::db::db()
+        .quota_groups_with_messages()
         .unwrap_or_default()
 }

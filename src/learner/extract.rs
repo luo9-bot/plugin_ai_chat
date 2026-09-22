@@ -3,13 +3,13 @@
 use super::store::*;
 use tracing::{debug, info, warn};
 
-pub fn should_learn(group_id: u64) -> bool {
+pub(crate) fn should_learn(group_id: u64) -> bool {
     let s = load_store();
     let now = crate::util::now_secs();
     now.saturating_sub(s.last_learned.get(&group_id).copied().unwrap_or(0)) >= LEARN_INTERVAL_SECS
 }
 
-pub fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
+pub(crate) fn learn_from_messages(group_id: u64, messages: &[(u64, String)]) {
     if messages.len() < MIN_MESSAGES {
         return;
     }

@@ -13,7 +13,7 @@ const MAX_PROGRESS_LINES: usize = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub(crate) enum TaskStatus {
     Pending,
     InProgress,
     WaitingForPerson,
@@ -29,21 +29,10 @@ impl TaskStatus {
             Self::Pending | Self::InProgress | Self::WaitingForPerson | Self::Snoozed
         )
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Pending => "待开始",
-            Self::InProgress => "进行中",
-            Self::WaitingForPerson => "等对方",
-            Self::Completed => "已完成",
-            Self::Snoozed => "暂缓",
-            Self::Abandoned => "已放弃",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersonalTask {
+pub(crate) struct PersonalTask {
     pub id: u64,
     pub title: String,
     pub source: String,
@@ -80,8 +69,10 @@ fn load() -> TaskStore {
 }
 
 fn save(store: &TaskStore) {
-    if let Ok(content) = serde_json::to_string_pretty(store) {
-        fs::write(store_path(), content).ok();
+    if let Ok(content) = serde_json::to_string_pretty(store)
+        && let Err(error) = crate::util::atomic_write(store_path(), content)
+    {
+        tracing::warn!(error = %error, "写盘失败");
     }
 }
 
@@ -100,7 +91,7 @@ fn titles_similar(left: &str, right: &str) -> bool {
 }
 
 /// 新增任务；相同未完成事项只补充进展，避免把同一个念头拆成多项任务。
-pub fn add_or_reinforce(
+pub(crate) fn add_or_reinforce(
     title: &str,
     source: &str,
     next_action: &str,
@@ -174,7 +165,7 @@ pub fn add_or_reinforce(
 ///
 /// 只登记"对方有回音"这件事供后续复盘，不再把任务立刻翻回进行中：
 /// 自动复活会让一件对方根本没接的事无限循环（等 → 复活 → 跟进 → 再等）。
-pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
+pub(crate) fn note_user_message(user_id: u64, group_id: u64, message: &str) {
     let mut store = load();
     let now = crate::util::now_secs();
     let mut changed = false;
@@ -209,7 +200,7 @@ pub fn note_user_message(user_id: u64, group_id: u64, message: &str) {
 /// 于是"等待超时 → 决定跟进 → 再等待"形成一个永不终止的环，
 /// 表现就是她隔几小时又来催同一件事。到达上限后直接 Abandoned：
 /// 真人不会为一件没回音的事无限排期。
-pub fn review_due_tasks() {
+pub(crate) fn review_due_tasks() {
     let mut store = load();
     let now = crate::util::now_secs();
     let mut changed = false;
@@ -269,66 +260,6 @@ fn mark_waiting_for_person(task_id: u64) {
     }
 }
 
-/// 将匹配的执行任务标记完成，并保留完成记录供后续反思使用。
-pub fn complete_by_title(title: &str, progress: &str) -> bool {
-    let mut store = load();
-    let now = crate::util::now_secs();
-    let Some(task) = store
-        .tasks
-        .iter_mut()
-        .find(|task| task.status.is_active() && titles_similar(&task.title, title))
-    else {
-        return false;
-    };
-
-    task.status = TaskStatus::Completed;
-    task.next_action.clear();
-    task.blocker.clear();
-    task.review_at = 0;
-    task.updated_at = now;
-    task.progress.push(format!("完成：{}", progress));
-    task.progress.truncate(8);
-    retain_finished(&mut store);
-    save(&store);
-    true
-}
-
-pub fn get_context(max_count: usize) -> String {
-    let now = crate::util::now_secs();
-    let mut tasks: Vec<PersonalTask> = load()
-        .tasks
-        .into_iter()
-        .filter(|task| {
-            task.status.is_active() && !(task.status == TaskStatus::Snoozed && task.review_at > now)
-        })
-        .collect();
-    tasks.sort_by_key(|task| std::cmp::Reverse(task.updated_at));
-    let lines: Vec<String> = tasks
-        .iter()
-        .take(max_count)
-        .map(|task| {
-            let progress = task
-                .progress
-                .last()
-                .map(String::as_str)
-                .unwrap_or("尚未开始");
-            format!(
-                "- #{} {}（{}）：{}；下一步：{}",
-                task.id,
-                task.title,
-                task.status.label(),
-                progress,
-                task.next_action
-            )
-        })
-        .collect();
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("# 正在推进的事\n{}", lines.join("\n"))
-    }
-}
-
 /// 从一次真实对话中提取她答应下来的事项。模型只能给出候选，本模块负责绑定对象和存储。
 ///
 /// 只把**对方说的话**交给提取模型：她自己的回复是模型生成的文本，不是
@@ -339,7 +270,7 @@ pub fn get_context(max_count: usize) -> String {
 ///
 /// 传入的 `user_message` 应当已经包含对话上下文（见调用方），
 /// 提取器据此判断"对方是不是真的提出了约定"。
-pub fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str) {
+pub(crate) fn extract_from_conversation(user_id: u64, group_id: u64, user_message: &str) {
     let context = format!("# 对方刚说\n{user_message}");
     let result = crate::ai::analyze_with_tools(
         crate::prompt::PromptManager::get().raw("task_progress"),

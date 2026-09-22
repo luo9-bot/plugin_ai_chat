@@ -1,26 +1,26 @@
-pub mod cognitive_biases;
-pub mod embedding;
+pub(crate) mod cognitive_biases;
+pub(crate) mod embedding;
 mod extract;
-pub mod graph;
+pub(crate) mod graph;
 mod operations;
-pub mod ops_log;
-pub mod retrieval;
+pub(crate) mod ops_log;
+pub(crate) mod retrieval;
 mod review;
-pub mod store;
-pub mod unpredictability;
-pub mod vector_store;
+pub(crate) mod store;
+pub(crate) mod unpredictability;
+pub(crate) mod vector_store;
 
 use std::collections::HashMap;
 
 use crate::config;
 
-pub use extract::*;
-pub use operations::*;
-pub use review::*;
-pub use store::*;
+pub(crate) use extract::*;
+pub(crate) use operations::*;
+pub(crate) use review::*;
+pub(crate) use store::*;
 
 /// 初始化记忆系统
-pub fn init() {
+pub(crate) fn init() {
     store::init();
     vector_store::init();
     retrieval::vector::init_query_cache();
@@ -30,31 +30,22 @@ pub fn init() {
 /// 语义检索记忆：双路检索 + 无状态遗忘曲线 + 后置图门控 + 自适应阈值 + 智能回退
 ///
 /// 同时检索全局记忆和群特定记忆；被想起的记忆会得到强化（检索即强化）。
-pub fn search_memories(
+pub(crate) fn search_memories(
     user_id: u64,
     current_group_id: u64,
     query: &str,
     top_k: usize,
 ) -> Vec<retrieval::RetrievalResult> {
-    search_memories_inner(user_id, current_group_id, query, top_k, true, 0.45, false)
+    search_memories_inner(user_id, current_group_id, query, top_k, false, 0.45)
 }
 
-/// 自动联想专用检索：相似度更严格，且不因为旁听式联想而强化记忆。
-pub fn search_memories_for_recall(
+pub(crate) fn search_memories_for_recall(
     user_id: u64,
     current_group_id: u64,
     query: &str,
     top_k: usize,
 ) -> Vec<retrieval::RetrievalResult> {
-    search_memories_inner(
-        user_id,
-        current_group_id,
-        query,
-        top_k,
-        false,
-        0.62,
-        true,
-    )
+    search_memories_inner(user_id, current_group_id, query, top_k, true, 0.62)
 }
 
 fn search_memories_inner(
@@ -62,9 +53,8 @@ fn search_memories_inner(
     current_group_id: u64,
     query: &str,
     top_k: usize,
-    reinforce: bool,
-    min_vector_similarity: f64,
     stable_only: bool,
+    min_vector_similarity: f64,
 ) -> Vec<retrieval::RetrievalResult> {
     let mut documents: Vec<(String, String)> = Vec::new();
     let mut meta: HashMap<String, retrieval::forgetting::MemoryMeta> = HashMap::new();
@@ -72,9 +62,7 @@ fn search_memories_inner(
     // 全局记忆
     let global = store::load_user_memory(user_id);
     for (i, entry) in global.entries.iter().enumerate() {
-        if stable_only && !recall_eligible(entry) {
-            continue;
-        }
+        if stable_only && !recall_eligible(entry) { continue; }
         let id = format!("global_{}_{}", user_id, i);
         meta.insert(
             id.clone(),
@@ -92,9 +80,7 @@ fn search_memories_inner(
     if current_group_id > 0 {
         let group_user = store::load_group_user_memory(current_group_id, user_id);
         for (i, entry) in group_user.entries.iter().enumerate() {
-            if stable_only && !recall_eligible(entry) {
-                continue;
-            }
+            if stable_only && !recall_eligible(entry) { continue; }
             let id = format!("group_{}_{}_{}", current_group_id, user_id, i);
             meta.insert(
                 id.clone(),
@@ -161,7 +147,6 @@ fn search_memories_inner(
         bm25_weight: 0.3,
         rrf_k: 60.0,
         min_vector_similarity,
-        metadata_filter: None,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
     };
@@ -188,14 +173,14 @@ fn search_memories_inner(
     retrieval::forgetting::apply(&mut results, |id| meta.get(id).copied(), now, &fcfg);
 
     // 检索即强化：被想起的记忆延长半衰期（下一次更难忘记）
-    if reinforce && fcfg.enabled && !results.is_empty() {
+    if !stable_only && fcfg.enabled && !results.is_empty() {
         let hits: std::collections::HashSet<&str> =
             results.iter().map(|r| r.content.as_str()).collect();
         reinforce_hits(user_id, current_group_id, &hits);
     }
 
     // 应用认知偏差修正
-    if config::get().humanity.cognitive_biases_enabled {
+    if !stable_only && config::get().humanity.cognitive_biases_enabled {
         let emotion = crate::emotion::get_state(user_id);
         let mut biases = cognitive_biases::load_biases();
         results = cognitive_biases::apply_cognitive_biases(results, &emotion.current, &mut biases);
@@ -205,32 +190,15 @@ fn search_memories_inner(
     results
 }
 
-/// 自动联想只读取稳定信息；普通事件通过显式记忆查询仍可访问。
 fn recall_eligible(entry: &MemoryEntry) -> bool {
-    if entry
-        .emotional_impact
-        .is_some_and(|impact| impact.abs() >= 6.0)
+    if entry.importance == Importance::Permanent
+        || entry.emotional_impact.is_some_and(|impact| impact.abs() >= 6.0)
     {
         return true;
     }
-    if matches!(entry.importance, Importance::Permanent) {
-        return true;
-    }
-    if !matches!(entry.importance, Importance::Important) {
-        return false;
-    }
-
-    // 兼容旧数据：过去可能把一次性事件误标成 important。
-    let temporary_markers = [
-        "今天", "刚刚", "刚才", "昨天", "这次", "目前", "现在", "最近",
-    ];
-    let transient_actions = [
-        "喝了", "吃了", "买了", "看了", "去了", "做了", "遇到", "刷到",
-        "听了", "玩了", "睡了",
-    ];
-    let has_transient_action = transient_actions.iter().any(|marker| entry.content.contains(marker));
-    let has_temporary_time = temporary_markers.iter().any(|marker| entry.content.contains(marker));
-    !has_transient_action && !has_temporary_time
+    if entry.importance != Importance::Important { return false; }
+    let transient = ["喝了", "吃了", "买了", "看了", "去了", "做了", "遇到", "刷到", "听了", "玩了", "睡了"];
+    !transient.iter().any(|marker| entry.content.contains(marker))
 }
 
 /// 检索即强化：命中条目 access_count+1、刷新 last_accessed 并回写
@@ -275,7 +243,6 @@ fn dual_path_bm25_only(
                 .map(|(_, c)| c.clone())
                 .unwrap_or_default(),
             score: r.score,
-            source: "bm25",
         })
         .collect()
 }
