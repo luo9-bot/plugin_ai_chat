@@ -25,7 +25,7 @@
 
       <div v-if="loading" class="empty">读取中…</div>
       <div v-else-if="filtered.length" class="timeline">
-        <div v-for="(e, i) in filtered" :key="i" class="tl-item" :class="['kind-' + e.kind, { 'is-recall': e.recall }]">
+        <div v-for="(e, i) in filtered" :key="i" class="tl-item" :class="['kind-' + e.kind, { 'is-recall': isRecall(e), 'is-recall-completed': e.recall?.completed }]">
           <div class="tl-rail">
             <span class="tl-dot"></span>
             <span class="tl-line" v-if="i < filtered.length - 1"></span>
@@ -36,7 +36,7 @@
               <span class="tl-time">{{ fmtAbs(e.time) }}</span>
               <span class="tl-about" v-if="e.about">关于 {{ e.about }}</span>
               <span class="recall-source" v-if="e.recall">{{ e.recall.source }}</span>
-              <span class="recall-status" v-if="e.recall">已自动处理</span>
+              <span class="recall-status" v-if="e.recall">{{ e.recall.completed ? '已自动处理' : '待处理' }}</span>
             </div>
             <div class="tl-content">{{ e.content }}</div>
           </div>
@@ -69,7 +69,7 @@ const LABELS = Object.fromEntries(KINDS.map(k => [k.value, k.label]))
 function kindLabel(kind) { return LABELS[kind] || kind }
 
 function isRecall(e) {
-  return Boolean(e.recall) || String(e.content || '').startsWith('想起：') || String(e.content || '').startsWith('（毫无来由地')
+  return Boolean(e.recall)
 }
 function displayKind(e) { return isRecall(e) ? 'recall' : e.kind }
 const filtered = computed(() => {
@@ -179,6 +179,7 @@ onUnmounted(() => window.clearInterval(poller))
 }
 .tl-item.kind-inner .tl-content { color: var(--text); }
 .tl-item.is-recall .tl-content { padding: 8px 10px; border-left: 3px solid var(--warning); background: var(--warning-subtle); border-radius: 4px; }
+.tl-item.is-recall-completed .tl-content { opacity: .72; }
 
 .empty { text-align: center; padding: 32px; color: var(--text-3); font-size: 13px; }
 </style>
