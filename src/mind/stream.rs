@@ -39,6 +39,13 @@ pub(crate) struct BodySignal {
     pub level: f32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RecallMeta {
+    pub id: String,
+    pub source: String,
+    pub completed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StreamEvent {
     pub kind: StreamKind,
@@ -50,6 +57,8 @@ pub(crate) struct StreamEvent {
     pub body: Option<BodySignal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall: Option<RecallMeta>,
 }
 
 impl StreamEvent {
@@ -60,11 +69,21 @@ impl StreamEvent {
             time: util::now_secs(),
             body: None,
             about: None,
+            recall: None,
         }
     }
 
     pub(crate) fn with_about(mut self, user_id: u64) -> Self {
         self.about = Some(user_id);
+        self
+    }
+
+    pub(crate) fn with_recall(mut self, id: String, source: &str) -> Self {
+        self.recall = Some(RecallMeta {
+            id,
+            source: source.to_string(),
+            completed: true,
+        });
         self
     }
 }
@@ -248,6 +267,7 @@ mod tests {
             time,
             body: None,
             about: None,
+            recall: None,
         }
     }
 

@@ -173,14 +173,14 @@ fn search_memories_inner(
     retrieval::forgetting::apply(&mut results, |id| meta.get(id).copied(), now, &fcfg);
 
     // 检索即强化：被想起的记忆延长半衰期（下一次更难忘记）
-    if fcfg.enabled && !results.is_empty() {
+    if !stable_only && fcfg.enabled && !results.is_empty() {
         let hits: std::collections::HashSet<&str> =
             results.iter().map(|r| r.content.as_str()).collect();
         reinforce_hits(user_id, current_group_id, &hits);
     }
 
     // 应用认知偏差修正
-    if config::get().humanity.cognitive_biases_enabled {
+    if !stable_only && config::get().humanity.cognitive_biases_enabled {
         let emotion = crate::emotion::get_state(user_id);
         let mut biases = cognitive_biases::load_biases();
         results = cognitive_biases::apply_cognitive_biases(results, &emotion.current, &mut biases);
@@ -197,7 +197,7 @@ fn recall_eligible(entry: &MemoryEntry) -> bool {
         return true;
     }
     if entry.importance != Importance::Important { return false; }
-    let transient = [\"喝了\", \"吃了\", \"买了\", \"看了\", \"去了\", \"做了\", \"遇到\", \"刷到\", \"听了\", \"玩了\", \"睡了\"];
+    let transient = ["喝了", "吃了", "买了", "看了", "去了", "做了", "遇到", "刷到", "听了", "玩了", "睡了"];
     !transient.iter().any(|marker| entry.content.contains(marker))
 }
 

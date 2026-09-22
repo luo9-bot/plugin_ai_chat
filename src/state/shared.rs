@@ -57,17 +57,10 @@ impl SharedState {
 
     /// 检查是否在对话跟进时间内
     pub(crate) fn is_in_follow_up(&self, group_id: u64, user_id: u64, timeout_secs: u64) -> bool {
-        if group_id > 0 {
-            self.last_reply_times
-                .get(&(group_id, 0))
-                .map(|t| t.elapsed().as_secs() < timeout_secs)
-                .unwrap_or(false)
-        } else {
-            self.last_reply_times
-                .get(&(0, user_id))
-                .map(|t| t.elapsed().as_secs() < timeout_secs)
-                .unwrap_or(false)
-        }
+        self.last_reply_times
+            .get(&(group_id, user_id))
+            .map(|t| t.elapsed().as_secs() < timeout_secs)
+            .unwrap_or(false)
     }
 
     /// 她在某群最近一次发言距今多少秒（None = 从未或已超出记录）

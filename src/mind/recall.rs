@@ -14,12 +14,34 @@
 
 use crate::mind::stream::{self, StreamKind};
 use crate::util;
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 const RECALL_COOLDOWN_SECS: u64 = 24 * 3600;
 const MAX_RECALLS_PER_TURN: usize = 3;
 static RECENT_RECALLS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+pub(crate) fn recall_id(user_id: u64, group_id: u64, content: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{user_id}:{group_id}:").as_bytes());
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+pub(crate) fn source_for(text: &str) -> Option<&'static str> {
+    if text.starts_with("想起：这话你今天已经说过了") {
+        Some("自己刚说过")
+    } else if text.starts_with("想起：（你在") {
+        Some("日记")
+    } else if text.starts_with("想起：") {
+        Some("长期记忆")
+    } else if text.starts_with("（毫无来由地") {
+        Some("情绪闪回")
+    } else {
+        None
+    }
+}
 
 /// 虚词停用表：这类字出现在哪都不构成"话题相关"
 pub(crate) const STOPWORDS: &str =

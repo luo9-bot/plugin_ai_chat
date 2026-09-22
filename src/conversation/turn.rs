@@ -48,7 +48,8 @@ impl UtteranceDigest {
 
     /// 这条发言是否在叫她（@ 她本人或点了她的名字）
     fn calls(&self, self_qq: u64, bot_name: &str) -> bool {
-        self.at_targets.contains(&self_qq) || names_bot(&self.text, bot_name)
+        (self_qq > 0 && self.at_targets.contains(&self_qq))
+            || (self.at_targets.is_empty() && names_bot(&self.text, bot_name))
     }
 }
 
@@ -76,6 +77,12 @@ impl TurnFocus {
         self.digests
             .iter()
             .any(|d| d.has_text() && d.user_id != self.primary)
+    }
+
+    pub(crate) fn is_solely_for_others(&self) -> bool {
+        !self.is_called()
+            && self.digests.iter().any(|d| d.has_text())
+            && self.digests.iter().filter(|d| d.has_text()).all(|d| !d.at_targets.is_empty())
     }
 
     /// 评分用的"被点名"加成：叫她的人或刚回过的人越多越该说话。
@@ -146,7 +153,7 @@ pub(crate) fn focus_batch(
 
     let followed_up_by: Vec<u64> = digests
         .iter()
-        .filter(|d| d.has_text() && is_follow_up(d.user_id))
+        .filter(|d| d.has_text() && d.at_targets.is_empty() && is_follow_up(d.user_id))
         .map(|d| d.user_id)
         .collect();
 

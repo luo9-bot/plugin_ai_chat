@@ -253,10 +253,18 @@ pub(crate) fn process_message(user_id: u64, message: &str) {
 
     // 联想：她能想起什么（转述入流，成为她的经历）
     for line in crate::mind::recall::recall_for(&ai_message, user_id, 0) {
-        crate::mind::stream::push(
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
-                .with_about(user_id),
-        );
+        let mut event = crate::mind::StreamEvent::new(
+            crate::mind::StreamKind::Sensation,
+            line.clone(),
+        )
+        .with_about(user_id);
+        if let Some(source) = crate::mind::recall::source_for(&line) {
+            event = event.with_recall(
+                crate::mind::recall::recall_id(user_id, 0, &line),
+                source,
+            );
+        }
+        crate::mind::stream::push(event);
     }
 
     // 注意力模型
@@ -527,7 +535,11 @@ pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
         });
 
     // 冷却是"这会儿不太想插话"，不是"听不见"：点名/叫名字必须能穿透
-    if silence_cooling(group_id) && !focus.is_called() && !addressed {
+    if focus.is_solely_for_others() {
+        debug!(group_id, "voice: 本批明确对其他群友说话，继续旁听");
+        return;
+    }
+    if silence_cooling(group_id) && !focus.is_called() && !addressed && focus.followed_up_by.is_empty() {
         debug!(group_id, "voice: silence cooldown, skipping");
         return;
     }
@@ -657,10 +669,18 @@ fn speak_and_deliver_group(
         .collect::<Vec<_>>()
         .join("\n");
     for line in crate::mind::recall::recall_for(&joined_text, primary, group_id) {
-        crate::mind::stream::push(
-            crate::mind::StreamEvent::new(crate::mind::StreamKind::Sensation, line)
-                .with_about(primary),
-        );
+        let mut event = crate::mind::StreamEvent::new(
+            crate::mind::StreamKind::Sensation,
+            line.clone(),
+        )
+        .with_about(primary);
+        if let Some(source) = crate::mind::recall::source_for(&line) {
+            event = event.with_recall(
+                crate::mind::recall::recall_id(primary, group_id, &line),
+                source,
+            );
+        }
+        crate::mind::stream::push(event);
     }
 
     // 注意力模型（以主要发言人计）
