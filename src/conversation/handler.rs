@@ -499,6 +499,22 @@ pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
         })
         .collect();
 
+    // 群级现场在沉默冷却和表达决策前记录，下一轮才能接住她错过的上下文。
+    for u in &utterances {
+        let text_only = crate::vision::strip_image_cq(&u.text);
+        let stored = if text_only.is_empty() { u.text.clone() } else { text_only };
+        let name = crate::person_info::get_display_name(u.user_id, group_id)
+            .unwrap_or_else(|| "群友".to_string());
+        with_shared_state(|s| {
+            s.push_group_history(
+                group_id,
+                "user",
+                &format!("[{name}] {stored}"),
+                cfg.conversation.max_history,
+            );
+        });
+    }
+
     // 轮次焦点：这批消息在跟谁说话（确定性判定，只用 @ / 名字 / 跟进关系）。
     // 回复目标由这里定，而不是"哪个用户的批次先到期"——批次是按
     // (群, 用户) 切出来的，取 first() 会答错人（实测 15.1% 的回复对象
