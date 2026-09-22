@@ -3,17 +3,16 @@ use std::sync::LazyLock;
 
 /// 风险类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RiskCategory {
+pub(crate) enum RiskCategory {
     Sexual,
     Violence,
     Illegal,
     Jailbreak,
     Emotional,
-    StructuredInjection,
 }
 
 /// 带权重的模式规则
-pub struct WeightedPattern {
+pub(crate) struct WeightedPattern {
     pub pattern: &'static str,
     pub category: RiskCategory,
     pub score: f32,
@@ -22,7 +21,7 @@ pub struct WeightedPattern {
 }
 
 /// 强命中模式（高置信度）
-pub static STRONG_PATTERNS: &[WeightedPattern] = &[
+pub(crate) static STRONG_PATTERNS: &[WeightedPattern] = &[
     // 色情
     WeightedPattern {
         pattern: "做爱",
@@ -436,7 +435,7 @@ pub static STRONG_PATTERNS: &[WeightedPattern] = &[
 ];
 
 /// 弱命中模式（低置信度，需要上下文或组合确认）
-pub static WEAK_PATTERNS: &[WeightedPattern] = &[
+pub(crate) static WEAK_PATTERNS: &[WeightedPattern] = &[
     // 色情
     WeightedPattern {
         pattern: "乳房",
@@ -749,13 +748,13 @@ pub static WEAK_PATTERNS: &[WeightedPattern] = &[
 ];
 
 /// 组合规则：多个短词必须在同一段中同时出现
-pub struct ComboRule {
+pub(crate) struct ComboRule {
     pub required: &'static [&'static str],
     pub category: RiskCategory,
     pub score: f32,
 }
 
-pub static COMBO_RULES: &[ComboRule] = &[
+pub(crate) static COMBO_RULES: &[ComboRule] = &[
     ComboRule {
         required: &["舔", "乳"],
         category: RiskCategory::Sexual,
@@ -869,8 +868,11 @@ pub static COMBO_RULES: &[ComboRule] = &[
 ];
 
 /// 编译后的 Aho-Corasick 自动机
+///
+/// `ac` 为 `None` 表示自动机构建失败（只可能是模式表里有空串这种代码缺陷）：
+/// 那时这一层扫不到任何东西，而不是让消息处理 panic。
 struct CompiledAutomaton {
-    ac: AhoCorasick,
+    ac: Option<AhoCorasick>,
     patterns: Vec<CompiledPattern>,
 }
 
@@ -883,10 +885,19 @@ struct CompiledPattern {
 
 fn build_automaton(patterns: &[WeightedPattern]) -> CompiledAutomaton {
     let keywords: Vec<&str> = patterns.iter().map(|p| p.pattern).collect();
-    let ac = AhoCorasickBuilder::new()
+    let ac = match AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostLongest)
         .build(&keywords)
-        .expect("Failed to build Aho-Corasick automaton");
+    {
+        Ok(ac) => Some(ac),
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "patterns: 模式自动机构建失败，本层不会命中任何模式（检查模式表是否有空串）"
+            );
+            None
+        }
+    };
     let compiled = patterns
         .iter()
         .map(|p| CompiledPattern {
@@ -906,7 +917,12 @@ static STRONG_AC: LazyLock<CompiledAutomaton> = LazyLock::new(|| build_automaton
 static WEAK_AC: LazyLock<CompiledAutomaton> = LazyLock::new(|| build_automaton(WEAK_PATTERNS));
 
 /// 检查所有 occurrence 是否被抑制（修复旧版本只检查第一次 occurrence 的 bug）
-pub fn is_suppressed_all(text: &str, keyword: &str, window: usize, suppressors: &[&str]) -> bool {
+pub(crate) fn is_suppressed_all(
+    text: &str,
+    keyword: &str,
+    window: usize,
+    suppressors: &[&str],
+) -> bool {
     if suppressors.is_empty() {
         return false;
     }
@@ -936,7 +952,7 @@ pub fn is_suppressed_all(text: &str, keyword: &str, window: usize, suppressors: 
 
 /// 模式匹配结果
 #[derive(Debug, Clone, Default)]
-pub struct PatternScores {
+pub(crate) struct PatternScores {
     pub sexual: f32,
     pub violence: f32,
     pub illegal: f32,
@@ -945,30 +961,24 @@ pub struct PatternScores {
 }
 
 impl PatternScores {
-    pub fn add(&mut self, category: RiskCategory, score: f32) {
+    pub(crate) fn add(&mut self, category: RiskCategory, score: f32) {
         match category {
             RiskCategory::Sexual => self.sexual = (self.sexual + score).min(1.0),
             RiskCategory::Violence => self.violence = (self.violence + score).min(1.0),
             RiskCategory::Illegal => self.illegal = (self.illegal + score).min(1.0),
             RiskCategory::Jailbreak => self.jailbreak = (self.jailbreak + score).min(1.0),
             RiskCategory::Emotional => self.emotional = (self.emotional + score).min(1.0),
-            RiskCategory::StructuredInjection => {}
         }
-    }
-
-    pub fn max_score(&self) -> f32 {
-        self.sexual
-            .max(self.violence)
-            .max(self.illegal)
-            .max(self.jailbreak)
-            .max(self.emotional)
     }
 }
 
 /// 在单段文本上执行 Aho-Corasick 模式匹配
 fn match_segment(segment: &str, automaton: &CompiledAutomaton) -> PatternScores {
     let mut scores = PatternScores::default();
-    for mat in automaton.ac.find_iter(segment) {
+    let Some(ac) = &automaton.ac else {
+        return scores;
+    };
+    for mat in ac.find_iter(segment) {
         let pat = &automaton.patterns[mat.pattern()];
         let keyword = &segment[mat.start()..mat.end()];
         // 检查所有 occurrence 是否被抑制
@@ -991,7 +1001,7 @@ fn match_combos(segment: &str) -> PatternScores {
 }
 
 /// 对多段文本执行完整模式匹配（逐段，不跨段）
-pub fn match_patterns(segments: &[String]) -> PatternScores {
+pub(crate) fn match_patterns(segments: &[String]) -> PatternScores {
     let mut combined = PatternScores::default();
     for seg in segments {
         let strong = match_segment(seg, &STRONG_AC);

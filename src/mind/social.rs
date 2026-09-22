@@ -87,10 +87,10 @@ const W_RECENT_REPLY: f32 = 0.08;
 
 /// 门限默认值。刻意落在评分分布的低分位，而不是压在"最该说的话"上：
 /// 说不说最终由她自己在表达里决定，门控只用来挡明显不值得叫醒她的噪声。
-pub const DEFAULT_SPEAK_GATE: f32 = 0.18;
+pub(crate) const DEFAULT_SPEAK_GATE: f32 = 0.18;
 
 /// 当前生效的开口门限（配置可覆盖默认值）
-pub fn speak_gate() -> f32 {
+pub(crate) fn speak_gate() -> f32 {
     crate::config::get().humanity.speak_gate
 }
 
@@ -118,7 +118,7 @@ const IGNORED_WINDOW_SECS: u64 = 600;
 
 /// 一个群的完整社会状态
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SocialState {
+pub(crate) struct SocialState {
     /// 参与者注意力表
     #[serde(default)]
     pub participants: HashMap<u64, Participant>,
@@ -144,7 +144,7 @@ pub struct SocialState {
 
 /// 群聊参与者的注意力状态
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Participant {
+pub(crate) struct Participant {
     /// 0.0~1.0，指数衰减
     #[serde(default)]
     pub attention: f32,
@@ -160,7 +160,7 @@ pub struct Participant {
 
 /// 一个话题线程：一条并行展开的对话线
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TopicThread {
+pub(crate) struct TopicThread {
     pub id: usize,
     /// 话题标题：消息中的实词片段（≤10 字，无 LLM，只用于展示与匹配）
     pub title: String,
@@ -186,7 +186,7 @@ pub struct TopicThread {
 /// 结构化而非裸字符串：拉黑清洗可按 speaker 精确过滤，
 /// 她自己的发言（is_bot）在线程里一眼可见——"我刚说过什么"。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TranscriptLine {
+pub(crate) struct TranscriptLine {
     pub speaker: u64,
     pub name: String,
     pub text: String,
@@ -197,7 +197,7 @@ pub struct TranscriptLine {
 
 /// 未回应的提问：有人在等
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Question {
+pub(crate) struct Question {
     pub from: u64,
     /// 原文（≤60 字，保留 @ 码以判断是否指向她）
     pub text: String,
@@ -206,7 +206,7 @@ pub struct Question {
 
 /// 她最近一次开口的踪迹
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BotSpeechTrace {
+pub(crate) struct BotSpeechTrace {
     pub at: u64,
     /// 当时挂进去的线程（None = 当时群里没有活跃线）
     pub thread_id: Option<usize>,
@@ -238,25 +238,13 @@ fn load_state_from_disk(group_id: u64) -> SocialState {
     }
 }
 
-/// 落盘一份状态（原子 tmp+rename，中断恢复）
+/// 落盘一份状态（原子写：临时文件 → fsync → rename，中断可恢复）
 fn save_state_to_disk(group_id: u64, state: &SocialState) {
-    let path = social_path(group_id);
-    if let Some(parent) = path.parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(group_id, error = %e, "social: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string(state) else {
         warn!(group_id, "social: 状态序列化失败");
         return;
     };
-    let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!(group_id, "social: 写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, &path) {
+    if let Err(e) = crate::util::atomic_write(social_path(group_id), json) {
         warn!(group_id, error = %e, "social: 状态落盘失败");
     }
 }
@@ -359,7 +347,7 @@ fn bump_bond(bonds: &mut HashMap<u64, HashMap<u64, f32>>, a: u64, b: u64, delta:
 
 /// 判读一对接话人之间的关系档位
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BondLevel {
+pub(crate) enum BondLevel {
     /// ≥0.5 熟络
     Close,
     /// ≥0.25 认识
@@ -368,7 +356,7 @@ pub enum BondLevel {
     Stranger,
 }
 
-pub fn bond_level(familiarity: f32) -> BondLevel {
+pub(crate) fn bond_level(familiarity: f32) -> BondLevel {
     if familiarity >= 0.5 {
         BondLevel::Close
     } else if familiarity >= 0.25 {
@@ -381,7 +369,7 @@ pub fn bond_level(familiarity: f32) -> BondLevel {
 // ── 观察（核心逻辑，纯函数）────────────────────────────────────
 
 /// 观察上下文：由调用方提供环境取值，保持核心逻辑可测
-pub struct ObserveCtx<'a> {
+pub(crate) struct ObserveCtx<'a> {
     pub self_qq: u64,
     pub bot_name: &'a str,
     /// 发言者显示名（None → uid）
@@ -393,7 +381,13 @@ pub struct ObserveCtx<'a> {
 /// 处理一条群消息对社会状态的影响。
 ///
 /// 顺序：注意力 → 线程匹配归入/新建 → 提问检测 → PairBond → 被忽略感。
-pub fn observe_event(state: &mut SocialState, ctx: &ObserveCtx, user_id: u64, text: &str, ts: u64) {
+pub(crate) fn observe_event(
+    state: &mut SocialState,
+    ctx: &ObserveCtx,
+    user_id: u64,
+    text: &str,
+    ts: u64,
+) {
     if user_id == 0 || text.trim().is_empty() {
         return;
     }
@@ -652,7 +646,7 @@ fn decay_value(value: f32, elapsed_secs: u64) -> f32 {
 }
 
 /// 周期维护：全表注意力衰减 + 线程强度衰减/关闭 + 参与者淡出
-pub fn evolve(state: &mut SocialState, now: u64) {
+pub(crate) fn evolve(state: &mut SocialState, now: u64) {
     let elapsed = now.saturating_sub(state.updated_at);
     for p in state.participants.values_mut() {
         p.attention = decay_value(p.attention, elapsed);
@@ -676,7 +670,7 @@ pub fn evolve(state: &mut SocialState, now: u64) {
 // ── SpeakScore（纯函数）────────────────────────────────────────
 
 /// 门控打分的输入（全部来自 SocialState + 既有状态系统，零 LLM）
-pub struct SpeakScoreInput<'a> {
+pub(crate) struct SpeakScoreInput<'a> {
     /// 批次逐条消息 (说话人, 文本)——相关度逐条计算取最大，
     /// 避免跨话题拼接稀释命中
     pub utterances: &'a [(u64, &'a str)],
@@ -708,7 +702,7 @@ fn intensity_word(intensity: f32) -> &'static str {
 /// 渲染"群里的势"感官块（感知语气，无指令；无活跃线程且无悬案时 None）。
 ///
 /// `bot_spoke_ago`：她本群最近一次发言距今的秒数（None = 很久没说）。
-pub fn render_context_block(
+pub(crate) fn render_context_block(
     state: &SocialState,
     now: u64,
     self_qq: u64,
@@ -725,10 +719,7 @@ pub fn render_context_block(
 
     if topics.len() >= 2 {
         lines.push("群里有几条话题线同时在走，别把不同人的话揉成一条".to_string());
-    } else if topics
-        .first()
-        .is_some_and(|topic| topic.intensity >= 0.6)
-    {
+    } else if topics.first().is_some_and(|topic| topic.intensity >= 0.6) {
         lines.push("群里现在比较热，大家接话很快".to_string());
     } else if !topics.is_empty() {
         lines.push("群里这会儿不算吵，接话可以自然一点".to_string());
@@ -849,7 +840,7 @@ fn notable_bonds(state: &SocialState) -> Vec<(u64, u64, f32)> {
 /// 她下一眼就能在线程里看见自己刚说过什么（P1 复读的解药之一），
 /// 并以此为锚点开始观察"有没有人接她的话"。
 /// 群里没有活跃线程时不强行建线（那段话由意识流承担）。
-pub fn record_bot_speech_in(state: &mut SocialState, text: &str, bot_name: &str, now: u64) {
+pub(crate) fn record_bot_speech_in(state: &mut SocialState, text: &str, bot_name: &str, now: u64) {
     let clipped = clamp_text(text);
     if clipped.is_empty() {
         return;
@@ -885,7 +876,7 @@ pub fn record_bot_speech_in(state: &mut SocialState, text: &str, bot_name: &str,
 // ── 清洗 ───────────────────────────────────────────────────────
 
 /// 被拉黑用户的一切社会痕迹：participants、线程参与者、转述行、bonds
-pub fn purge_user_in(state: &mut SocialState, user_id: u64) {
+pub(crate) fn purge_user_in(state: &mut SocialState, user_id: u64) {
     state.participants.remove(&user_id);
     for t in &mut state.topics {
         t.participants.retain(|&uid| uid != user_id);
@@ -911,7 +902,7 @@ pub fn purge_user_in(state: &mut SocialState, user_id: u64) {
 // ── IO 包装（入口调用，observe 不落盘）─────────────────────────
 
 /// 消息入口调用：观察一条群消息（纯内存更新，主循环零 IO）
-pub fn observe_message(group_id: u64, user_id: u64, text: &str, ts: u64) {
+pub(crate) fn observe_message(group_id: u64, user_id: u64, text: &str, ts: u64) {
     let cfg = config::get();
     let display_name = crate::person_info::get_display_name(user_id, group_id);
     let ctx = ObserveCtx {
@@ -930,7 +921,7 @@ pub fn observe_message(group_id: u64, user_id: u64, text: &str, ts: u64) {
 }
 
 /// 周期维护：全表衰减 + 线程生命周期 + 落盘（check_periodic 对活跃群逐群调用）
-pub fn tick(group_id: u64) {
+pub(crate) fn tick(group_id: u64) {
     let snapshot = with_state(group_id, |state| {
         let had_content =
             !state.topics.is_empty() || !state.participants.is_empty() || state.next_thread_id > 0;
@@ -945,7 +936,7 @@ pub fn tick(group_id: u64) {
 }
 
 /// 她刚说的话挂进最热线程（回复落地时调用，handler 线程，落盘代价可接受）
-pub fn record_bot_speech(group_id: u64, text: &str) {
+pub(crate) fn record_bot_speech(group_id: u64, text: &str) {
     let cfg = config::get();
     let snapshot = with_state(group_id, |state| {
         record_bot_speech_in(state, text, &cfg.bot_name, util::now_secs());
@@ -956,7 +947,7 @@ pub fn record_bot_speech(group_id: u64, text: &str) {
 }
 
 /// 渲染"群里的势"感官块（voice::speak_group 注入用；无事发生时 None）
-pub fn context_block(group_id: u64) -> Option<String> {
+pub(crate) fn context_block(group_id: u64) -> Option<String> {
     let cfg = config::get();
     let spoke_ago = crate::read_shared_state(|s| s.last_reply_ago(group_id));
     with_state(group_id, |state| {
@@ -971,7 +962,7 @@ pub fn context_block(group_id: u64) -> Option<String> {
 /// `score_before_gate / gate_reason / selected_thread`，这里把"分数
 /// 从哪来"一并留下——出问题时能直接回放复算，而不是猜。
 #[derive(Debug, Clone, Copy)]
-pub struct SpeakScoreBreakdown {
+pub(crate) struct SpeakScoreBreakdown {
     /// 最终总分（用于与门限比较）
     pub total: f32,
     /// 话题相关度（0~1）
@@ -996,7 +987,7 @@ pub struct SpeakScoreBreakdown {
 
 impl SpeakScoreBreakdown {
     /// 单行可解析形态，便于从日志回放标定门限
-    pub fn log_line(&self) -> String {
+    pub(crate) fn log_line(&self) -> String {
         format!(
             "total={:.4} relevance={:.3} attention={:.3} unanswered={:.0} fresh={:.0} addressing={:.2} fatigue={:.3} risk={:.0} recent={:.3} since_spoke={}",
             self.total,
@@ -1019,7 +1010,7 @@ impl SpeakScoreBreakdown {
 ///
 /// `addressing` 来自 [`crate::conversation::turn::TurnFocus`]：1.0 = 有人
 /// 点名找她，0.5 = 她刚回过的人在继续，0.0 = 谁也没冲她说话。
-pub fn speak_score(
+pub(crate) fn speak_score(
     group_id: u64,
     utterances: &[(u64, &str)],
     primary: u64,
@@ -1046,7 +1037,7 @@ pub fn speak_score(
     };
     let (bot_name, self_qq) = (cfg.bot_name.clone(), cfg.self_qq);
     let now = util::now_secs();
-    let intimacy_component = W_INTIMACY * intimacy;
+    let intimacy_component = W_INTIMACY * input.intimacy;
     with_state(group_id, |state| {
         let mut breakdown = speak_score_breakdown(state, now, &input, &bot_name, self_qq);
         // 亲密度不单独成项暴露（它是关系系统的输出），并入总分说明
@@ -1056,12 +1047,12 @@ pub fn speak_score(
 }
 
 /// admin API：读取一份社会状态快照（供 WebUI 展示"群里的势"）
-pub fn state_for_admin(group_id: u64) -> SocialState {
+pub(crate) fn state_for_admin(group_id: u64) -> SocialState {
     with_state(group_id, |state| state.clone())
 }
 
 /// admin API：已有社会状态的群列表（内存态 + 磁盘文件）
-pub fn known_groups() -> Vec<u64> {
+pub(crate) fn known_groups() -> Vec<u64> {
     known_group_ids()
 }
 
@@ -1093,7 +1084,7 @@ fn known_group_ids() -> Vec<u64> {
 }
 
 /// 被拉黑用户的一切社会痕迹清洗（内存 + 落盘，随零容忍/管理员拉黑调用）
-pub fn purge_user(user_id: u64) {
+pub(crate) fn purge_user(user_id: u64) {
     for group_id in known_group_ids() {
         let snapshot = with_state(group_id, |state| {
             purge_user_in(state, user_id);

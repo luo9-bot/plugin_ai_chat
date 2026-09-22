@@ -14,15 +14,43 @@ use std::collections::HashMap;
 
 use tracing::{debug, info, warn};
 
-use crate::ai::{ALL_TOOL_NAMES, Tool, ToolOutcome, run_tool_loop};
+use crate::ai::{ALL_TOOL_NAMES, SilenceCause, Tool, ToolOutcome, Utterance, run_tool_loop};
 use crate::config;
-use crate::mind::{self, SensoryPacket};
+use crate::mind::{self};
+
+/// 报告一次沉默
+///
+/// 这是把"上游全挂了"与"她今天很安静"分开的那一处：只有
+/// [`SilenceCause::Chose`] 是正常结果（`debug!`，不刷屏），
+/// 其余三类都是故障，走 `warn!` 并带上稳定的 `kind` 标签，
+/// 便于告警与统计。
+fn report_silence(scope: &str, cause: &SilenceCause, id: u64) {
+    let kind = cause.kind();
+    if cause.is_deliberate() {
+        debug!(scope, id, kind, "voice: 她选择沉默");
+        return;
+    }
+    // 三类故障各自带上能定位问题的字段
+    let detail = match cause {
+        SilenceCause::Chose => String::new(),
+        SilenceCause::UpstreamFailed { error } => {
+            format!("{} retryable={}", error.kind(), error.is_retryable())
+        }
+        SilenceCause::InvalidOutput { attempts } => format!("attempts={attempts}"),
+        SilenceCause::BudgetExhausted { rounds } => format!("rounds={rounds}"),
+    };
+    warn!(
+        scope,
+        id,
+        kind,
+        detail = %detail,
+        "voice: 这一轮没能表达——原因是故障，不是她不想说"
+    );
+}
 
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
-pub enum VoiceAction {
-    /// 请求失败或输出无效，不能算作已处理联想。
-    Failed,
+pub(crate) enum VoiceAction {
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
     Reply(String),
     /// 这一轮她选择沉默
@@ -30,11 +58,15 @@ pub enum VoiceAction {
 }
 
 /// 群聊里一条待处理的发言
-pub struct GroupUtterance {
+pub(crate) struct GroupUtterance {
     pub user_id: u64,
     /// 感知内容（已剥离 CQ 码的正文）
     pub text: String,
-    /// 原始消息中的 @ 目标。归一化正文会移除 CQ 码，因此单独保留。
+    /// 这条消息 @ 到的 QQ 号
+    ///
+    /// 必须从**原始 CQ 文本**解析：`text` 已经过
+    /// [`crate::conversation::perception::normalize`]，其中的
+    /// `[CQ:at,qq=N]` 会被还原成 `@名字`，之后再解析就永远为空。
     pub at_targets: Vec<u64>,
     /// 消息到达时间（unix 秒，转译入流用）
     pub ts: u64,
@@ -42,20 +74,11 @@ pub struct GroupUtterance {
     pub ts_ms: u64,
 }
 
-/// 按真实到达顺序排好一批发言
-///
-/// 批次是按 (群, 用户) 切出来的，合并后输入顺序不反映群里谁先谁后——
-/// 不排序就会出现"接着甲的话、回给乙"的错位。同一毫秒的并列由
-/// 用户号兜底，保证顺序确定。
-pub fn order_by_arrival(utterances: &mut [GroupUtterance]) {
-    utterances.sort_by_key(|u| (u.ts_ms, u.user_id));
-}
-
 // ── 回神协议 ────────────────────────────────────────────────────
 
 /// 回神的行动产物
 #[derive(Debug)]
-pub enum WakeAction {
+pub(crate) enum WakeAction {
     /// 说一句话（reply_to = 引用的消息 id）
     Speak { text: String, reply_to: Option<u64> },
     /// 这一轮只想想，没说话
@@ -64,7 +87,7 @@ pub enum WakeAction {
 
 /// 一次回神的完整产物
 #[derive(Debug)]
-pub struct WakeTurn {
+pub(crate) struct WakeTurn {
     /// 她亲笔的内心活动（入流 Inner）
     pub inner: Vec<String>,
     pub action: WakeAction,
@@ -135,7 +158,7 @@ thread_local! {
 }
 
 /// 取走她在本轮表达里留下的想起（若有）
-pub fn take_last_plan() -> Option<(u64, String)> {
+pub(crate) fn take_last_plan() -> Option<(u64, String)> {
     LAST_PLAN.with(|cell| cell.borrow_mut().take())
 }
 
@@ -224,7 +247,7 @@ fn search_web_tool() -> Tool {
 ///
 /// 抽取出来是因为表达与回神两条路径都要给她同一套：
 /// 她在聊天里顺手勾一下，和独处时回看今天做了什么，用的是同一批工具。
-pub fn plan_tools() -> Vec<Tool> {
+pub(crate) fn plan_tools() -> Vec<Tool> {
     vec![
         crate::ai::check_plan_tool(),
         crate::ai::add_plan_tool(),
@@ -692,36 +715,17 @@ fn style_block(group_id: u64, trigger: &str, user_id: u64) -> Option<String> {
     crate::mind::style::context_block(group_id, trigger, user_id)
 }
 
-/// 读取本轮之前的群聊现场，避免每次开口都像刚进群。
 fn group_history_block(group_id: u64, current_count: usize) -> Option<String> {
-    if group_id == 0 {
-        return None;
-    }
+    if group_id == 0 { return None; }
     let history = crate::read_shared_state(|s| s.get_group_history_clone(group_id));
     let previous_len = history.len().saturating_sub(current_count);
     let previous = &history[..previous_len];
-    if previous.is_empty() {
-        return None;
-    }
-
-    let lines: Vec<String> = previous
-        .iter()
-        .rev()
-        .take(10)
-        .rev()
-        .map(|(role, content)| {
-            if role == "assistant" {
-                format!("[你] {content}")
-            } else {
-                content.clone()
-            }
-        })
-        .collect();
+    if previous.is_empty() { return None; }
+    let lines: Vec<String> = previous.iter().rev().take(10).rev().map(|(role, content)| {
+        if role == "assistant" { format!("[你] {content}") } else { content.clone() }
+    }).collect();
     (!lines.is_empty()).then(|| {
-        format!(
-            "# 这群最近的聊天（较早现场，只用来接住语境）\n{}",
-            lines.join("\n")
-        )
+        format!("# 这群最近的聊天（较早现场，只用来接住语境）\n{}", lines.join("\n"))
     })
 }
 
@@ -732,7 +736,7 @@ fn group_history_block(group_id: u64, current_count: usize) -> Option<String> {
 /// `focus` 是这一批消息的焦点判定（谁在跟她说话、该回谁），
 /// 由 [`crate::conversation::turn`] 依确定性规则算出——回复目标不再
 /// 取决于"哪个用户的批次先到期"。
-pub fn speak_group(
+pub(crate) fn speak_group(
     group_id: u64,
     utterances: &[GroupUtterance],
     focus: &crate::conversation::turn::TurnFocus,
@@ -804,15 +808,16 @@ pub fn speak_group(
         |name, args| execute_tool(name, args, group_id, primary, &involved, &transcript_tail),
     );
 
+    // 沉默的原因必须分类留痕：只有"她选择不说"是正常结果，
+    // 其余三类是故障（上游挂了 / 输出无效 / 轮次用尽）。
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
+        Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Failed,
         },
-        Ok(None) => VoiceAction::Silent,
-        Err(e) => {
-            info!(group_id, error = %e, "voice: group API error");
-            VoiceAction::Failed
+        Utterance::Silent(cause) => {
+            report_silence("group", &cause, group_id);
+            VoiceAction::Silent
         }
     }
 }
@@ -823,7 +828,7 @@ pub fn speak_group(
 ///
 /// `message` 是刚刚发生的感知内容（含图片描述）；`extra_system` 允许
 /// 调用方追加特殊场景指令（如对话结束检测提示）。
-pub fn speak_private(
+pub(crate) fn speak_private(
     user_id: u64,
     message: &str,
     history: &[(String, String)],
@@ -852,18 +857,13 @@ pub fn speak_private(
         system.push_str(extra);
     }
 
-    // 她惦记这个人的心事进入感官（读取侧滤壳：这些 reason 落盘且反复回灌）
+    // 她惦记这个人的心事进入感官（读取侧滤壳：这些 reason 落盘且反复回灌 prompt）
     let loops = mind::wake::sanitize_reasons(mind::wake::pending_reasons_for(user_id));
-    let packet = SensoryPacket {
-        loops,
-        ..Default::default()
-    };
     let mut user_content = stream_user_content(message);
-    if !packet.loops.is_empty() {
+    if !loops.is_empty() {
         user_content.push_str("\n\n你惦记的：\n");
         user_content.push_str(
-            &packet
-                .loops
+            &loops
                 .iter()
                 .map(|l| format!("- {l}"))
                 .collect::<Vec<_>>()
@@ -897,14 +897,13 @@ pub fn speak_private(
     );
 
     match result {
-        Ok(Some(text)) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
+        Utterance::Say(text) => match guard_voice_reply(&text, &cfg.bot_name, ALL_TOOL_NAMES) {
             Some(reply) => VoiceAction::Reply(reply),
             None => VoiceAction::Failed,
         },
-        Ok(None) => VoiceAction::Silent,
-        Err(e) => {
-            info!(user_id, error = %e, "voice: private API error");
-            VoiceAction::Failed
+        Utterance::Silent(cause) => {
+            report_silence("private", &cause, user_id);
+            VoiceAction::Silent
         }
     }
 }
@@ -914,7 +913,7 @@ pub fn speak_private(
 /// 一次回神：两阶段——先写内心，再决定行动
 ///
 /// `allow_speak` 为 false（睡前整理）时只写内心，不安排 say 工具。
-pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
+pub(crate) fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 
@@ -1033,8 +1032,13 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
         }
         },
     );
-    // 决策阶段失败且她什么都没留下 = 这次回神没有完成，不是她的沉默
-    let api_failed = decision_result.is_err() && captured_action.borrow().is_none();
+    // 决策阶段上游故障且她什么都没留下 = 这次回神没有完成，不是她的沉默。
+    // 判据从"是不是 Err"变成"沉默原因是不是上游故障"：前者只是约定，
+    // 后者是类型保证的。
+    let api_failed = matches!(
+        decision_result.silence_cause(),
+        Some(SilenceCause::UpstreamFailed { .. })
+    ) && captured_action.borrow().is_none();
 
     WakeTurn {
         inner,
@@ -1048,7 +1052,7 @@ pub fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
 
 /// 日记草稿（她亲笔）
 #[derive(Debug, Clone)]
-pub struct DiaryDraft {
+pub(crate) struct DiaryDraft {
     pub content: String,
     pub feeling: Option<String>,
     pub about: Option<u64>,
@@ -1056,7 +1060,7 @@ pub struct DiaryDraft {
 
 /// 人物档案修订（她亲笔，只带新内容）
 #[derive(Debug, Clone)]
-pub struct PersonUpdate {
+pub(crate) struct PersonUpdate {
     pub user_id: u64,
     pub impression: Option<String>,
     pub my_feeling: Option<String>,
@@ -1067,7 +1071,7 @@ pub struct PersonUpdate {
 
 /// 心事草稿（她亲笔）
 #[derive(Debug, Clone)]
-pub struct LoopDraft {
+pub(crate) struct LoopDraft {
     pub content: String,
     pub about_user: Option<u64>,
     pub in_secs: Option<u64>,
@@ -1075,7 +1079,7 @@ pub struct LoopDraft {
 
 /// 目标草稿（她亲笔）：睡前整理时立下的长期愿望
 #[derive(Debug, Clone)]
-pub struct GoalDraft {
+pub(crate) struct GoalDraft {
     pub text: String,
     pub parent_id: Option<u64>,
     /// 多久之后到期（秒）
@@ -1085,14 +1089,14 @@ pub struct GoalDraft {
 
 /// 想法草稿（她亲笔）：新冒出来的念头
 #[derive(Debug, Clone)]
-pub struct IdeaDraft {
+pub(crate) struct IdeaDraft {
     pub text: String,
     pub excitement: Option<u8>,
 }
 
 /// 愿望推进（她亲笔）：目标进度更新或收尾
 #[derive(Debug, Clone)]
-pub struct WishUpdate {
+pub(crate) struct WishUpdate {
     pub goal_id: u64,
     pub progress: Option<u8>,
     pub achieved: Option<bool>,
@@ -1100,7 +1104,7 @@ pub struct WishUpdate {
 
 /// 睡前整理的完整产物
 #[derive(Debug, Default)]
-pub struct DigestOutcome {
+pub(crate) struct DigestOutcome {
     pub inner: Vec<String>,
     pub diary: Vec<DiaryDraft>,
     pub persons: Vec<PersonUpdate>,
@@ -1266,7 +1270,7 @@ fn digest_tools() -> Vec<Tool> {
 }
 
 /// 睡前整理：两阶段——先写内心，再用工具整理今天
-pub fn digest_think(input: &str) -> DigestOutcome {
+pub(crate) fn digest_think(input: &str) -> DigestOutcome {
     let identity = crate::mind::self_model::identity_text();
     let system = build_system("", &identity);
 

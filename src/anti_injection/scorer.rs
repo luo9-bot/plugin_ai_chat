@@ -1,15 +1,15 @@
 /// 风险类别权重
-pub const WEIGHT_STRUCTURAL: f32 = 1.0;
-pub const WEIGHT_PROMPT_LEAK: f32 = 0.95;
-pub const WEIGHT_JAILBREAK: f32 = 0.90;
-pub const WEIGHT_ILLEGAL: f32 = 0.80;
-pub const WEIGHT_VIOLENCE: f32 = 0.80;
-pub const WEIGHT_SEXUAL: f32 = 0.75;
-pub const WEIGHT_EMOTIONAL: f32 = 0.45;
+pub(crate) const WEIGHT_STRUCTURAL: f32 = 1.0;
+pub(crate) const WEIGHT_PROMPT_LEAK: f32 = 0.95;
+pub(crate) const WEIGHT_JAILBREAK: f32 = 0.90;
+pub(crate) const WEIGHT_ILLEGAL: f32 = 0.80;
+pub(crate) const WEIGHT_VIOLENCE: f32 = 0.80;
+pub(crate) const WEIGHT_SEXUAL: f32 = 0.75;
+pub(crate) const WEIGHT_EMOTIONAL: f32 = 0.45;
 
 /// 综合风险评分
 #[derive(Debug, Clone)]
-pub struct RiskScore {
+pub(crate) struct RiskScore {
     pub sexual: f32,
     pub violence: f32,
     pub illegal: f32,
@@ -36,7 +36,7 @@ impl Default for RiskScore {
 impl RiskScore {
     /// 贝叶斯风险融合：final = 1 - Π(1 - p_i * w_i)
     /// 比简单的 max() 更能捕捉多维度风险的叠加效应
-    pub fn combined_risk(&self) -> f32 {
+    pub(crate) fn combined_risk(&self) -> f32 {
         let weighted = [
             self.sexual * WEIGHT_SEXUAL,
             self.violence * WEIGHT_VIOLENCE,
@@ -48,21 +48,10 @@ impl RiskScore {
         ];
         combine_probabilities(&weighted)
     }
-
-    /// 获取各维度的最大风险分
-    pub fn max_raw_score(&self) -> f32 {
-        self.sexual
-            .max(self.violence)
-            .max(self.illegal)
-            .max(self.jailbreak)
-            .max(self.emotional)
-            .max(self.structured)
-            .max(self.prompt_leak)
-    }
 }
 
 /// 贝叶斯概率融合：1 - Π(1 - p_i)
-pub fn combine_probabilities(probs: &[f32]) -> f32 {
+pub(crate) fn combine_probabilities(probs: &[f32]) -> f32 {
     let product: f64 = probs
         .iter()
         .map(|&p| (1.0 - p as f64).clamp(0.0, 1.0))
@@ -71,7 +60,7 @@ pub fn combine_probabilities(probs: &[f32]) -> f32 {
 }
 
 /// 从各个子系统的分数融合为最终 RiskScore
-pub fn fuse_scores(
+pub(crate) fn fuse_scores(
     pattern_scores: &super::patterns::PatternScores,
     structure_score: f32,
     semantic_jailbreak: f32,
@@ -168,6 +157,5 @@ mod tests {
     fn test_risk_score_all_zero() {
         let score = RiskScore::default();
         assert_eq!(score.combined_risk(), 0.0);
-        assert_eq!(score.max_raw_score(), 0.0);
     }
 }

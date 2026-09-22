@@ -4,6 +4,7 @@ use std::sync::{OnceLock, RwLock};
 use tracing::debug;
 
 use super::structs::*;
+use crate::util::RwLockWriteExt;
 
 // ── 全局实例 ────────────────────────────────────────────────────
 
@@ -13,6 +14,8 @@ pub(super) static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// 配置解析错误信息，为空表示正常
 pub(super) static CONFIG_ERROR: RwLock<String> = RwLock::new(String::new());
 
+/// 把相对路径解析成绝对路径（只有生产数据目录需要：测试用临时目录）
+#[cfg(not(test))]
 fn to_absolute(p: &PathBuf) -> PathBuf {
     if p.is_absolute() {
         p.clone()
@@ -39,8 +42,34 @@ pub(super) const DEFAULT_PROMPT_TXT: &str = r#"# 人设
 
 // ── 初始化 ──────────────────────────────────────────────────────
 
-pub fn init() {
-    let data_path = to_absolute(&PathBuf::from("data").join("plugin_ai_chat"));
+/// 这个构建用哪个数据目录
+///
+/// 测试构建落在**进程独占的临时目录**里，而不是真实的
+/// `data/plugin_ai_chat/`：`init()` 会写 `config.yaml`，测试还散布着
+/// `daily_plan.json`、`push_history.json`、`event_log.db` 等文件。落在真实
+/// 目录里意味着跑一次 `cargo test` 就可能覆盖用户正在用的配置，而且上一次
+/// 测试留下的状态会参与下一次（代码里记为"约每十几次一次"的偶发红灯）。
+///
+/// 生产构建仍然用真实目录：`data_dir()` 是启动契约，不能猜。
+///
+/// 它同时是**唯一**的推导入口：`plugin_main` 要在 `init()` 之前建日志目录，
+/// 那时 `DATA_DIR` 还没被设置（走 `data_dir()` 会 panic，而插件入口是
+/// `extern "C"`，一次 panic 不刷日志）。两处各推导一遍路径才是真正的隐患——
+/// 推导规则一旦改动，日志会落到和数据不同的地方。
+#[cfg(test)]
+pub(crate) fn default_data_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("plugin_ai_chat_test")
+        .join(format!("pid{}", std::process::id()))
+}
+
+#[cfg(not(test))]
+pub(crate) fn default_data_path() -> PathBuf {
+    to_absolute(&PathBuf::from("data").join("plugin_ai_chat"))
+}
+
+pub(crate) fn init() {
+    let data_path = default_data_path();
     fs::create_dir_all(&data_path).ok();
     fs::create_dir_all(data_path.join("prompts")).ok();
     let _ = DATA_DIR.set(data_path.clone());
@@ -48,7 +77,9 @@ pub fn init() {
     // 配置文件: 不存在则自动生成
     let config_path = data_path.join("config.yaml");
     if !config_path.exists() {
-        fs::write(&config_path, DEFAULT_CONFIG_YAML).ok();
+        if let Err(error) = crate::util::atomic_write(&config_path, DEFAULT_CONFIG_YAML) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
         debug!(path = ?config_path, "generated default config");
     }
 
@@ -58,7 +89,7 @@ pub fn init() {
             Err(e) => {
                 let msg = format!("配置文件解析失败，已使用默认值: {}", e);
                 tracing::error!(path = ?config_path, error = %e, "{}", msg);
-                *CONFIG_ERROR.write().unwrap() = msg;
+                *CONFIG_ERROR.write_recover() = msg;
                 Config {
                     search: Default::default(),
                     api_key: String::new(),
@@ -129,7 +160,9 @@ pub fn init() {
     // 提示词文件: 不存在则自动生成
     let prompt_path = data_path.join("prompts").join(&config.prompts);
     if !prompt_path.exists() {
-        fs::write(&prompt_path, DEFAULT_PROMPT_TXT).ok();
+        if let Err(error) = crate::util::atomic_write(&prompt_path, DEFAULT_PROMPT_TXT) {
+            tracing::warn!(error = %error, "写盘失败");
+        }
         debug!(path = ?prompt_path, "generated default prompt");
     }
 
@@ -138,8 +171,8 @@ pub fn init() {
     // 自号自检
     check_self_qq(&mut config, &data_path);
 
-    *CONFIG.write().unwrap() = Some(config);
-    *PROMPT.write().unwrap() = prompt_content;
+    *CONFIG.write_recover() = Some(config);
+    *PROMPT.write_recover() = prompt_content;
 
     load_all();
 }
@@ -190,7 +223,7 @@ fn load_all() {
     let emo_count = crate::emotion::user_count();
     let wm_groups = crate::working_memory::group_count();
     let (archive_wm, archive_lt) = crate::archive::stats();
-    let block_count = crate::blocklist::load_count();
+    let block_count = crate::db::db().blocked_count().unwrap_or(0);
 
     debug!(
         path = ?super::data_dir(),

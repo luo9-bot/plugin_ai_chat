@@ -2,7 +2,6 @@
 
 mod segments;
 mod send;
-pub mod timing;
+pub(crate) mod timing;
 
-pub use segments::*;
-pub use send::*;
+pub(crate) use send::*;

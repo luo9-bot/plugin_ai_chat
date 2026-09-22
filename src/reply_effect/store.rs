@@ -1,23 +1,24 @@
 //! 回复效果数据结构和持久化
 
+use crate::util::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum EffectStatus {
+pub(crate) enum EffectStatus {
     Pending,
     Finalized,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FollowupMessage {
+pub(crate) struct FollowupMessage {
     pub user_id: u64,
     pub content: String,
     pub timestamp: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplyEffectRecord {
+pub(crate) struct ReplyEffectRecord {
     pub reply_text: String,
     pub target_user: u64,
     pub group_id: u64,
@@ -31,7 +32,7 @@ pub struct ReplyEffectRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EffectStore {
+pub(crate) struct EffectStore {
     pub records: Vec<ReplyEffectRecord>,
 }
 
@@ -42,7 +43,7 @@ pub(crate) fn store_path() -> std::path::PathBuf {
 }
 
 pub(crate) fn load_store() -> EffectStore {
-    let mut guard = STORE.lock().unwrap();
+    let mut guard = STORE.lock_recover();
     if guard.is_none() {
         *guard = Some(crate::util::load_json(&store_path()));
     }
@@ -50,11 +51,16 @@ pub(crate) fn load_store() -> EffectStore {
 }
 
 pub(crate) fn save_store(store: &EffectStore) {
-    let mut guard = STORE.lock().unwrap();
-    *guard = Some(store.clone());
-    crate::util::save_json(&store_path(), store);
+    {
+        let mut guard = STORE.lock_recover();
+        *guard = Some(store.clone());
+        // 锁在这里释放：磁盘延迟不该决定锁的持有时间
+    }
+    if let Err(error) = crate::util::save_json(&store_path(), store) {
+        tracing::warn!(error = %error, path = %store_path().display(), "reply_effect: 持久化失败");
+    }
 }
 
-pub const OBSERVATION_WINDOW: u64 = 600;
-pub const MAX_FOLLOWUPS: usize = 10;
-pub const MAX_ACTIVE_RECORDS: usize = 20;
+pub(crate) const OBSERVATION_WINDOW: u64 = 600;
+pub(crate) const MAX_FOLLOWUPS: usize = 10;
+pub(crate) const MAX_ACTIVE_RECORDS: usize = 20;

@@ -3,7 +3,7 @@ use unicode_normalization::UnicodeNormalization;
 
 /// 三视图归一化文本
 #[derive(Debug, Clone)]
-pub struct NormalizedText {
+pub(crate) struct NormalizedText {
     /// 原始输入（仅去除非法控制字符）
     pub raw: String,
     /// Confusable skeleton（视觉相似字符→ASCII）
@@ -133,7 +133,7 @@ fn apply_homo_replacements(text: &str) -> String {
 }
 
 /// 三视图归一化
-pub fn normalize(input: &str) -> NormalizedText {
+pub(crate) fn normalize(input: &str) -> NormalizedText {
     NormalizedText {
         raw: clean_raw(input),
         skeleton: make_skeleton(input),

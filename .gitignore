@@ -34,3 +34,5 @@ luo9*.txt
 *.md
 
 *.diff
+.npm-cache/
+*cache*/

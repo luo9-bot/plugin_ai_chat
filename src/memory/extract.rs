@@ -19,8 +19,10 @@ fn load_keyword_map() -> std::collections::HashMap<String, u64> {
 
 fn save_keyword_map(map: &std::collections::HashMap<String, u64>) {
     let path = keyword_cooldown_path();
-    if let Ok(json) = serde_json::to_string_pretty(map) {
-        std::fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(map)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
@@ -99,7 +101,7 @@ fn is_contradictory(user_id: u64, content: &str) -> bool {
 }
 
 /// AI 驱动的记忆提取（MaiBot 风格）
-pub fn ai_extract(
+pub(crate) fn ai_extract(
     user_id: u64,
     group_id: u64,
     user_message: &str,
@@ -198,30 +200,6 @@ fn fallback_keyword(user_id: u64, group_id: u64, message: &str) {
                 "keyword '记住' fallback",
             );
             add(user_id, group_id, after, Importance::Normal);
-            mark_keyword_extracted(user_id, "记住");
-        }
-    }
-}
-
-pub fn extract_memory_from_message(user_id: u64, message: &str) {
-    if looks_ephemeral(message) {
-        return;
-    }
-    if let Some(pos) = message.find("记住") {
-        let after = &message[pos + 2..].trim();
-        if !after.is_empty()
-            && !is_keyword_on_cooldown(user_id, "记住")
-            && !is_contradictory(user_id, after)
-        {
-            super::ops_log::record(
-                "keyword_extract",
-                user_id,
-                0,
-                after,
-                "normal",
-                "keyword '记住' from message",
-            );
-            add(user_id, 0, after, Importance::Normal);
             mark_keyword_extracted(user_id, "记住");
         }
     }

@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
 use tracing::info;
 
 use crate::crisis::CrisisLevel;
@@ -11,7 +9,7 @@ pub(crate) const CRISIS_SEVERE_COOLDOWN_SECS: u64 = 7200;
 pub(crate) const CRISIS_MILD_COOLDOWN_SECS: u64 = 3600;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum EmotionType {
+pub(crate) enum EmotionType {
     Neutral,
     Happy,
     Sad,
@@ -25,59 +23,8 @@ pub enum EmotionType {
     Like, // 喜欢/心动
 }
 
-impl EmotionType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Neutral => "neutral",
-            Self::Happy => "happy",
-            Self::Sad => "sad",
-            Self::Thinking => "thinking",
-            Self::Surprised => "surprised",
-            Self::Angry => "angry",
-            Self::Shy => "shy",
-            Self::Worried => "worried",
-            Self::Tired => "tired",
-            Self::Excited => "excited",
-            Self::Like => "like",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "happy" | "开心" | "高兴" => Self::Happy,
-            "sad" | "难过" | "伤心" => Self::Sad,
-            "thinking" | "思考" | "沉思" => Self::Thinking,
-            "surprised" | "惊讶" | "吃惊" => Self::Surprised,
-            "angry" | "生气" | "愤怒" => Self::Angry,
-            "shy" | "害羞" | "羞涩" => Self::Shy,
-            "worried" | "担心" | "担忧" => Self::Worried,
-            "tired" | "疲惫" | "困倦" => Self::Tired,
-            "excited" | "兴奋" | "激动" => Self::Excited,
-            "like" | "喜欢" | "心动" => Self::Like,
-            _ => Self::Neutral,
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Neutral => "平静",
-            Self::Happy => "开心",
-            Self::Sad => "难过",
-            Self::Thinking => "沉思",
-            Self::Surprised => "惊讶",
-            Self::Angry => "有些不悦",
-            Self::Shy => "害羞",
-            Self::Worried => "担忧",
-            Self::Tired => "疲惫",
-            Self::Excited => "兴奋",
-            Self::Like => "心动",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmotionState {
+pub(crate) struct EmotionState {
     pub current: EmotionType,
     /// 混合情绪（次要情绪，如"开心但有点担忧"）
     #[serde(default)]
@@ -128,7 +75,7 @@ fn default_empathy_resonance() -> f32 {
 
 /// 情绪触发事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmotionTrigger {
+pub(crate) struct EmotionTrigger {
     /// 触发类型
     pub trigger_type: TriggerType,
     /// 触发源描述
@@ -143,7 +90,7 @@ pub struct EmotionTrigger {
 
 /// 情绪触发类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TriggerType {
+pub(crate) enum TriggerType {
     /// 用户说了什么
     UserMessage,
     /// 自我反思
@@ -166,7 +113,7 @@ impl EmotionState {
     /// 2. 新刺激叠加（不是替换，是混合）
     /// 3. 基线引力——缓慢拉向人格决定的基线情绪
     /// 4. 清理过期触发链
-    pub fn update_emotional_dynamics(
+    pub(crate) fn update_emotional_dynamics(
         &mut self,
         new_stimulus: Option<(&EmotionType, f32, &str, TriggerType)>,
         delta_secs: f32,
@@ -248,55 +195,6 @@ impl EmotionState {
 
         self.last_update = crate::util::now_secs();
     }
-
-    /// 情绪感染——被他人的情绪状态影响
-    pub fn emotional_contagion(&mut self, other_emotion: &EmotionType, other_intensity: f32) {
-        let resonance = self.empathy_resonance * other_intensity * 0.3;
-        if resonance > 0.1 {
-            self.update_emotional_dynamics(
-                Some((
-                    other_emotion,
-                    resonance,
-                    "情绪感染",
-                    TriggerType::EmotionalContagion,
-                )),
-                0.0,
-            );
-        }
-    }
-
-    /// 获取当前情绪的描述
-    pub fn describe_detailed(&self) -> String {
-        let mut desc = match self.current {
-            EmotionType::Neutral => "平静".to_string(),
-            EmotionType::Happy => "开心".to_string(),
-            EmotionType::Sad => "难过".to_string(),
-            EmotionType::Thinking => "沉思".to_string(),
-            EmotionType::Surprised => "惊讶".to_string(),
-            EmotionType::Angry => "有些不悦".to_string(),
-            EmotionType::Shy => "害羞".to_string(),
-            EmotionType::Worried => "担忧".to_string(),
-            EmotionType::Tired => "疲惫".to_string(),
-            EmotionType::Excited => "兴奋".to_string(),
-            EmotionType::Like => "心动".to_string(),
-        };
-
-        if let Some(secondary) = &self.secondary {
-            let sec_desc = match secondary {
-                EmotionType::Happy => "开心",
-                EmotionType::Sad => "难过",
-                EmotionType::Worried => "担忧",
-                EmotionType::Excited => "兴奋",
-                EmotionType::Thinking => "思考",
-                _ => "",
-            };
-            if !sec_desc.is_empty() {
-                desc = format!("{}但有点{}", desc, sec_desc);
-            }
-        }
-
-        format!("{}(强度:{:.1})", desc, self.intensity)
-    }
 }
 
 impl Default for EmotionState {
@@ -323,52 +221,50 @@ impl Default for EmotionState {
     }
 }
 
-fn emotion_path() -> std::path::PathBuf {
-    crate::config::data_dir().join("emotion.json")
-}
-
-fn load_states() -> HashMap<String, EmotionState> {
-    let path = emotion_path();
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => HashMap::new(),
+/// 读一个用户的情绪状态
+///
+/// 状态库按 user_id 主键存**一行一个用户**。此前这里是"读整个
+/// `emotion.json` 再取其中一个键"：`get_state` 在每条消息的路径上被调用，
+/// 而 `update_state` 更是"全量读 → 改一个键 → 全量写"——
+/// 一个用户的情绪波动会重写所有用户的记录。
+pub(crate) fn get_state(user_id: u64) -> EmotionState {
+    let stored = crate::db::db().emotion_state(user_id);
+    match stored {
+        Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
+        Ok(None) => EmotionState::default(),
+        Err(error) => {
+            tracing::warn!(%error, user_id, "emotion: 读取状态失败，按默认情绪处理");
+            EmotionState::default()
+        }
     }
 }
 
-fn save_states(states: &HashMap<String, EmotionState>) {
-    let path = emotion_path();
-    if let Ok(json) = serde_json::to_string_pretty(states) {
-        fs::write(path, json).ok();
+/// 写一个用户的情绪状态（单行 UPSERT）
+pub(crate) fn update_state(user_id: u64, state: EmotionState) {
+    let json = match serde_json::to_string(&state) {
+        Ok(json) => json,
+        Err(error) => {
+            tracing::warn!(%error, user_id, "emotion: 序列化失败，状态未写入");
+            return;
+        }
+    };
+    if let Err(error) = crate::db::db().set_emotion_state(user_id, &json) {
+        tracing::warn!(%error, user_id, "emotion: 状态写库失败");
     }
 }
 
-/// 初始化时调用：返回有情绪状态的用户数量
-pub fn user_count() -> usize {
-    let states = load_states();
-    states.len()
+/// 有情绪状态记录的用户数量
+pub(crate) fn user_count() -> usize {
+    crate::db::db().emotion_user_count().unwrap_or(0)
 }
 
-pub fn get_state(user_id: u64) -> EmotionState {
-    let states = load_states();
-    states
-        .get(&user_id.to_string())
-        .cloned()
-        .unwrap_or_default()
-}
-
-pub fn update_state(user_id: u64, state: EmotionState) {
-    let mut states = load_states();
-    states.insert(user_id.to_string(), state);
-    save_states(&states);
-}
-
-pub fn decay(user_id: u64) {
-    let cfg = &crate::config::get().emotion;
-    let mut state = get_state(user_id);
-    let now = crate::util::now_secs();
+/// 单个用户状态的时间推进（纯计算，不碰磁盘）
+///
+/// 返回 `false` 表示还没到衰减延迟、状态未变。
+fn advance_decay(state: &mut EmotionState, user_id: u64, now: u64, decay_delay_secs: u64) -> bool {
     let elapsed = now.saturating_sub(state.last_update) as f32;
-    if elapsed < cfg.decay_delay_secs as f32 {
-        return;
+    if elapsed < decay_delay_secs as f32 {
+        return false;
     }
 
     // 使用情绪动力学更新（替代旧的线性衰减）
@@ -392,11 +288,106 @@ pub fn decay(user_id: u64) {
             _ => {}
         }
     }
-
-    update_state(user_id, state);
+    true
 }
 
-pub fn describe(user_id: u64) -> String {
-    let state = get_state(user_id);
-    format!("{}({:.1})", state.current.description(), state.intensity)
+/// 批量推进多个用户的情绪衰减
+///
+/// 周期检查需要推进**所有已知用户**，而 `emotion.json` 是"每用户一个条目的
+/// 单一文件"。逐用户调用 [`decay`] 会让 1ms 主循环上的文件操作数量变成 3N
+/// （每用户一次全量读 + 一次全量读改写）。这里一次载入、一次落盘。
+pub(crate) fn decay_many(user_ids: &[u64]) {
+    if user_ids.is_empty() {
+        return;
+    }
+    let decay_delay_secs = crate::config::get().emotion.decay_delay_secs;
+    let now = crate::util::now_secs();
+    let db = crate::db::db();
+
+    // 逐用户读他**那一行**，只把真正变化的收集起来一次写入：
+    // 此前这里是"整份 emotion.json 读进来 → 全量写回去"。
+    let mut changed: Vec<(u64, String)> = Vec::new();
+    for user_id in user_ids {
+        let mut state = match db.emotion_state(*user_id) {
+            Ok(Some(json)) => match serde_json::from_str::<EmotionState>(&json) {
+                Ok(state) => state,
+                Err(error) => {
+                    tracing::warn!(%error, user_id, "emotion: 状态解析失败，跳过衰减");
+                    continue;
+                }
+            },
+            // 没有状态记录就不必凭空造一个：默认状态本来也没有衰减可言
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!(%error, user_id, "emotion: 读取状态失败，跳过衰减");
+                continue;
+            }
+        };
+        if !advance_decay(&mut state, *user_id, now, decay_delay_secs) {
+            continue;
+        }
+        match serde_json::to_string(&state) {
+            Ok(json) => changed.push((*user_id, json)),
+            Err(error) => tracing::warn!(%error, user_id, "emotion: 序列化失败，跳过写入"),
+        }
+    }
+
+    if let Err(error) = db.set_emotion_states(&changed) {
+        tracing::warn!(%error, count = changed.len(), "emotion: 批量写库失败");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 未到衰减延迟时不推进——批量推进必须保留这条门（否则所有状态
+    /// 每轮维护都会被无意义地改写一次）
+    #[test]
+    fn advance_decay_respects_the_delay_gate() {
+        let mut state = EmotionState {
+            last_update: 1_000,
+            ..EmotionState::default()
+        };
+
+        // 距上次更新 10 秒 < 延迟 60 秒
+        assert!(!advance_decay(&mut state, 7, 1_010, 60));
+        // 恰好到延迟边界即推进
+        assert!(advance_decay(&mut state, 7, 1_060, 60));
+    }
+
+    /// 推进之后 `last_update` 前移，因此同一次维护里重复推进不会叠加衰减
+    #[test]
+    fn advance_decay_moves_last_update_forward() {
+        let mut state = EmotionState {
+            last_update: 1_000,
+            ..EmotionState::default()
+        };
+
+        assert!(advance_decay(&mut state, 7, 5_000, 60));
+        let advanced_to = state.last_update;
+        assert!(
+            advanced_to > 1_000,
+            "推进后 last_update 必须前移，否则衰减会被重复应用"
+        );
+
+        // 紧接着再推进一次：因为 last_update 已经前移，延迟门会挡住
+        assert!(!advance_decay(&mut state, 7, 5_000, 60));
+    }
+
+    /// 危机等级的时间衰减是保底清理，必须能在推进中被降级
+    #[test]
+    fn advance_decay_relaxes_stale_crisis_levels() {
+        let mut state = EmotionState {
+            last_update: 1_000,
+            crisis_level: CrisisLevel::Mild,
+            last_crisis_detected: 1_000,
+            ..EmotionState::default()
+        };
+
+        // 距上次检测超过 Mild 冷却的三倍
+        let now = 1_000 + CRISIS_MILD_COOLDOWN_SECS * 3 + 1;
+        assert!(advance_decay(&mut state, 7, now, 60));
+        assert_eq!(state.crisis_level, CrisisLevel::None);
+    }
 }

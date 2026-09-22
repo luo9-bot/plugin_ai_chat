@@ -1,9 +1,9 @@
-use tracing::{debug, info};
+use tracing::info;
 
 use super::state::{EmotionType, TriggerType, get_state, update_state};
 use crate::crisis::{detect_crisis, update_crisis};
 
-pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
+pub(crate) fn analyze_user_message(user_id: u64, message: &str) -> bool {
     info!(user_id, message = %message.chars().take(30).collect::<String>(), "emotion: 分析用户消息");
     let mut state = get_state(user_id);
     let now = crate::util::now_secs();
@@ -44,88 +44,6 @@ pub fn analyze_user_message(user_id: u64, message: &str) -> bool {
     // 危机信号检测
     let crisis = detect_crisis(message);
     update_crisis(user_id, crisis)
-}
-
-/// AI 驱动的情绪分析 (发送回复后调用，用于更精准的情绪状态更新)
-pub fn ai_analyze(user_id: u64, user_message: &str, ai_reply: &str) {
-    let content = format!("用户消息: {}\nAI回复: {}", user_message, ai_reply);
-
-    let result = crate::ai::analyze(
-        crate::prompt::PromptManager::get().raw("emotion_analyze"),
-        &content,
-    );
-    match result {
-        Ok(raw) => {
-            let json_str = if let Some(start) = raw.find('{') {
-                if let Some(end) = raw[start..].find('}') {
-                    &raw[start..start + end + 1]
-                } else {
-                    &raw
-                }
-            } else {
-                &raw
-            };
-
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                let emotion_str = parsed
-                    .get("emotion")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("neutral");
-                let intensity = parsed
-                    .get("intensity")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.3) as f32;
-
-                let detected = EmotionType::from_str(emotion_str);
-                let mut state = get_state(user_id);
-
-                // 使用情绪动力学更新替代直接替换
-                state.update_emotional_dynamics(
-                    Some((
-                        &detected,
-                        intensity,
-                        "AI情绪分析",
-                        TriggerType::SelfReflection,
-                    )),
-                    0.0,
-                );
-                update_state(user_id, state);
-            }
-        }
-        Err(e) => {
-            debug!(error = %e, "emotion AI analysis failed, falling back to keyword");
-            let (detected, delta) = detect_emotion(user_message);
-            if delta > 0.1 {
-                let mut state = get_state(user_id);
-                let source: String = user_message.chars().take(30).collect();
-                state.update_emotional_dynamics(
-                    Some((&detected, delta, &source, TriggerType::UserMessage)),
-                    0.0,
-                );
-                update_state(user_id, state);
-            }
-        }
-    }
-}
-
-/// 从后处理分析结果更新情绪状态
-pub fn update_from_analysis(user_id: u64, emotion_str: &str, intensity: f32) {
-    let detected = EmotionType::from_str(emotion_str);
-    let mut state = get_state(user_id);
-
-    debug!(user_id, from = ?state.current, to = ?detected, intensity, "emotion: state changed");
-
-    // 使用情绪动力学更新替代直接替换
-    state.update_emotional_dynamics(
-        Some((
-            &detected,
-            intensity,
-            "对话反思",
-            TriggerType::SelfReflection,
-        )),
-        0.0,
-    );
-    update_state(user_id, state);
 }
 
 fn detect_emotion(message: &str) -> (EmotionType, f32) {

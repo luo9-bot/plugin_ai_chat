@@ -14,7 +14,7 @@ use crate::config;
 
 /// 社交电量状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SocialBattery {
+pub(crate) struct SocialBattery {
     /// 当前电量 (0.0-100.0)
     pub level: f32,
     /// 最大电量（人格决定，可配置）
@@ -67,7 +67,7 @@ fn battery_path() -> std::path::PathBuf {
 }
 
 /// 加载电量状态
-pub fn load() -> SocialBattery {
+pub(crate) fn load() -> SocialBattery {
     let path = battery_path();
     match fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
@@ -76,10 +76,12 @@ pub fn load() -> SocialBattery {
 }
 
 /// 保存电量状态
-pub fn save(battery: &SocialBattery) {
+pub(crate) fn save(battery: &SocialBattery) {
     let path = battery_path();
-    if let Ok(json) = serde_json::to_string_pretty(battery) {
-        fs::write(path, json).ok();
+    if let Ok(json) = serde_json::to_string_pretty(battery)
+        && let Err(error) = crate::util::atomic_write(path, json.as_bytes())
+    {
+        tracing::warn!(error = %error, "状态写盘失败");
     }
 }
 
@@ -89,7 +91,7 @@ pub fn save(battery: &SocialBattery) {
 /// - 被动模式消耗极少
 /// - 倦怠恢复期消耗更慢
 /// - 情绪影响消耗速率
-pub fn update(battery: &mut SocialBattery) {
+pub(crate) fn update(battery: &mut SocialBattery) {
     let now = crate::util::now_secs();
     let elapsed_minutes = now.saturating_sub(battery.last_update) as f32 / 60.0;
 
@@ -148,7 +150,7 @@ pub fn update(battery: &mut SocialBattery) {
 }
 
 /// 记录一次主动回复（消耗电量）
-pub fn record_active_reply(battery: &mut SocialBattery) {
+pub(crate) fn record_active_reply(battery: &mut SocialBattery) {
     let cfg = config::get();
     let drain_mult = if battery.is_burned_out { 1.5 } else { 1.0 };
     let drain = cfg.humanity.battery_drain_rate * drain_mult * battery.emotion_drain_modifier;
@@ -165,12 +167,12 @@ pub fn record_active_reply(battery: &mut SocialBattery) {
 }
 
 /// 记录被动参与（听消息但不回复，消耗极少）
-pub fn record_passive_participation(battery: &mut SocialBattery) {
+pub(crate) fn record_passive_participation(battery: &mut SocialBattery) {
     battery.is_passive_mode = true;
 }
 
 /// 设置情绪消耗修正（焦虑/负面情绪加速消耗）
-pub fn set_emotion_modifier(
+pub(crate) fn set_emotion_modifier(
     battery: &mut SocialBattery,
     emotion_type: &crate::emotion::EmotionType,
 ) {
@@ -185,36 +187,7 @@ pub fn set_emotion_modifier(
     };
 }
 
-/// 获取电量状态的自然语言描述（用于注入 prompt，非数值）
-pub fn get_battery_context(battery: &SocialBattery) -> String {
-    let level = battery.level;
-    let capacity = battery.capacity;
-    let percentage = level / capacity;
-
-    let mut lines = Vec::new();
-
-    if battery.is_burned_out {
-        lines.push("- 你现在社交电量严重不足，感到疲惫和倦怠。回复可以非常简短，用表情包代替文字也完全可以。不需要主动找话题。如果实在不想回复，可以说「累了」之类的话".to_string());
-    } else if percentage < 0.1 {
-        lines.push("- 你现在社交电量很低，感到很累。可以简短回复，偶尔「嗯」「哦」也可以。不想说话的时候可以直接表达".to_string());
-    } else if percentage < 0.3 {
-        lines.push("- 你现在社交电量偏低，回复可以短一些，不用太热情".to_string());
-    } else if percentage < 0.5 {
-        lines.push("- 你现在社交电量一般，保持平常的回复状态即可".to_string());
-    } else if percentage > 0.8 {
-        lines.push("- 你现在精力充沛，可以主动聊天、开玩笑，回复也可以更长更有趣".to_string());
-    } else if percentage > 0.6 {
-        lines.push("- 你现在社交电量比较充足，可以积极一些".to_string());
-    }
-
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("# 当前社交状态\n{}", lines.join("\n"))
-    }
-}
-
 /// 获取电量百分比
-pub fn level_percentage(battery: &SocialBattery) -> f32 {
+pub(crate) fn level_percentage(battery: &SocialBattery) -> f32 {
     (battery.level / battery.capacity).clamp(0.0, 1.0)
 }

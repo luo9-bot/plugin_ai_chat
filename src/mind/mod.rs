@@ -7,28 +7,25 @@
 //! - 意识流 append-only，72h 消亡；日记（[`diary`]）与人物档案（[`persons`]）
 //!   是睡前整理沉淀下的长存记忆
 
-pub mod archive;
-pub mod diary;
-pub mod foraging;
-pub mod persons;
-pub mod recall;
-pub mod security;
-pub mod self_model;
-pub mod sensation;
-pub mod social;
-pub mod stream;
-pub mod style;
-pub mod wake;
-pub mod wish;
+pub(crate) mod archive;
+pub(crate) mod diary;
+pub(crate) mod foraging;
+pub(crate) mod persons;
+pub(crate) mod recall;
+pub(crate) mod security;
+pub(crate) mod self_model;
+pub(crate) mod sensation;
+pub(crate) mod social;
+pub(crate) mod stream;
+pub(crate) mod style;
+pub(crate) mod wake;
+pub(crate) mod wish;
 
-pub use diary::DiaryEntry;
-pub use persons::{PersonFile, PersonSeed};
-pub use sensation::{SensoryPacket, body_signals, transcribe_message, transcribe_world};
-pub use social::{SocialState, TopicThread};
-pub use stream::{
-    KEEP_DAYS, StreamEvent, StreamKind, cleanup, push_acted, push_digested, push_inner,
-    push_sensation, recent, recent_text,
+pub(crate) use persons::PersonFile;
+pub(crate) use sensation::{body_signals, transcribe_message};
+pub(crate) use stream::{
+    StreamEvent, StreamKind, push_acted, push_digested, push_inner, recent, recent_text,
 };
-pub use wake::{
-    Urgency, WakeKind, WakePlan, WakeProduct, add as add_wake_plan, is_night, tick as wake_tick,
+pub(crate) use wake::{
+    Urgency, WakeKind, WakePlan, add as add_wake_plan, is_night, tick as wake_tick,
 };

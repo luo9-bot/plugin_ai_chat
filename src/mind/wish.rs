@@ -32,7 +32,7 @@ const NOTIFY_COOLDOWN_SECS: u64 = 24 * 3600;
 /// 目标状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum GoalStatus {
+pub(crate) enum GoalStatus {
     /// 正在放在心上
     Active,
     /// 实现了
@@ -42,7 +42,7 @@ pub enum GoalStatus {
 }
 
 impl GoalStatus {
-    pub fn is_active(self) -> bool {
+    pub(crate) fn is_active(self) -> bool {
         self == Self::Active
     }
 
@@ -58,7 +58,7 @@ impl GoalStatus {
 /// 想法状态机：new → developing → realized / dropped
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum IdeaStatus {
+pub(crate) enum IdeaStatus {
     /// 刚冒出来
     New,
     /// 正在琢磨
@@ -70,16 +70,7 @@ pub enum IdeaStatus {
 }
 
 impl IdeaStatus {
-    /// 生命周期的下一步（dropped/realized 是终点）
-    pub fn advance(self) -> Option<Self> {
-        match self {
-            Self::New => Some(Self::Developing),
-            Self::Developing => Some(Self::Realized),
-            _ => None,
-        }
-    }
-
-    pub fn is_alive(self) -> bool {
+    pub(crate) fn is_alive(self) -> bool {
         matches!(self, Self::New | Self::Developing)
     }
 }
@@ -87,7 +78,7 @@ impl IdeaStatus {
 /// 愿望来源
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WishSource {
+pub(crate) enum WishSource {
     /// 睡前整理时的反思
     Reflection,
     /// 聊天中冒出来的
@@ -98,7 +89,7 @@ pub enum WishSource {
 
 /// 一个长期愿望：她想要的东西
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WishGoal {
+pub(crate) struct WishGoal {
     pub id: u64,
     pub text: String,
     /// 父目标（"学会做甜点"下面挂着"学会做提拉米苏"）
@@ -119,7 +110,7 @@ pub struct WishGoal {
 
 /// 一个念头：她想试一试的主意
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WishIdea {
+pub(crate) struct WishIdea {
     pub id: u64,
     pub text: String,
     /// 兴奋度 1~10：越兴奋越容易被想起
@@ -162,22 +153,11 @@ fn load_store() -> WishStore {
 }
 
 fn save_store(store: &WishStore) {
-    if let Some(parent) = wish_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "wish: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string_pretty(store) else {
         warn!("wish: 愿望库序列化失败");
         return;
     };
-    let tmp = wish_path().with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!("wish: 愿望库写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, wish_path()) {
+    if let Err(e) = crate::util::atomic_write(wish_path(), json) {
         warn!(error = %e, "wish: 愿望库落盘失败");
     }
 }
@@ -214,7 +194,7 @@ fn same_wish(left: &str, right: &str) -> bool {
 // ── 目标 ────────────────────────────────────────────────────────
 
 /// 新增目标；与现有活跃目标重复时把旧目标抬回台面（优先级取高者）
-pub fn add_goal(
+pub(crate) fn add_goal(
     text: &str,
     parent_id: Option<u64>,
     priority: u8,
@@ -280,7 +260,7 @@ pub fn add_goal(
 }
 
 /// 更新目标进度（0~100）
-pub fn set_goal_progress(goal_id: u64, progress: u8) -> bool {
+pub(crate) fn set_goal_progress(goal_id: u64, progress: u8) -> bool {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = load_store();
     let Some(goal) = store.goals.iter_mut().find(|g| g.id == goal_id) else {
@@ -305,7 +285,7 @@ pub fn set_goal_progress(goal_id: u64, progress: u8) -> bool {
 }
 
 /// 目标收尾：实现了，或者放下了
-pub fn close_goal(goal_id: u64, achieved: bool) -> bool {
+pub(crate) fn close_goal(goal_id: u64, achieved: bool) -> bool {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = load_store();
     let Some(goal) = store.goals.iter_mut().find(|g| g.id == goal_id) else {
@@ -328,16 +308,6 @@ pub fn close_goal(goal_id: u64, achieved: bool) -> bool {
     true
 }
 
-/// 全部活跃目标（admin API / 上下文用）
-pub fn active_goals() -> Vec<WishGoal> {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_store()
-        .goals
-        .into_iter()
-        .filter(|g| g.status.is_active())
-        .collect()
-}
-
 /// 目标是否到期该被提醒：有期限、过期、且最近没提醒过
 fn goal_due(goal: &WishGoal, now: u64) -> bool {
     goal.status.is_active()
@@ -350,7 +320,7 @@ fn goal_due(goal: &WishGoal, now: u64) -> bool {
 /// 把到期目标的期限变成她的"想起"（意图堆），并标记已提醒
 ///
 /// 定时器只兑现不产生意愿：这里提醒的是她自己立下的期限。
-pub fn sync_due_to_wake(now: u64) {
+pub(crate) fn sync_due_to_wake(now: u64) {
     let due: Vec<WishGoal> = {
         let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut store = load_store();
@@ -396,7 +366,7 @@ fn retain_finished_goals(store: &mut WishStore) {
 // ── 想法 ────────────────────────────────────────────────────────
 
 /// 新增念头；与现有活着念头重复时只提升兴奋度
-pub fn add_idea(text: &str, excitement: u8, source: WishSource) -> Option<WishIdea> {
+pub(crate) fn add_idea(text: &str, excitement: u8, source: WishSource) -> Option<WishIdea> {
     let text = clean_text(text)?;
     let excitement = excitement.clamp(1, 10);
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -446,48 +416,6 @@ pub fn add_idea(text: &str, excitement: u8, source: WishSource) -> Option<WishId
     Some(idea)
 }
 
-/// 念头生命周期推进：new → developing → realized
-pub fn advance_idea(idea_id: u64) -> bool {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut store = load_store();
-    let Some(idea) = store.ideas.iter_mut().find(|i| i.id == idea_id) else {
-        return false;
-    };
-    let Some(next) = idea.status.advance() else {
-        return false;
-    };
-    idea.status = next;
-    idea.updated_at = util::now_secs();
-    save_store(&store);
-    true
-}
-
-/// 放下一个念头
-pub fn drop_idea(idea_id: u64) -> bool {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut store = load_store();
-    let Some(idea) = store.ideas.iter_mut().find(|i| i.id == idea_id) else {
-        return false;
-    };
-    if !idea.status.is_alive() {
-        return false;
-    }
-    idea.status = IdeaStatus::Dropped;
-    idea.updated_at = util::now_secs();
-    save_store(&store);
-    true
-}
-
-/// 活着的念头（admin API 用）
-pub fn alive_ideas() -> Vec<WishIdea> {
-    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_store()
-        .ideas
-        .into_iter()
-        .filter(|i| i.status.is_alive())
-        .collect()
-}
-
 // ── 上下文呈现 ──────────────────────────────────────────────────
 
 /// 目标的一行描述（进度/期限是机械事实，解释交给她的表达）
@@ -523,7 +451,7 @@ fn idea_line(idea: &WishIdea, with_id: bool) -> String {
 /// 渲染"你想要的"上下文块：活跃目标 + 最兴奋的念头
 ///
 /// `with_id` 供睡前整理使用——她要能引用 id 来更新进度。
-pub fn context_block(with_id: bool) -> Option<String> {
+pub(crate) fn context_block(with_id: bool) -> Option<String> {
     if !config::get().humanity.wish_enabled {
         return None;
     }
@@ -565,13 +493,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn idea_lifecycle_is_forward_only() {
-        assert_eq!(IdeaStatus::New.advance(), Some(IdeaStatus::Developing));
-        assert_eq!(IdeaStatus::Developing.advance(), Some(IdeaStatus::Realized));
-        assert_eq!(IdeaStatus::Realized.advance(), None);
-        assert_eq!(IdeaStatus::Dropped.advance(), None);
+    fn only_unfinished_ideas_are_alive() {
         assert!(IdeaStatus::New.is_alive());
+        assert!(IdeaStatus::Developing.is_alive());
         assert!(!IdeaStatus::Realized.is_alive());
+        assert!(!IdeaStatus::Dropped.is_alive());
     }
 
     #[test]

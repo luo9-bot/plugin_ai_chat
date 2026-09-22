@@ -2,6 +2,6 @@ mod interest;
 mod segment;
 mod store;
 
-pub use interest::*;
-pub use segment::*;
-pub use store::{SegmentLogEntry, SegmentMessage, init};
+pub(crate) use interest::*;
+pub(crate) use segment::*;
+pub(crate) use store::init;

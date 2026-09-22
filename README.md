@@ -12,8 +12,22 @@ Luo9 bot AI 插件 - 仅供学习使用。
 
 ### 构建
 
+需要 **Node.js / npm**：管理后台的前端产物会被编译进二进制。
+
 ```bash
 cargo build --release
+```
+
+`build.rs` 会在 `frontend/dist/index.html` 缺失或比 `frontend/src` 旧时自动执行
+`cd frontend && npm run build`，然后 `src/admin/ui.rs` 用 `include_str!` 把它嵌进
+二进制。前端构建失败会**直接让 Rust 构建失败**（而不是沿用旧产物），这样"前端改
+了但内嵌 UI 没更新"不可能静默发生。若你的环境跑不了 npm，就在别处构建一次，
+把产物放到 `frontend/dist/index.html` 再编译。
+
+前端依赖未安装时先执行一次：
+
+```bash
+cd frontend && npm ci
 ```
 
 ### 部署
