@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
+use crate::util::MutexExt;
 use crate::voice::{self, GroupUtterance, VoiceAction};
 use crate::{ProcessingGuard, config, processing_users, read_shared_state, with_shared_state};
 
@@ -182,21 +183,11 @@ fn resolve_name(qq: u64, group_id: u64) -> Option<String> {
 /// `[CQ:markdown,…]` 这类富文本此前完全没被处理过，一坨几百字符的
 /// 原始 markup（HTML 转义、`mqqapi://` 链接、图片链接、代码块）直接进了
 /// 她的 prompt——她正是在这种消息里"看不清谁 @ 了谁"。
-fn perceive_batch_message(
-    group_id: u64,
-    user_id: u64,
-    message: &str,
-    record_timestamps: &[u64],
-) -> String {
+fn perceive_batch_message(group_id: u64, user_id: u64, message: &str, entry_ids: &[u64]) -> String {
     let (descriptions, text_only) = perceive_images(user_id, message);
     if !descriptions.is_empty() && group_id > 0 {
         // 用精确时间戳把工作记忆中的 [图片] 替换为实际描述
-        crate::working_memory::update_image_content(
-            group_id,
-            user_id,
-            &descriptions,
-            record_timestamps,
-        );
+        crate::working_memory::update_image_content(group_id, user_id, &descriptions, entry_ids);
     }
     // 表情包是语气不是信息：只有普通图片才沉淀记忆
     if !crate::sticker::is_sticker_cq(message) {
@@ -211,10 +202,10 @@ fn perceive_batch_message(
 // ── 私聊 ────────────────────────────────────────────────────────
 
 /// 私聊消息处理：感知 → 表达 → 落地
-pub fn process_message(user_id: u64, message: &str) {
+pub(crate) fn process_message(user_id: u64, message: &str) {
     // 标记用户为处理中，防止并发处理同一用户的消息
     {
-        let mut processing = processing_users().lock().unwrap();
+        let mut processing = processing_users().lock_recover();
         if processing.contains(&(0, user_id)) {
             info!(user_id, "process_message: 用户消息正在处理中，跳过");
             return;
@@ -366,7 +357,7 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
 /// 结构化而不是元组：字段多了以后 `(u64, String, Vec<u64>, Vec<u64>)`
 /// 在调用点完全读不出含义，传参顺序写错编译器也帮不上忙。
 #[derive(Debug, Clone)]
-pub struct GroupBatch {
+pub(crate) struct GroupBatch {
     /// 群号（私聊为 0）
     pub group_id: u64,
     pub user_id: u64,
@@ -376,18 +367,18 @@ pub struct GroupBatch {
 
 impl GroupBatch {
     /// 这批消息最早到达的时刻（秒）
-    pub fn first_arrival(&self) -> u64 {
+    pub(crate) fn first_arrival(&self) -> u64 {
         self.taken.first_arrival()
     }
 
     /// 排序用的到达时刻（毫秒）
-    pub fn sort_key_ms(&self) -> u64 {
+    pub(crate) fn sort_key_ms(&self) -> u64 {
         self.taken.sort_key_ms()
     }
 }
 
 /// 群聊批次处理：危机筛选 → 配额 → 表达 → 落地
-pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
+pub(crate) fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     let cfg = config::get();
     let self_qq = cfg.self_qq;
 
@@ -398,7 +389,7 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
     for batch in user_msgs {
         let user_id = &batch.user_id;
         let messages = &batch.taken.messages;
-        let timestamps = &batch.taken.record_timestamps;
+        let timestamps = &batch.taken.entry_ids;
         let mut level = crate::emotion::get_state(*user_id).crisis_level;
         if !level.is_crisis()
             && crate::crisis::detect_crisis(messages).is_crisis()
@@ -413,6 +404,8 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
             crisis_utterances.push(GroupUtterance {
                 user_id: *user_id,
                 text: perceived,
+                // @ 必须从原始文本取：perceive 已把 CQ 码还原成人名
+                at_targets: crate::conversation::turn::at_targets(messages),
                 ts: batch.first_arrival(),
                 ts_ms: batch.sort_key_ms(),
             });
@@ -495,8 +488,10 @@ pub fn process_group_batch(group_id: u64, user_msgs: &[GroupBatch]) {
                 group_id,
                 batch.user_id,
                 &batch.taken.messages,
-                &batch.taken.record_timestamps,
+                &batch.taken.entry_ids,
             ),
+            // @ 的判定必须走原始文本，归一化后 parse 不出 `[CQ:at,qq=…]`
+            at_targets: crate::conversation::turn::at_targets(&batch.taken.messages),
             // 用真实到达时刻排序：工作记忆时间戳只有秒级精度，
             // 同一秒内两个人的话谁先谁后会退化成哈希顺序
             ts: batch.first_arrival(),

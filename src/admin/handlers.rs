@@ -1,4 +1,5 @@
-use tiny_http::{Header, Method, Response};
+use tiny_http::{Method, Response};
+use tracing::warn;
 
 use crate::config;
 
@@ -7,7 +8,7 @@ use super::{err, ok, parse_json};
 
 // ── 表情包管理 ────────────────────────────────────────────────
 
-pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
     let (total, registered) = crate::sticker::get_stats();
     let store = crate::sticker::store::load_store();
     ok(serde_json::json!({
@@ -30,7 +31,7 @@ pub fn handle_sticker() -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// 切换表情包封禁状态
-pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut store = crate::sticker::store::load_store();
     let banned = store
         .stickers
@@ -48,7 +49,7 @@ pub fn handle_sticker_toggle(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// 删除表情包
-pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut store = crate::sticker::store::load_store();
     let data_dir = crate::config::data_dir();
     if let Some(idx) = store.stickers.iter().position(|e| e.hash == hash) {
@@ -68,7 +69,7 @@ pub fn handle_sticker_delete(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 ///
 /// 1. 优先从注册表中查找哈希对应的路径
 /// 2. 注册表未命中时，直接扫描 sticker/ 和 ne_sticker/ 目录查找文件
-pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let data_dir = crate::config::data_dir();
     let mut full_path = None;
 
@@ -123,16 +124,20 @@ pub fn handle_sticker_image(hash: &str) -> Response<std::io::Cursor<Vec<u8>>> {
             "webp" => "image/webp",
             _ => "image/png",
         };
-        return Response::from_data(data)
-            .with_header(Header::from_bytes("Content-Type", mime).unwrap())
-            .with_header(Header::from_bytes("Cache-Control", "public, max-age=86400").unwrap());
+        return super::attach_headers(
+            Response::from_data(data),
+            &[
+                ("Content-Type", mime),
+                ("Cache-Control", "public, max-age=86400"),
+            ],
+        );
     }
 
     err(404, "image not found")
 }
 
 /// 更新表情包标签
-pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     let val: serde_json::Value = match super::parse_json(body) {
         Ok(v) => v,
         Err(e) => return super::err(400, &e),
@@ -157,7 +162,10 @@ pub fn handle_sticker_tags(hash: &str, body: &[u8]) -> Response<std::io::Cursor<
 }
 
 /// 更新表情包 VLM 自然语言描述
-pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_sticker_description(
+    hash: &str,
+    body: &[u8],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let val: serde_json::Value = match super::parse_json(body) {
         Ok(v) => v,
         Err(e) => return super::err(400, &e),
@@ -178,7 +186,7 @@ pub fn handle_sticker_description(hash: &str, body: &[u8]) -> Response<std::io::
 
 // ── 仪表盘统计 ────────────────────────────────────────────────
 
-pub fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_dashboard() -> Response<std::io::Cursor<Vec<u8>>> {
     let user_ids = crate::memory::store::all_user_ids();
     let user_count = user_ids.len();
     let mut mem_count: usize = 0;
@@ -223,7 +231,7 @@ fn parse_importance(
     }
 }
 
-pub fn handle_memory(
+pub(crate) fn handle_memory(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -233,17 +241,16 @@ pub fn handle_memory(
     // GET /api/memory/export -> 导出全部
     if *method == Method::Get && segs.first() == Some(&"export") {
         let data = serde_json::to_string(&memory_store_json()).unwrap_or_default();
-        return Response::from_string(data)
-            .with_header(
-                Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap(),
-            )
-            .with_header(
-                Header::from_bytes(
+        return super::attach_headers(
+            Response::from_string(data),
+            &[
+                ("Content-Type", "application/json; charset=utf-8"),
+                (
                     "Content-Disposition",
                     "attachment; filename=\"memory_export.json\"",
-                )
-                .unwrap(),
-            );
+                ),
+            ],
+        );
     }
 
     // POST /api/memory/{user_id}/batch -> 批量删除
@@ -375,32 +382,67 @@ pub fn handle_memory(
 
 // ── Handler: 工作记忆 ──────────────────────────────────────────
 
-pub fn handle_working_memory(
+pub(crate) fn handle_working_memory(
     method: &Method,
     segs: &[&str],
     _body: &[u8],
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let path = config::data_dir().join("working_memory.json");
     match method {
         Method::Get => {
-            let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let store: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!({"groups": {}}));
+            // 工作记忆已迁入状态库：读旧文件只会拿到过期内容
+            let db = crate::db::db();
             if let Some(gid) = segs.first() {
-                let groups = store.get("groups").and_then(|v| v.as_object()).unwrap();
-                match groups.get(*gid) {
-                    Some(group) => {
-                        ok(serde_json::json!({"group_id": gid, "entries": group["entries"]}))
-                    }
-                    None => ok(serde_json::json!({"group_id": gid, "entries": []})),
-                }
+                let group_id: u64 = match gid.parse() {
+                    Ok(id) => id,
+                    Err(_) => return err(400, "invalid group_id"),
+                };
+                let entries = match db.working_memory_of_group(group_id) {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .map(|row| {
+                            serde_json::json!({
+                                "id": row.id,
+                                "user_id": row.user_id,
+                                "content": row.content,
+                                "timestamp": row.created_at,
+                                "bot_replied": row.bot_replied,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                    Err(error) => return err(500, &format!("读取工作记忆失败: {error}")),
+                };
+                ok(serde_json::json!({"group_id": gid, "entries": entries}))
             } else {
-                ok(store)
+                // 保持前端既有形状：{ "groups": { "<gid>": { "entries": [...] } } }
+                let groups = match db.working_memory_groups() {
+                    Ok(groups) => groups,
+                    Err(error) => return err(500, &format!("读取工作记忆失败: {error}")),
+                };
+                let mut view = serde_json::Map::new();
+                for (group_id, rows) in groups {
+                    let entries: Vec<serde_json::Value> = rows
+                        .into_iter()
+                        .map(|row| {
+                            serde_json::json!({
+                                "id": row.id,
+                                "user_id": row.user_id,
+                                "content": row.content,
+                                "timestamp": row.created_at,
+                                "bot_replied": row.bot_replied,
+                            })
+                        })
+                        .collect();
+                    view.insert(
+                        group_id.to_string(),
+                        serde_json::json!({ "entries": entries }),
+                    );
+                }
+                ok(serde_json::json!({ "groups": view }))
             }
         }
         Method::Delete => {
-            let gid = match segs.first() {
-                Some(g) => *g,
+            let gid: u64 = match segs.first().and_then(|s| s.parse().ok()) {
+                Some(g) => g,
                 None => return err(400, "group_id required"),
             };
             let idx: usize = match segs.get(1).and_then(|s| s.parse().ok()) {
@@ -408,27 +450,19 @@ pub fn handle_working_memory(
                 None => return err(400, "index required"),
             };
             backup::before_modify("working_memory");
-            let mut store: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-            )
-            .unwrap_or(serde_json::json!({"groups": {}}));
-            let groups = store
-                .get_mut("groups")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            if let Some(group) = groups.get_mut(gid) {
-                let entries = group
-                    .get_mut("entries")
-                    .and_then(|v| v.as_array_mut())
-                    .unwrap();
-                if idx >= entries.len() {
-                    return err(404, "index out of range");
+            // 走类型化 store：它负责锁与原子写。
+            // 后台不再自己拼 JSON——`working_memory.json` 是所有群共用的一份文件，
+            // 第二条写路径会与消息线程的读改写互相覆盖。
+            match crate::working_memory::delete_entry_at(gid, idx) {
+                crate::working_memory::DeleteEntryOutcome::Removed => {
+                    ok(serde_json::json!({"ok": true}))
                 }
-                entries.remove(idx);
-                std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
-                ok(serde_json::json!({"ok": true}))
-            } else {
-                err(404, "group not found")
+                crate::working_memory::DeleteEntryOutcome::GroupNotFound => {
+                    err(404, "group not found")
+                }
+                crate::working_memory::DeleteEntryOutcome::IndexOutOfRange => {
+                    err(404, "index out of range")
+                }
             }
         }
         _ => err(405, "method not allowed"),
@@ -437,17 +471,34 @@ pub fn handle_working_memory(
 
 // ── Handler: 情绪 ──────────────────────────────────────────────
 
-pub fn handle_emotion(
+pub(crate) fn handle_emotion(
     method: &Method,
     segs: &[&str],
     body: &[u8],
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let path = config::data_dir().join("emotion.json");
     match method {
         Method::Get => {
-            let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
-            let store: serde_json::Value =
-                serde_json::from_str(&data).unwrap_or(serde_json::json!({}));
+            // 情绪状态已迁入状态库（按用户一行）：不能再读 emotion.json，
+            // 那个文件已经退休，读它只会拿到过期内容
+            let mut view = serde_json::Map::new();
+            match crate::db::db().all_emotion_states() {
+                Ok(states) => {
+                    for (uid, json) in states {
+                        match serde_json::from_str::<serde_json::Value>(&json) {
+                            Ok(state) => {
+                                view.insert(uid.to_string(), state);
+                            }
+                            Err(error) => {
+                                warn!(%error, uid, "admin: 情绪状态解析失败，已跳过");
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    return err(500, &format!("读取情绪状态失败: {error}"));
+                }
+            }
+            let store = serde_json::Value::Object(view);
             if let Some(uid) = segs.first() {
                 match store.get(*uid) {
                     Some(state) => ok(serde_json::json!({"user_id": uid, "state": state})),
@@ -458,8 +509,8 @@ pub fn handle_emotion(
             }
         }
         Method::Put => {
-            let uid = match segs.first() {
-                Some(u) => *u,
+            let uid: u64 = match segs.first().and_then(|s| s.parse().ok()) {
+                Some(u) => u,
                 None => return err(400, "user_id required"),
             };
             let body_val: serde_json::Value = match parse_json(body) {
@@ -467,12 +518,14 @@ pub fn handle_emotion(
                 Err(e) => return err(400, &e),
             };
             backup::before_modify("emotion");
-            let mut store: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()),
-            )
-            .unwrap_or(serde_json::json!({}));
-            store[uid] = body_val;
-            std::fs::write(&path, serde_json::to_string_pretty(&store).unwrap()).ok();
+            // 走类型化 store：锁、原子写、默认值都由它负责。
+            // 后台不再自己拼一份 JSON——那是第二条写路径，会与消息线程
+            // 的读改写互相覆盖。
+            let state: crate::emotion::EmotionState = match serde_json::from_value(body_val) {
+                Ok(state) => state,
+                Err(e) => return err(400, &format!("情绪状态结构校验失败（未写入）: {e}")),
+            };
+            crate::emotion::update_state(uid, state);
             ok(serde_json::json!({"ok": true}))
         }
         _ => err(405, "method not allowed"),
@@ -481,28 +534,31 @@ pub fn handle_emotion(
 
 // ── Handler: 黑名单 ──────────────────────────────────────────
 
-pub fn handle_blocklist(
+pub(crate) fn handle_blocklist(
     method: &Method,
     segs: &[&str],
     body: &[u8],
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let path = config::data_dir().join("blocklist.json");
+    // 运行时黑名单由进程级门禁状态持有（`crate::get_blacklist`），
+    // 落盘是它的快照。这里不再自己读写 blocklist.json——第二条写路径
+    // 会让主循环看到的内存集合与文件不一致。
     match method {
         Method::Get => {
-            // 合并 blocklist.json 和 config.yaml 中的 blacklist
-            let file_list: Vec<u64> = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
-            )
-            .unwrap_or_default();
-            let mut all: Vec<u64> = file_list.clone();
-            for uid in &config::get().blacklist {
+            let runtime = crate::get_blacklist();
+            // 配置里的 blacklist 是启动时并入运行时的静态名单，仍然分别展示，
+            // 便于定位"这条为什么被拉黑"。
+            let from_config = config::get().blacklist.clone();
+            let mut all = runtime.clone();
+            for uid in &from_config {
                 if !all.contains(uid) {
                     all.push(*uid);
                 }
             }
-            ok(
-                serde_json::json!({"blocked": all, "from_file": file_list, "from_config": &config::get().blacklist}),
-            )
+            ok(serde_json::json!({
+                "blocked": all,
+                "from_runtime": runtime,
+                "from_config": from_config,
+            }))
         }
         Method::Post => {
             let body_val: serde_json::Value = match parse_json(body) {
@@ -514,18 +570,7 @@ pub fn handle_blocklist(
                 None => return err(400, "user_id required"),
             };
             backup::before_modify("blocklist");
-            let mut list: Vec<u64> = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
-            )
-            .unwrap_or_default();
-            if !list.contains(&uid) {
-                list.push(uid);
-            }
-            std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
-            // 同步运行时状态
-            crate::with_state(|s| {
-                s.add_blacklist(uid);
-            });
+            crate::set_blacklisted(crate::db::Actor::Admin, uid, true);
             ok(serde_json::json!({"ok": true}))
         }
         Method::Delete => {
@@ -534,16 +579,7 @@ pub fn handle_blocklist(
                 None => return err(400, "user_id required"),
             };
             backup::before_modify("blocklist");
-            let mut list: Vec<u64> = serde_json::from_str(
-                &std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into()),
-            )
-            .unwrap_or_default();
-            list.retain(|&x| x != uid);
-            std::fs::write(&path, serde_json::to_string_pretty(&list).unwrap()).ok();
-            // 同步运行时状态
-            crate::with_state(|s| {
-                s.remove_blacklist(uid);
-            });
+            crate::set_blacklisted(crate::db::Actor::Admin, uid, false);
             ok(serde_json::json!({"ok": true}))
         }
         _ => err(405, "method not allowed"),
@@ -552,7 +588,7 @@ pub fn handle_blocklist(
 
 // ── Handler: 归档 ──────────────────────────────────────────────
 
-pub fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
     let path = config::data_dir().join("archive.json");
     let data = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
     let store: serde_json::Value = serde_json::from_str(&data)
@@ -562,7 +598,7 @@ pub fn handle_archive() -> Response<std::io::Cursor<Vec<u8>>> {
 
 // ── Handler: 备份 ──────────────────────────────────────────────
 
-pub fn handle_backups(
+pub(crate) fn handle_backups(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -626,7 +662,7 @@ pub fn handle_backups(
 
 // ── 配额追踪 ────────────────────────────────────────────────────
 
-pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
     if *method != Method::Get {
         return err(405, "method not allowed");
     }
@@ -658,7 +694,10 @@ pub fn handle_quota(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<
 
 // ── 防注入状态管理 ────────────────────────────────────────────────
 
-pub fn handle_anti_injection(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_anti_injection(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             // GET /api/anti-injection/users - 获取所有用户风险状态
@@ -762,7 +801,7 @@ pub fn handle_anti_injection(method: &Method, segs: &[&str]) -> Response<std::io
 
 // ── 配置管理 ──────────────────────────────────────────────────
 
-pub fn handle_config(
+pub(crate) fn handle_config(
     method: &Method,
     segs: &[&str],
     body: &[u8],
@@ -797,12 +836,13 @@ pub fn handle_config(
             Some(c) => c,
             None => return err(400, "content required"),
         };
-        // 验证 YAML 语法
-        if let Err(e) = serde_yaml::from_str::<serde_json::Value>(content) {
-            return err(400, &format!("YAML 语法错误: {}", e));
+        // 原文保存也必须先验证它能被解析成 Config：
+        // 只验证"YAML 语法"会放过结构错误，而那正是"配置写得进、插件起不来"。
+        if let Err(e) = serde_yaml::from_str::<config::Config>(content) {
+            return err(400, &format!("配置结构校验失败（未写入）: {e}"));
         }
         let config_path = config::data_dir().join("config.yaml");
-        if let Err(e) = std::fs::write(&config_path, content) {
+        if let Err(e) = crate::util::atomic_write(&config_path, content) {
             return err(500, &format!("写入失败: {}", e));
         }
         return ok(
@@ -879,15 +919,16 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
                 }
             }
 
-            // 使用模板保存：保留注释和格式，只替换值
-            let yaml = match config::save_config_with_comments(&merged) {
-                Ok(y) => y,
-                Err(e) => return err(500, &format!("serialize: {}", e)),
+            // 类型化保存：反序列化成 Config 再原子落盘。
+            // 校验发生在写入之前，因此"改坏配置导致插件起不来"不可达。
+            let parsed: config::Config = match serde_json::from_value(merged) {
+                Ok(cfg) => cfg,
+                Err(e) => return err(400, &format!("配置校验失败（未写入）: {e}")),
             };
-            if let Err(e) = std::fs::write(&config_path, &yaml) {
-                return err(500, &format!("write config: {}", e));
+            if let Err(e) = config::save(&parsed) {
+                return err(500, &format!("write config: {e}"));
             }
-            ok(serde_json::json!({"ok": true, "message": "配置已保存，重启插件后生效"}))
+            ok(serde_json::json!({"ok": true, "message": "配置已保存，点击「重新载入配置」生效"}))
         }
         _ => err(405, "method not allowed"),
     }
@@ -895,13 +936,48 @@ fn handle_config_main(method: &Method, body: &[u8]) -> Response<std::io::Cursor<
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
-pub fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
-    ok(crate::tracking::UsageStore::summary())
+pub(crate) fn handle_analytics() -> Response<std::io::Cursor<Vec<u8>>> {
+    ok(crate::tracking::summary())
+}
+
+/// Turn 契约影子观测：最近 24 小时的分布
+///
+/// 这是"要不要把「文本即发言」换成严格 `Turn` tagged union"的决策依据——
+/// 看 `failure_rate`：它就是在当前流量下，严格契约会失败的比例。
+pub(crate) fn handle_turn_shadow() -> Response<std::io::Cursor<Vec<u8>>> {
+    ok(crate::ai::shadow::report(24 * 3600).to_json())
+}
+
+/// 后台操作审计：最近 100 条"谁在什么时候改了什么"
+///
+/// 审计表此前**只写不读**——写入方（[`crate::db::Db::record_audit`]）在，
+/// 读方没有出口，只有它自己的单元测试读过。没有读方的审计回答不了它本来
+/// 要回答的问题，所以补上这个出口而不是删掉读方。
+pub(crate) fn handle_audit() -> Response<std::io::Cursor<Vec<u8>>> {
+    const PAGE_SIZE: usize = 100;
+
+    match crate::db::db().recent_audit(PAGE_SIZE) {
+        Ok(entries) => {
+            let items: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "actor": entry.actor,
+                        "command": entry.command,
+                        "detail": entry.detail,
+                        "created_at": entry.created_at,
+                    })
+                })
+                .collect();
+            ok(serde_json::json!({ "entries": items }))
+        }
+        Err(error) => err(500, &format!("读取审计失败: {error}")),
+    }
 }
 
 // ── 日程计划 ──────────────────────────────────────────────────
 
-pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor<Vec<u8>>> {
     // POST: 更新计划状态
     if method == &Method::Post {
         let body_val: serde_json::Value = match serde_json::from_slice(body) {
@@ -986,7 +1062,10 @@ pub fn handle_schedule(method: &Method, body: &[u8]) -> Response<std::io::Cursor
 
 // ── 对话管理 ──────────────────────────────────────────────────
 
-pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_conversations(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             // GET /api/conversations -- 列出所有活跃群聊和私聊
@@ -1020,8 +1099,8 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
             };
 
             let changed = match kind {
-                "group" => crate::toggle_group_chat(id, enable),
-                "private" => crate::toggle_private_chat(id, enable),
+                "group" => crate::toggle_group_chat(crate::db::Actor::Admin, id, enable),
+                "private" => crate::toggle_private_chat(crate::db::Actor::Admin, id, enable),
                 _ => return err(400, "kind must be group or private"),
             };
 
@@ -1043,7 +1122,7 @@ pub fn handle_conversations(method: &Method, segs: &[&str]) -> Response<std::io:
 
 // ── Handler: 人性化状态 ──────────────────────────────────────────
 
-pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
     let cfg = config::get();
 
     let battery = if cfg.humanity.social_battery_enabled {
@@ -1091,7 +1170,6 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
         let b = crate::memory::cognitive_biases::load_biases();
         Some(serde_json::json!({
             "confirmation_bias": b.confirmation_bias,
-            "recency_bias": b.recency_bias,
             "mood_congruence": b.mood_congruence,
             "anchoring_strength": b.anchoring_strength,
             "availability_heuristic": b.availability_heuristic,
@@ -1100,15 +1178,9 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
         None
     };
 
-    let rel_path = config::data_dir().join("relationships.json");
-    let rel_count = std::fs::read_to_string(&rel_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("relationships")
-                .and_then(|r| r.as_object())
-                .map(|o| o.len())
-        })
+    // 关系已迁入状态库：读旧文件会永远拿到迁移那一刻的快照
+    let rel_count = crate::db::db()
+        .per_user_count(crate::db::PerUserState::Relationship)
         .unwrap_or(0);
 
     ok(serde_json::json!({
@@ -1128,7 +1200,10 @@ pub fn handle_humanity() -> Response<std::io::Cursor<Vec<u8>>> {
     }))
 }
 
-pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_relationships(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     if *method != Method::Get {
         return err(405, "method not allowed");
     }
@@ -1141,16 +1216,29 @@ pub fn handle_relationships(method: &Method, segs: &[&str]) -> Response<std::io:
         let summary = crate::person_info::relationship::get_relationship_summary(uid_num);
         return ok(summary);
     }
-    let rel_path = config::data_dir().join("relationships.json");
-    let data = std::fs::read_to_string(&rel_path).unwrap_or_else(|_| "{}".into());
-    let store: serde_json::Value =
-        serde_json::from_str(&data).unwrap_or(serde_json::json!({"relationships": {}}));
-    ok(store)
+    // 关系已迁入状态库：保持前端既有形状 { "relationships": { "<uid>": {...} } }
+    let stored = match crate::db::db().all_per_user_states(crate::db::PerUserState::Relationship) {
+        Ok(stored) => stored,
+        Err(error) => return err(500, &format!("读取关系失败: {error}")),
+    };
+    let mut view = serde_json::Map::new();
+    for (user_id, json) in stored {
+        match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(state) => {
+                view.insert(user_id.to_string(), state);
+            }
+            Err(error) => warn!(%error, user_id, "admin: 关系解析失败，已跳过"),
+        }
+    }
+    ok(serde_json::json!({ "relationships": view }))
 }
 
 // ── Handler: 内存操作日志 ──────────────────────────────────────────
 
-pub fn handle_memory_ops_log(method: &Method, segs: &[&str]) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn handle_memory_ops_log(
+    method: &Method,
+    segs: &[&str],
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match method {
         Method::Get => {
             let limit = segs
@@ -1241,7 +1329,7 @@ fn mind_now() -> serde_json::Value {
     })
 }
 
-pub fn handle_mind(
+pub(crate) fn handle_mind(
     method: &Method,
     segs: &[&str],
     body: &[u8],

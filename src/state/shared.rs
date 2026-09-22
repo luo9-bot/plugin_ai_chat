@@ -2,24 +2,22 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// 用户对话状态
-pub struct UserContext {
+pub(crate) struct UserContext {
     /// 对话历史 (role, content)
     pub history: Vec<(String, String)>,
-    /// 当前情绪标签 (由 AI 回复中解析)
-    pub emotion: String,
     /// AI 生成的历史摘要（当历史过长时使用），记录重要内容
     pub conversation_summary: String,
 }
 
 /// 上下文键: (group_id, user_id)
 /// 私聊: (0, user_id)，群聊: (group_id, user_id)
-pub type CtxKey = (u64, u64);
+pub(crate) type CtxKey = (u64, u64);
 
 // ── 跨线程共享状态 ────────────────────────────────────────────
 
 /// 跨线程共享状态，由 RwLock 保护。
 /// 包含 spawned 线程需要读写的字段。
-pub struct SharedState {
+pub(crate) struct SharedState {
     /// 机器人在各群最近发出的消息 (group_id → [(message, time)])
     recent_bot_messages: HashMap<u64, Vec<(String, Instant)>>,
     /// 机器人上次回复时间 ((group_id, user_id) → Instant)
@@ -27,10 +25,6 @@ pub struct SharedState {
     last_reply_times: HashMap<(u64, u64), Instant>,
     /// 用户对话上下文 (按 (group_id, user_id) 隔离)
     pub contexts: HashMap<CtxKey, UserContext>,
-    /// 活跃群聊集合 (由主线程同步，供管理线程读取)
-    pub active_groups: HashSet<u64>,
-    /// 活跃私聊用户集合 (由主线程同步，供管理线程读取)
-    pub active_users: HashSet<u64>,
     /// 群级对话历史 (group_id → history)，用于群聊中跨用户共享上下文
     pub group_history: HashMap<u64, Vec<(String, String)>>,
 }
@@ -42,26 +36,18 @@ impl Default for SharedState {
 }
 
 impl SharedState {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             recent_bot_messages: HashMap::new(),
             last_reply_times: HashMap::new(),
             contexts: HashMap::new(),
-            active_groups: HashSet::new(),
-            active_users: HashSet::new(),
             group_history: HashMap::new(),
         }
     }
 
-    /// 同步活跃对话状态（由主线程调用）
-    pub fn sync_active(&mut self, groups: &HashSet<u64>, users: &HashSet<u64>) {
-        self.active_groups = groups.clone();
-        self.active_users = users.clone();
-    }
-
     /// 记录机器人回复了某用户 (group_id=0 表示私聊)
     /// 群聊时同时记录群级状态 (group_id, 0)
-    pub fn record_reply(&mut self, group_id: u64, user_id: u64) {
+    pub(crate) fn record_reply(&mut self, group_id: u64, user_id: u64) {
         if group_id > 0 {
             self.last_reply_times.insert((group_id, 0), Instant::now());
         }
@@ -70,7 +56,7 @@ impl SharedState {
     }
 
     /// 检查是否在对话跟进时间内
-    pub fn is_in_follow_up(&self, group_id: u64, user_id: u64, timeout_secs: u64) -> bool {
+    pub(crate) fn is_in_follow_up(&self, group_id: u64, user_id: u64, timeout_secs: u64) -> bool {
         if group_id > 0 {
             self.last_reply_times
                 .get(&(group_id, 0))
@@ -85,14 +71,14 @@ impl SharedState {
     }
 
     /// 她在某群最近一次发言距今多少秒（None = 从未或已超出记录）
-    pub fn last_reply_ago(&self, group_id: u64) -> Option<u64> {
+    pub(crate) fn last_reply_ago(&self, group_id: u64) -> Option<u64> {
         self.last_reply_times
             .get(&(group_id, 0))
             .map(|t| t.elapsed().as_secs())
     }
 
     /// 记录机器人在群里发出的消息
-    pub fn record_bot_message(&mut self, group_id: u64, message: &str) {
+    pub(crate) fn record_bot_message(&mut self, group_id: u64, message: &str) {
         let entry = self.recent_bot_messages.entry(group_id).or_default();
         entry.push((message.to_string(), Instant::now()));
         if entry.len() > 10 {
@@ -101,7 +87,7 @@ impl SharedState {
     }
 
     /// 获取机器人在某群最近的消息 (返回 owned String，因为无法跨锁返回引用)
-    pub fn get_recent_bot_messages(
+    pub(crate) fn get_recent_bot_messages(
         &self,
         group_id: u64,
         max_age_secs: u64,
@@ -121,11 +107,14 @@ impl SharedState {
     }
 
     /// 获取或创建用户上下文
-    pub fn get_or_create_context(&mut self, group_id: u64, user_id: u64) -> &mut UserContext {
+    pub(crate) fn get_or_create_context(
+        &mut self,
+        group_id: u64,
+        user_id: u64,
+    ) -> &mut UserContext {
         let key: CtxKey = (group_id, user_id);
         self.contexts.entry(key).or_insert(UserContext {
             history: Vec::new(),
-            emotion: String::new(),
             conversation_summary: String::new(),
         })
     }
@@ -133,7 +122,7 @@ impl SharedState {
     /// 向用户历史追加一条消息。
     /// 超出窗口大小时，将需要压缩的数据提取出来，在锁外调用 AI，
     /// 然后重新获取锁写回摘要。避免持锁调用 AI 导致死锁。
-    pub fn push_history(
+    pub(crate) fn push_history(
         &mut self,
         group_id: u64,
         user_id: u64,
@@ -194,7 +183,7 @@ impl SharedState {
     }
 
     /// 克隆用户对话历史 (用于跨锁返回)
-    pub fn get_history_clone(&self, group_id: u64, user_id: u64) -> Vec<(String, String)> {
+    pub(crate) fn get_history_clone(&self, group_id: u64, user_id: u64) -> Vec<(String, String)> {
         let key: CtxKey = (group_id, user_id);
         self.contexts
             .get(&key)
@@ -203,7 +192,7 @@ impl SharedState {
     }
 
     /// 向群级历史追加一条消息（群聊中跨用户可见）
-    pub fn push_group_history(
+    pub(crate) fn push_group_history(
         &mut self,
         group_id: u64,
         role: &str,
@@ -221,7 +210,7 @@ impl SharedState {
     }
 
     /// 遗忘用户的所有对话 (共享部分)
-    pub fn forget_user_shared(&mut self, user_id: u64) {
+    pub(crate) fn forget_user_shared(&mut self, user_id: u64) {
         self.contexts.retain(|&(_, uid), _| uid != user_id);
         self.last_reply_times.retain(|&(_, uid), _| uid != user_id);
     }
@@ -231,7 +220,7 @@ impl SharedState {
     /// - 移除空 history 的 context（已压缩到 summary 的保留）
     /// - 移除超过 1 小时的 last_reply_times
     /// - 移除不活跃群的 group_history
-    pub fn cleanup_inactive(&mut self, active_groups: &HashSet<u64>) {
+    pub(crate) fn cleanup_inactive(&mut self, active_groups: &HashSet<u64>) {
         let one_hour = 3600u64;
 
         // 清理空 history 且 summary 也为空的 context

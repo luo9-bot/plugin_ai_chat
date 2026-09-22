@@ -1,307 +1,323 @@
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use tracing::debug;
 
-use super::init::{CONFIG, CONFIG_ERROR, DATA_DIR, DEFAULT_CONFIG_YAML, PROMPT};
+use super::init::{CONFIG, CONFIG_ERROR, DATA_DIR, PROMPT};
 use super::structs::Config;
+use crate::util::{RwLockReadExt, RwLockWriteExt};
 
-pub fn data_dir() -> &'static PathBuf {
+/// 数据目录
+///
+/// 这是**启动契约**：把状态写到"猜出来的目录"比在这里失败更糟（数据会散到
+/// 错误位置且无人察觉）。因此本函数是"配置必须先初始化"的断言，也是全仓
+/// 少数被显式豁免 `expect_used` 的位置之一。
+#[allow(clippy::expect_used)]
+pub(crate) fn data_dir() -> &'static PathBuf {
     DATA_DIR.get().expect("Config not initialized")
 }
 
+/// 数据目录；配置尚未初始化时返回 `None`
+///
+/// 给"可能在启动流程之前被调用"的模块用（状态库的惰性打开）。
+/// 这类模块不该因为启动顺序而 panic——那是把顺序错误变成崩溃。
+pub(crate) fn try_data_dir() -> Option<&'static PathBuf> {
+    DATA_DIR.get()
+}
+
 /// 获取配置的克隆（每次调用会 clone，但 Config 很小且调用不频繁）
-pub fn get() -> Config {
+///
+/// 同 [`data_dir`]：未初始化即访问配置是启动顺序错误，必须立刻可见。
+#[allow(clippy::expect_used)]
+pub(crate) fn get() -> Config {
     CONFIG
-        .read()
-        .unwrap()
+        .read_recover()
         .as_ref()
         .expect("Config not initialized")
         .clone()
 }
 
 /// 获取配置解析错误信息，为空表示正常
-pub fn error_message() -> String {
-    CONFIG_ERROR.read().unwrap().clone()
+pub(crate) fn error_message() -> String {
+    CONFIG_ERROR.read_recover().clone()
 }
 
 /// 重新载入配置文件（热重载，无需重启插件）
-pub fn reload() -> Result<(), String> {
+pub(crate) fn reload() -> Result<(), String> {
     let config_path = data_dir().join("config.yaml");
     let content = fs::read_to_string(&config_path).map_err(|e| format!("读取配置失败: {}", e))?;
     let config: Config = match serde_yaml::from_str(&content) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("配置文件解析失败: {}", e);
-            *CONFIG_ERROR.write().unwrap() = msg.clone();
+            *CONFIG_ERROR.write_recover() = msg.clone();
             return Err(msg);
         }
     };
 
     // 解析成功，清除错误标记
-    *CONFIG_ERROR.write().unwrap() = String::new();
+    *CONFIG_ERROR.write_recover() = String::new();
 
     // 更新提示词
     let prompt_path = data_dir().join("prompts").join(&config.prompts);
     if prompt_path.exists() {
         let prompt_content = fs::read_to_string(&prompt_path).unwrap_or_default();
-        *PROMPT.write().unwrap() = prompt_content;
+        *PROMPT.write_recover() = prompt_content;
     }
 
-    *CONFIG.write().unwrap() = Some(config);
+    *CONFIG.write_recover() = Some(config);
     debug!("config: hot-reloaded successfully");
     Ok(())
 }
 
-pub fn prompt() -> String {
-    PROMPT.read().unwrap().clone()
+pub(crate) fn prompt() -> String {
+    PROMPT.read_recover().clone()
 }
 
-/// 返回配置模板（带注释的 YAML）
-pub fn config_template() -> &'static str {
-    DEFAULT_CONFIG_YAML
+/// 保存配置：**类型化序列化 + 原子落盘**
+///
+/// 这是唯一的保存路径。它取代了原先 307 行的"逐行文本重写器"
+/// （`save_config_with_comments`）——那个实现靠缩进栈猜层级，
+/// 在嵌套字段、非两空格缩进、含 `#` 的字符串值上会**静默产出错误 YAML**
+/// 并且无条件返回 `Ok`（见 `.docs/counter-world-design.md` §3.2）。
+///
+/// 注释不承载语义，因此不再保留：想留笔记请写进 `config.notes.md`。
+/// 代价是明确的、可预期的；而"偶尔丢一个嵌套字段"不是。
+///
+/// 写盘前先反序列化校验一次：序列化/反序列化不对称（`skip_serializing`、
+/// 自定义 `deserialize_with` 等）会让配置变成"写得进、读不出"，
+/// 那正是"改坏配置导致插件起不来"的成因。
+pub(crate) fn save(config: &Config) -> Result<(), String> {
+    let path = data_dir().join("config.yaml");
+    let yaml = serde_yaml::to_string(config).map_err(|e| format!("序列化配置失败: {e}"))?;
+
+    // 校验：写出去的内容必须能被自己读回来
+    if let Err(e) = serde_yaml::from_str::<Config>(&yaml) {
+        return Err(format!("配置无法通过回读校验，已放弃写入: {e}"));
+    }
+
+    crate::util::atomic_write(&path, yaml).map_err(|e| format!("写入配置失败: {e}"))?;
+    debug!("config: saved");
+    Ok(())
 }
 
-/// 使用模板保存配置：保留注释和格式，只替换值
-pub fn save_config_with_comments(config: &serde_json::Value) -> Result<String, String> {
-    let template = DEFAULT_CONFIG_YAML;
-    let new_obj = config.as_object().ok_or("config is not an object")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::init::DEFAULT_CONFIG_YAML;
 
-    let mut output = String::with_capacity(template.len() + 512);
-    let mut indent_stack: Vec<&str> = Vec::new();
-    let mut skip_list_items = false;
-    let mut handled_keys: HashSet<&str> = HashSet::new();
+    /// 默认配置的参考实例：默认值的唯一真源就是模板本身
+    fn reference_config() -> Config {
+        serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法的 Config")
+    }
 
-    for line in template.lines() {
-        let trimmed = line.trim();
+    /// 模板（`config.example.yaml`）必须始终能解析成 `Config`。
+    ///
+    /// 模板是 `include_str!` 进二进制的默认值来源：一旦它与结构体漂移，
+    /// 新装用户的配置就会带着解析错误启动。
+    #[test]
+    fn example_template_parses_into_config() {
+        let parsed: Result<Config, _> = serde_yaml::from_str(DEFAULT_CONFIG_YAML);
+        assert!(
+            parsed.is_ok(),
+            "config.example.yaml 无法解析为 Config：{:?}",
+            parsed.err()
+        );
+    }
 
-        // 注释或空行：原样保留
-        if trimmed.starts_with('#') || trimmed.is_empty() {
-            output.push_str(line);
-            output.push('\n');
-            continue;
-        }
+    /// 保存路径不得丢值：改两个**嵌套**字段，序列化后重新解析必须还在。
+    ///
+    /// `CLAUDE.md` 明确记录过这个失效模式——模板里被注释掉的嵌套字段
+    /// 既进不了 `handled_keys` 也进不了缩进栈，保存时会**静默丢失**。
+    /// 类型化保存从结构上消除了这个失败模式，这条测试把它钉住。
+    #[test]
+    fn nested_values_survive_serialize_and_reparse() {
+        let mut config = reference_config();
 
-        // 计算当前缩进深度
-        let indent = line.len() - line.trim_start().len();
-        let depth = indent / 2;
-        let indent_str = &line[..indent];
+        config.conversation.batch_timeout_ms = 4321;
+        config.style.max_reply_chars = 77;
 
-        // 更新缩进栈
-        while indent_stack.len() > depth {
-            indent_stack.pop();
-        }
+        let yaml = serde_yaml::to_string(&config).expect("序列化");
+        let reloaded: Config = serde_yaml::from_str(&yaml).expect("回读");
 
-        // 列表项（- 开头）：如果父 key 的数组已被替换，跳过
-        if trimmed.starts_with('-') && skip_list_items {
-            continue;
-        }
+        assert_eq!(
+            reloaded.conversation.batch_timeout_ms, 4321,
+            "嵌套字段在序列化时丢失"
+        );
+        assert_eq!(reloaded.style.max_reply_chars, 77, "嵌套字段在序列化时丢失");
+    }
 
-        // 遇到新的 key，重置跳过标记
-        if trimmed.find(':').is_some() {
-            skip_list_items = false;
-        }
+    /// 配置往返必须是恒等。
+    ///
+    /// "能写出去但读回来不一样"（`skip_serializing`、自定义
+    /// `deserialize_with` 之类的不对称）会在这里暴露，而不是在用户升级后
+    /// 发现配置被悄悄重置。
+    #[test]
+    fn config_round_trip_is_identity() {
+        let original = reference_config();
+        let yaml = serde_yaml::to_string(&original).expect("序列化");
+        let reloaded: Config = serde_yaml::from_str(&yaml).expect("回读");
 
-        // 解析 key: value
-        if let Some(colon_pos) = trimmed.find(':') {
-            let key = trimmed[..colon_pos].trim();
-            let old_rest = &trimmed[colon_pos + 1..];
-            let old_rest_trimmed = old_rest.trim();
+        let yaml_again = serde_yaml::to_string(&reloaded).expect("再次序列化");
+        assert_eq!(yaml, yaml_again, "配置往返不是恒等");
+    }
 
-            // 嵌套块（key: 后面没值）
-            if old_rest_trimmed.is_empty() {
-                // 检查新值是否是数组（需要替换后续列表项）
-                let new_val = find_nested_value(new_obj, &indent_stack, key);
-                if let Some(serde_json::Value::Array(arr)) = new_val {
-                    if arr.is_empty() {
-                        // 空数组用 [] 内联格式，避免 YAML 将 key: 解析为 null
-                        output.push_str(&format!("{}{}: []\n", indent_str, key));
+    /// **三处同步规则的第三条**：`ConfigView.vue` 的 `sections` 里每个
+    /// 字段路径都必须真的存在于配置结构体中。
+    ///
+    /// 否则网页上会出现一个"改了没用"的旋钮——`CLAUDE.md` 把这条列为
+    /// 靠人眼维持的一致性之一。这里把它变成编译期就能跑到的断言：
+    /// 结构体删字段而忘了改前端，测试立刻失败。
+    #[test]
+    fn admin_ui_field_paths_resolve_in_config() {
+        let config_value: serde_yaml::Value =
+            serde_yaml::to_value(reference_config()).expect("配置必须可序列化");
+        let view = include_str!("../../frontend/src/views/ConfigView.vue");
+
+        let pattern = regex::Regex::new(r"key:\s*'([A-Za-z0-9_.]+)'").expect("正则必须合法");
+        let unresolved: Vec<&str> = pattern
+            .captures_iter(view)
+            .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
+            .filter(|path| resolve_config_path(&config_value, path).is_none())
+            .collect();
+
+        assert!(
+            unresolved.is_empty(),
+            "ConfigView.vue 指向了不存在的配置路径（网页旋钮会失效）：{unresolved:?}"
+        );
+    }
+
+    /// 按点分路径在 YAML 映射里查找；返回 `None` 表示路径不存在
+    fn resolve_config_path<'a>(
+        value: &'a serde_yaml::Value,
+        path: &str,
+    ) -> Option<&'a serde_yaml::Value> {
+        path.split('.')
+            .try_fold(value, |current, segment| current.get(segment))
+    }
+
+    /// 模板里不能有**结构体不认识**的键。
+    ///
+    /// `Config` 没有 `deny_unknown_fields`，所以模板里残留的键会被静默忽略：
+    /// 它既不报错也不生效，只是让文档承诺一个不存在的旋钮。
+    /// （清理前模板里就有 10 个这样的死键。）
+    ///
+    /// 反方向——结构体有而模板没有——不会解析失败（会拿到代码内建默认值），
+    /// 因此这里只钉住会造成"文档撒谎"的那一侧。
+    #[test]
+    fn template_has_no_unknown_keys() {
+        let template: serde_yaml::Value =
+            serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法 YAML");
+        let known: serde_yaml::Value =
+            serde_yaml::to_value(reference_config()).expect("配置必须可序列化");
+
+        let mut template_paths = Vec::new();
+        collect_leaf_paths(&template, String::new(), &mut template_paths);
+
+        let unknown: Vec<String> = template_paths
+            .into_iter()
+            .filter(|path| resolve_config_path(&known, path).is_none())
+            .collect();
+
+        assert!(
+            unknown.is_empty(),
+            "config.example.yaml 含有结构体不认识的键（会被静默忽略）：{unknown:?}"
+        );
+    }
+
+    /// 反方向：结构体有的字段，模板也必须有。
+    ///
+    /// 上面那个测试只钉住"模板不撒谎"的那一侧。这一侧不会让解析失败（缺键会
+    /// 拿到代码内建默认值），代价是模板对新装用户**少给一个旋钮**——而
+    /// CLAUDE.md 把"字段变更必须同步 `config.example.yaml`"写成了人工纪律。
+    /// 靠人记得住的约定正是本项目记录过的一类代价（设计文档 §13.3 结尾），
+    /// 所以让测试替人记这一条。它第一次运行就抓到了整个 `sticker:` 段缺失。
+    ///
+    /// 判定按**键名**而不是路径，并且把注释放行也算数：`whitelist` /
+    /// `blacklist` / `auto_start_*` 这类列表就是有意写成注释示例的
+    /// （模板里写死一份假名单比不写更糟），只比解析结果会把它们误判成缺失。
+    #[test]
+    fn template_covers_every_config_field() {
+        let known: serde_yaml::Value =
+            serde_yaml::to_value(reference_config()).expect("配置必须可序列化");
+        let template: serde_yaml::Value =
+            serde_yaml::from_str(DEFAULT_CONFIG_YAML).expect("模板必须是合法 YAML");
+        let documented = documented_key_names();
+
+        let mut expected = Vec::new();
+        collect_non_null_paths(&known, String::new(), &mut expected);
+
+        let missing: Vec<String> = expected
+            .into_iter()
+            .filter(|path| resolve_config_path(&template, path).is_none())
+            .filter(|path| !documented.contains(leaf_name(path)))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "config.example.yaml 缺少这些字段（新装用户看不到这个旋钮）：{missing:?}"
+        );
+    }
+
+    /// 模板里出现过的键名，**包括被注释掉的示例行**（`# whitelist: [...]`）
+    fn documented_key_names() -> std::collections::HashSet<String> {
+        DEFAULT_CONFIG_YAML
+            .lines()
+            .filter_map(|line| {
+                let after_hash = line.trim_start().trim_start_matches('#').trim_start();
+                after_hash
+                    .split_once(':')
+                    .map(|(name, _)| name.trim().to_string())
+            })
+            .filter(|name| !name.is_empty() && !name.contains(' '))
+            .collect()
+    }
+
+    fn leaf_name(path: &str) -> &str {
+        path.rsplit('.').next().unwrap_or(path)
+    }
+
+    /// 收集非 `null` 叶子字段的点分路径（映射一律继续下钻）
+    fn collect_non_null_paths(value: &serde_yaml::Value, prefix: String, paths: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                for (key, child) in map {
+                    let Some(name) = key.as_str() else { continue };
+                    let path = if prefix.is_empty() {
+                        name.to_string()
                     } else {
-                        output.push_str(line);
-                        output.push('\n');
-                        // 输出新数组的列表项
-                        let item_indent = format!("{}  ", indent_str);
-                        for item in arr {
-                            let item_yaml = value_to_yaml_inline(item);
-                            output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
-                        }
-                    }
-                    // 标记跳过后续的模板列表项
-                    skip_list_items = true;
-                    indent_stack.push(key);
-                    continue;
+                        format!("{prefix}.{name}")
+                    };
+                    collect_non_null_paths(child, path, paths);
                 }
-                if indent_stack.is_empty() {
-                    handled_keys.insert(key);
-                }
-                indent_stack.push(key);
-                output.push_str(line);
-                output.push('\n');
-                continue;
             }
+            serde_yaml::Value::Null => {}
+            _ => {
+                if !prefix.is_empty() {
+                    paths.push(prefix);
+                }
+            }
+        }
+    }
 
-            // 在 new_obj 中查找对应值
-            let new_value = find_nested_value(new_obj, &indent_stack, key);
-
-            if let Some(val) = new_value {
-                // 检查是否是数组（需要输出为列表格式）
-                if let serde_json::Value::Array(arr) = val {
-                    if arr.is_empty() {
-                        // 空数组用 [] 内联格式，避免 YAML 将 key: 解析为 null
-                        let comment = extract_inline_comment(old_rest);
-                        if comment.is_empty() {
-                            output.push_str(&format!("{}{}: []\n", indent_str, key));
-                        } else {
-                            output.push_str(&format!("{}{}: [] {}\n", indent_str, key, comment));
-                        }
+    /// 收集叶子字段的点分路径（非空映射继续下钻，其余算叶子）
+    fn collect_leaf_paths(value: &serde_yaml::Value, prefix: String, paths: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) if !map.is_empty() => {
+                for (key, child) in map {
+                    let Some(name) = key.as_str() else { continue };
+                    let path = if prefix.is_empty() {
+                        name.to_string()
                     } else {
-                        let comment = extract_inline_comment(old_rest);
-                        if comment.is_empty() {
-                            output.push_str(&format!("{}{}:\n", indent_str, key));
-                        } else {
-                            output.push_str(&format!("{}{}: {}\n", indent_str, key, comment));
-                        }
-                        // 输出数组项为列表格式
-                        let item_indent = format!("{}  ", indent_str);
-                        for item in arr {
-                            let item_yaml = value_to_yaml_inline(item);
-                            output.push_str(&format!("{}- {}\n", item_indent, item_yaml));
-                        }
-                    }
-                    // 标记跳过后续的模板列表项
-                    skip_list_items = true;
-                    if indent_stack.is_empty() {
-                        handled_keys.insert(key);
-                    }
-                } else {
-                    let new_yaml = value_to_yaml_inline(val);
-                    let comment = extract_inline_comment(old_rest);
-                    if comment.is_empty() {
-                        output.push_str(&format!("{}{}: {}\n", indent_str, key, new_yaml));
-                    } else {
-                        output.push_str(&format!(
-                            "{}{}: {} {}\n",
-                            indent_str, key, new_yaml, comment
-                        ));
-                    }
-                    if indent_stack.is_empty() {
-                        handled_keys.insert(key);
-                    }
+                        format!("{prefix}.{name}")
+                    };
+                    collect_leaf_paths(child, path, paths);
                 }
-            } else {
-                output.push_str(line);
-                output.push('\n');
             }
-        } else {
-            // 列表项或其他非 key: value 行
-            output.push_str(line);
-            output.push('\n');
-        }
-    }
-
-    // 追加模板中没有的顶级 key（如 whitelist、blacklist 等）
-    for (key, val) in new_obj {
-        if !handled_keys.contains(key.as_str()) {
-            let yaml_val = value_to_yaml_inline(val);
-            output.push_str(&format!("{}: {}\n", key, yaml_val));
-        }
-    }
-
-    Ok(output)
-}
-
-/// 在嵌套对象中查找值
-fn find_nested_value<'a>(
-    root: &'a serde_json::Map<String, serde_json::Value>,
-    stack: &[&str],
-    key: &str,
-) -> Option<&'a serde_json::Value> {
-    let mut current = root;
-    for parent in stack {
-        current = current.get(*parent)?.as_object()?;
-    }
-    current.get(key)
-}
-
-/// 将 JSON Value 转为 YAML 内联格式
-fn value_to_yaml_inline(val: &serde_json::Value) -> String {
-    match val {
-        serde_json::Value::String(s) => {
-            if s.contains(':') || s.contains('#') || s.contains('"') || s.starts_with(' ') {
-                format!("\"{}\"", s.replace('"', "\\\""))
-            } else {
-                s.clone()
+            _ => {
+                if !prefix.is_empty() {
+                    paths.push(prefix);
+                }
             }
         }
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(value_to_yaml_inline).collect();
-            format!("[{}]", items.join(", "))
-        }
-        serde_json::Value::Object(map) => {
-            // 按预定义顺序输出字段，未定义的排在最后按字母序
-            let ordered = object_to_ordered_pairs(map);
-            format!("{{{}}}", ordered.join(", "))
-        }
     }
-}
-
-/// 已知结构的字段顺序（不在列表中的键按字母序追加到末尾）
-fn field_order_hint(
-    obj: &serde_json::Map<String, serde_json::Value>,
-) -> Option<&'static [&'static str]> {
-    // 配额时段
-    if obj.contains_key("start_hour")
-        && obj.contains_key("end_hour")
-        && obj.contains_key("max_replies")
-    {
-        return Some(&["start_hour", "end_hour", "max_replies"]);
-    }
-    None
-}
-
-fn object_to_ordered_pairs(map: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
-    let hint = field_order_hint(map);
-    let mut pairs = Vec::with_capacity(map.len());
-    if let Some(order) = hint {
-        // 按预定义顺序输出
-        for &key in order {
-            if let Some(val) = map.get(key) {
-                pairs.push(format!("{}: {}", key, value_to_yaml_inline(val)));
-            }
-        }
-        // 追加不在预定义顺序中的键（字母序）
-        for (k, v) in map {
-            if !order.contains(&k.as_str()) {
-                pairs.push(format!("{}: {}", k, value_to_yaml_inline(v)));
-            }
-        }
-    } else {
-        // 无特殊顺序要求，按字母序
-        for (k, v) in map {
-            pairs.push(format!("{}: {}", k, value_to_yaml_inline(v)));
-        }
-    }
-    pairs
-}
-
-/// 提取行尾注释（如 "value  # 注释" -> "# 注释"）
-fn extract_inline_comment(rest: &str) -> &str {
-    // 在 "value" 之后找 "#"，但要排除引号内的 #
-    let chars: Vec<char> = rest.trim().chars().collect();
-    let mut in_quote = false;
-    for (i, &c) in chars.iter().enumerate() {
-        match c {
-            '"' => in_quote = !in_quote,
-            '#' if !in_quote => {
-                // 找到注释起始位置
-                let trimmed = rest.trim();
-                return &trimmed[i..];
-            }
-            _ => {}
-        }
-    }
-    ""
 }

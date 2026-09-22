@@ -1,26 +1,26 @@
-pub mod cognitive_biases;
-pub mod embedding;
+pub(crate) mod cognitive_biases;
+pub(crate) mod embedding;
 mod extract;
-pub mod graph;
+pub(crate) mod graph;
 mod operations;
-pub mod ops_log;
-pub mod retrieval;
+pub(crate) mod ops_log;
+pub(crate) mod retrieval;
 mod review;
-pub mod store;
-pub mod unpredictability;
-pub mod vector_store;
+pub(crate) mod store;
+pub(crate) mod unpredictability;
+pub(crate) mod vector_store;
 
 use std::collections::HashMap;
 
 use crate::config;
 
-pub use extract::*;
-pub use operations::*;
-pub use review::*;
-pub use store::*;
+pub(crate) use extract::*;
+pub(crate) use operations::*;
+pub(crate) use review::*;
+pub(crate) use store::*;
 
 /// 初始化记忆系统
-pub fn init() {
+pub(crate) fn init() {
     store::init();
     vector_store::init();
     retrieval::vector::init_query_cache();
@@ -30,7 +30,7 @@ pub fn init() {
 /// 语义检索记忆：双路检索 + 无状态遗忘曲线 + 后置图门控 + 自适应阈值 + 智能回退
 ///
 /// 同时检索全局记忆和群特定记忆；被想起的记忆会得到强化（检索即强化）。
-pub fn search_memories(
+pub(crate) fn search_memories(
     user_id: u64,
     current_group_id: u64,
     query: &str,
@@ -124,7 +124,6 @@ pub fn search_memories(
         vector_weight: 0.7,
         bm25_weight: 0.3,
         rrf_k: 60.0,
-        metadata_filter: None,
         threshold_config: Some(retrieval::ThresholdConfig::default()),
         posterior_graph_config: Some(retrieval::PosteriorGraphConfig::default()),
     };
@@ -210,7 +209,6 @@ fn dual_path_bm25_only(
                 .map(|(_, c)| c.clone())
                 .unwrap_or_default(),
             score: r.score,
-            source: "bm25",
         })
         .collect()
 }

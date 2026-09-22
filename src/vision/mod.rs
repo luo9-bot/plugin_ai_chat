@@ -3,7 +3,7 @@ use crate::config;
 use tracing::{debug, info};
 
 /// 从消息中提取 [CQ:image,...] 的图片 URL
-pub fn extract_image_urls(message: &str) -> Vec<String> {
+pub(crate) fn extract_image_urls(message: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let mut remaining = message;
     while let Some(start) = remaining.find("[CQ:image,") {
@@ -35,7 +35,7 @@ pub fn extract_image_urls(message: &str) -> Vec<String> {
 /// 只处理图片：视频/文件/转发等其它 CQ 码由 `conversation::turn::strip_cq_codes`
 /// 统一剥离（那里有完整的 CQ 语法处理）。这里的语义就是"去掉图片码"，
 /// 保留它是因为记忆与图片沉淀路径需要精确区分"这条消息本来有没有图"。
-pub fn strip_image_cq(message: &str) -> String {
+pub(crate) fn strip_image_cq(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
     let mut remaining = message;
     while let Some(start) = remaining.find("[CQ:image,") {
@@ -58,7 +58,7 @@ pub fn strip_image_cq(message: &str) -> String {
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
 /// 注意：此函数需要 user_id 参数来检查识图禁用状态
-pub fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
+pub(crate) fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
     // 检查用户是否被禁用识图
     if anti_injection::is_vision_disabled(user_id) {
         info!(user_id, "vision: 用户识图已被禁用");
@@ -67,22 +67,114 @@ pub fn recognize_for_user(image_url: &str, user_id: u64) -> Option<String> {
     recognize(image_url)
 }
 
+/// VLM 调用的失败原因
+///
+/// 分成三类是因为处置方式不同：序列化失败是本地的编码 bug，传输失败通常是
+/// 上游不可达，没有文本则说明对方答应了却没给出可用内容。
+#[derive(Debug)]
+pub(crate) enum VlmError {
+    /// 请求体无法序列化
+    Serialize(serde_json::Error),
+    /// 传输失败或响应体读取失败
+    Http(crate::util::HttpError),
+    /// 响应里没有可提取的文本
+    NoText,
+}
+
+impl std::fmt::Display for VlmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Serialize(error) => write!(f, "请求体序列化失败：{error}"),
+            Self::Http(error) => write!(f, "{error}"),
+            Self::NoText => write!(f, "响应里没有可提取的文本"),
+        }
+    }
+}
+
+/// `{base_url}/responses`：识图与表情包选择共用的 VLM 端点
+///
+/// 这是**唯一**一处 VLM 调用与响应解析。此前识图和表情包选择各写了一份，
+/// 连解析回退顺序都不一致——改一处必漏另一处。
+///
+/// 超时走 [`crate::ai::no_error_agent`]：VLM 也在串行消息队列的路径上，
+/// "不设超时"等于给整个 bot 留一个无限期停摆的入口。
+pub(crate) fn call_vlm(
+    base_url: &str,
+    api_key: &str,
+    body: &serde_json::Value,
+) -> Result<String, VlmError> {
+    let url = format!("{}/responses", base_url.trim_end_matches('/'));
+    let json_body = serde_json::to_string(body).map_err(VlmError::Serialize)?;
+
+    debug!(url = %url, "vision: sending request");
+
+    let response_body =
+        crate::util::post_json(&crate::ai::no_error_agent(), &url, api_key, &json_body)
+            .map_err(VlmError::Http)?;
+
+    extract_vlm_text(&response_body).ok_or_else(|| {
+        debug!(response = %response_body, "vision: 响应里没有可提取的文本");
+        VlmError::NoText
+    })
+}
+
+/// 从 VLM 响应里提取文本
+///
+/// 兼容三种上游形态，按可靠性从高到低回退：
+/// 1. responses API：`{ "output": [{ "content": [{ "text": "..." }] }] }`
+/// 2. chat completions：`{ "choices": [{ "message": { "content": "..." } }] }`
+/// 3. 直接字段：`output_text` / `text`
+fn extract_vlm_text(response_body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(response_body).ok()?;
+
+    let from_responses = value
+        .get("output")
+        .and_then(|output| output.as_array())
+        .and_then(|output| {
+            output.iter().find_map(|item| {
+                item.get("content")
+                    .and_then(|content| content.as_array())
+                    .and_then(|contents| {
+                        contents.iter().find_map(|content| {
+                            content
+                                .get("text")
+                                .and_then(|text| text.as_str())
+                                .map(str::to_string)
+                        })
+                    })
+            })
+        });
+
+    let from_choices = value
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .map(str::to_string);
+
+    let from_plain_text = ["output_text", "text"]
+        .iter()
+        .find_map(|key| value.get(key).and_then(|text| text.as_str()))
+        .map(str::to_string);
+
+    from_responses.or(from_choices).or(from_plain_text)
+}
+
 /// 调用识图 API，返回图片描述 (不检查用户禁用状态)
 ///
 /// 使用 OpenAI responses API 格式：POST {base_url}/responses
 /// 如果 api_key 未配置或调用失败，返回 None
-pub fn recognize(image_url: &str) -> Option<String> {
+pub(crate) fn recognize(image_url: &str) -> Option<String> {
     info!(url = %image_url, "vision: 开始识别图片");
     let cfg = config::get();
     if !cfg.vision.enabled() {
         return None;
     }
 
-    let model = cfg.vision.model.clone();
-    let max_tokens = cfg.vision.max_tokens;
-
     let request_body = serde_json::json!({
-        "model": model,
+        "model": cfg.vision.model,
         "input": [{
             "role": "user",
             "content": [
@@ -96,96 +188,67 @@ pub fn recognize(image_url: &str) -> Option<String> {
                 }
             ]
         }],
-        "max_output_tokens": max_tokens
+        "max_output_tokens": cfg.vision.max_tokens
     });
 
-    let url = format!("{}/responses", cfg.vision.base_url.trim_end_matches('/'));
-
-    debug!(url = %url, model = %cfg.vision.model, image = %image_url, "vision: sending request");
-
-    let json_body = match serde_json::to_string(&request_body) {
-        Ok(j) => j,
-        Err(e) => {
-            debug!(error = %e, "vision: serialize failed");
-            return None;
+    match call_vlm(&cfg.vision.base_url, &cfg.vision.api_key, &request_body) {
+        Ok(text) => {
+            debug!(result = %text, "vision: got description");
+            Some(text)
         }
-    };
-
-    let mut resp = match ureq::post(&url)
-        .header("Authorization", &format!("Bearer {}", cfg.vision.api_key))
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-    {
-        Ok(r) => r,
-        Err(e) => {
-            debug!(error = %e, "vision: request failed");
-            return None;
-        }
-    };
-
-    let resp_str = match resp.body_mut().read_to_string() {
-        Ok(s) => s,
-        Err(e) => {
-            debug!(error = %e, "vision: read response failed");
-            return None;
-        }
-    };
-
-    // 解析 responses API 格式
-    // 标准格式: { "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "..." }] }] }
-    // 兼容 chat completions: { "choices": [{ "message": { "content": "..." } }] }
-    let text = match serde_json::from_str::<serde_json::Value>(&resp_str) {
-        Ok(v) => {
-            // 尝试 responses 格式
-            if let Some(output) = v.get("output").and_then(|o| o.as_array()) {
-                output.iter().find_map(|item| {
-                    item.get("content")
-                        .and_then(|c| c.as_array())
-                        .and_then(|contents| {
-                            contents.iter().find_map(|content| {
-                                content
-                                    .get("text")
-                                    .and_then(|t| t.as_str())
-                                    .map(|s| s.to_string())
-                            })
-                        })
-                })
-            }
-            // 兼容 chat completions 格式
-            else if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
-                choices.first().and_then(|c| {
-                    c.get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_str())
-                        .map(|s| s.to_string())
-                })
-            }
-            // 兼容直接 text 字段
-            else {
-                v.get("output_text")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        v.get("text")
-                            .and_then(|t| t.as_str())
-                            .map(|s| s.to_string())
-                    })
-            }
-        }
-        Err(e) => {
-            debug!(error = %e, "vision: response parse failed");
+        Err(error) => {
+            debug!(error = %error, "vision: 识图失败");
             None
         }
-    };
+    }
+}
 
-    match &text {
-        Some(t) => {
-            debug!(result = %t, "vision: got description");
-            Some(t.clone())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_api_shape_is_understood() {
+        let body = r#"{"output":[{"content":[{"type":"output_text","text":"一只橘猫"}]}]}"#;
+        assert_eq!(extract_vlm_text(body).as_deref(), Some("一只橘猫"));
+    }
+
+    #[test]
+    fn chat_completions_shape_is_understood() {
+        let body = r#"{"choices":[{"message":{"content":"一只橘猫"}}]}"#;
+        assert_eq!(extract_vlm_text(body).as_deref(), Some("一只橘猫"));
+    }
+
+    #[test]
+    fn plain_text_fields_are_understood() {
+        assert_eq!(
+            extract_vlm_text(r#"{"output_text":"甲"}"#).as_deref(),
+            Some("甲")
+        );
+        assert_eq!(extract_vlm_text(r#"{"text":"乙"}"#).as_deref(), Some("乙"));
+    }
+
+    /// 有 output 键但里面没有文本时，必须继续往后面的形态回退
+    #[test]
+    fn an_empty_output_still_falls_back_to_choices() {
+        let body = r#"{"output":[],"choices":[{"message":{"content":"回退成功"}}]}"#;
+        assert_eq!(extract_vlm_text(body).as_deref(), Some("回退成功"));
+    }
+
+    #[test]
+    fn junk_responses_yield_nothing_instead_of_panicking() {
+        for body in ["", "not json at all", "{}", r#"{"output":"不是数组"}"#] {
+            assert_eq!(extract_vlm_text(body), None, "{body:?}");
         }
-        None => {
-            debug!(response = %resp_str, "vision: could not extract text from response");
-            None
-        }
+    }
+
+    #[test]
+    fn image_urls_are_extracted_and_stripped() {
+        let message = "看这个[CQ:image,file=a.jpg,url=https://example.com/a.jpg]好看吗";
+        assert_eq!(
+            extract_image_urls(message),
+            vec!["https://example.com/a.jpg".to_string()]
+        );
+        assert_eq!(strip_image_cq(message), "看这个好看吗");
     }
 }

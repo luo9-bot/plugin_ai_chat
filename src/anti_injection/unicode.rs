@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Unicode 不可见字符列表
-pub const INVISIBLE_CHARS: &[char] = &[
+pub(crate) const INVISIBLE_CHARS: &[char] = &[
     '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}', '\u{00AD}', '\u{034F}',
     '\u{061C}', '\u{115F}', '\u{1160}', '\u{17B4}', '\u{17B5}', '\u{180E}', '\u{2060}', '\u{2061}',
     '\u{2062}', '\u{2063}', '\u{2064}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{206A}',
@@ -206,11 +206,14 @@ static CONFUSABLE_MAP: LazyLock<HashMap<char, char>> = LazyLock::new(|| {
         m.insert(char::from_u32(0x1D7F6 + i as u32).unwrap_or(c), c);
     }
 
-    // Fullwidth ASCII
+    // Fullwidth ASCII：全角 0xFF01..=0xFF5E 与半角 0x0021..=0x007E 一一对应。
+    // 这里用 `if let` 而不是 `unwrap`：范围固定、实际不可能越界，
+    // 但扫描表构造不该持有任何 panic 点。
     for i in 0x0021..=0x007E {
-        let full = char::from_u32(0xFF01 + (i - 0x0021)).unwrap();
-        let half = char::from_u32(i).unwrap();
-        m.insert(full, half);
+        if let (Some(full), Some(half)) = (char::from_u32(0xFF01 + (i - 0x0021)), char::from_u32(i))
+        {
+            m.insert(full, half);
+        }
     }
     m.insert('\u{3000}', ' ');
 
@@ -239,7 +242,7 @@ static CONFUSABLE_MAP: LazyLock<HashMap<char, char>> = LazyLock::new(|| {
 });
 
 /// 常见谐音/替代映射
-pub const HOMO_MAP: &[(&str, &str)] = &[
+pub(crate) const HOMO_MAP: &[(&str, &str)] = &[
     ("艹", "操"),
     ("草", "操"),
     ("cao", "操"),
@@ -280,7 +283,7 @@ pub const HOMO_MAP: &[(&str, &str)] = &[
 ];
 
 /// 全角→半角转换
-pub fn fullwidth_to_halfwidth(c: char) -> char {
+pub(crate) fn fullwidth_to_halfwidth(c: char) -> char {
     match c {
         '\u{FF01}'..='\u{FF5E}' => ((c as u32 - 0xFEE0) as u8) as char,
         '\u{3000}' => ' ',
@@ -289,17 +292,17 @@ pub fn fullwidth_to_halfwidth(c: char) -> char {
 }
 
 /// 检查字符是否为不可见字符
-pub fn is_invisible(c: char) -> bool {
+pub(crate) fn is_invisible(c: char) -> bool {
     INVISIBLE_CHARS.contains(&c)
 }
 
 /// Confusable skeleton：将视觉相似字符映射到 ASCII 等价物
-pub fn confusable_skeleton(c: char) -> char {
+pub(crate) fn confusable_skeleton(c: char) -> char {
     CONFUSABLE_MAP.get(&c).copied().unwrap_or(c)
 }
 
 /// 检查文本是否包含混合脚本（Latin + Cyrillic 或 Latin + Greek）
-pub fn detect_mixed_script(text: &str) -> bool {
+pub(crate) fn detect_mixed_script(text: &str) -> bool {
     let mut has_latin = false;
     let mut has_cyrillic = false;
     let mut has_greek = false;
@@ -317,7 +320,7 @@ pub fn detect_mixed_script(text: &str) -> bool {
 }
 
 /// 计算 Shannon 熵
-pub fn shannon_entropy(text: &str) -> f64 {
+pub(crate) fn shannon_entropy(text: &str) -> f64 {
     if text.is_empty() {
         return 0.0;
     }
@@ -339,7 +342,7 @@ pub fn shannon_entropy(text: &str) -> f64 {
 }
 
 /// 判断是否为 CJK 字符
-pub fn is_cjk(c: char) -> bool {
+pub(crate) fn is_cjk(c: char) -> bool {
     ('\u{4E00}'..='\u{9FFF}').contains(&c)
         || ('\u{3400}'..='\u{4DBF}').contains(&c)
         || ('\u{20000}'..='\u{2A6DF}').contains(&c)

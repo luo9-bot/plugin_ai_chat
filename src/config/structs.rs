@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 // ── 顶层配置 ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct Config {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct Config {
     pub api_key: String,
     pub base_url: String,
     pub model: String,
@@ -67,8 +67,8 @@ pub struct Config {
     pub humanity: HumanityConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct AiConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct AiConfig {
     #[serde(default = "default_frequency_penalty")]
     pub frequency_penalty: f64,
     #[serde(default = "default_presence_penalty")]
@@ -102,14 +102,12 @@ impl Default for AiConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct ConversationConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct ConversationConfig {
     #[serde(default = "default_max_history")]
     pub max_history: usize,
     #[serde(default = "default_batch_timeout")]
     pub batch_timeout_ms: u64,
-    #[serde(default = "default_typing_speed")]
-    pub typing_speed: f64,
     #[serde(default = "default_max_typing_delay")]
     pub max_typing_delay_ms: u64,
     #[serde(default = "default_reply_follow_up_secs")]
@@ -118,8 +116,6 @@ pub struct ConversationConfig {
     #[serde(default = "default_action_descriptions")]
     pub action_descriptions: bool,
     /// 对同一用户的回复冷却时间 (秒)，防止连续回复刷屏，默认 15
-    #[serde(default = "default_reply_cooldown_secs")]
-    pub reply_cooldown_secs: u64,
     /// 群聊表达循环的最大轮数（工具调用轮次），默认 3
     #[serde(default = "default_voice_max_rounds")]
     pub voice_max_rounds: u32,
@@ -140,11 +136,9 @@ impl Default for ConversationConfig {
         Self {
             max_history: default_max_history(),
             batch_timeout_ms: default_batch_timeout(),
-            typing_speed: default_typing_speed(),
             max_typing_delay_ms: default_max_typing_delay(),
             reply_follow_up_secs: default_reply_follow_up_secs(),
             action_descriptions: default_action_descriptions(),
-            reply_cooldown_secs: default_reply_cooldown_secs(),
             voice_max_rounds: default_voice_max_rounds(),
             silence_cooldown_secs: default_silence_cooldown_secs(),
             interruption_enabled: true,
@@ -153,8 +147,8 @@ impl Default for ConversationConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct MemoryConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct MemoryConfig {
     #[serde(default = "default_normal_expire_days")]
     pub normal_expire_days: u64,
     #[serde(default = "default_important_fade_days")]
@@ -192,14 +186,10 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct EmotionConfig {
-    #[serde(default = "default_decay_rate")]
-    pub decay_rate: f32,
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct EmotionConfig {
     #[serde(default = "default_decay_delay")]
     pub decay_delay_secs: u64,
-    #[serde(default = "default_neutral_threshold")]
-    pub neutral_threshold: f32,
     #[serde(default = "default_affinity_threshold")]
     pub affinity_threshold: f32,
 }
@@ -207,16 +197,14 @@ pub struct EmotionConfig {
 impl Default for EmotionConfig {
     fn default() -> Self {
         Self {
-            decay_rate: default_decay_rate(),
             decay_delay_secs: default_decay_delay(),
-            neutral_threshold: default_neutral_threshold(),
             affinity_threshold: default_affinity_threshold(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct ProactiveConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct ProactiveConfig {
     #[serde(default = "default_quiet_start")]
     pub quiet_start: u32,
     #[serde(default = "default_quiet_end")]
@@ -240,8 +228,8 @@ impl Default for ProactiveConfig {
 /// 协议约定：POST `{"query": "..."}` 到 `api_url`（Bearer `api_key`），
 /// 期望响应 `{"results": [{"title": "...", "snippet": "..."}]}`——
 /// 任何能适配该形状的自建代理/搜索服务都可用。
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct SearchConfig {
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub(crate) struct SearchConfig {
     /// 是否开启 search_web 工具（默认关闭）
     #[serde(default)]
     pub enabled: bool,
@@ -252,8 +240,8 @@ pub struct SearchConfig {
     pub api_key: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct VisionConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct VisionConfig {
     /// 识图 API key，为空则禁用识图功能
     #[serde(default)]
     pub api_key: String,
@@ -284,13 +272,13 @@ impl Default for VisionConfig {
 }
 
 impl VisionConfig {
-    pub fn enabled(&self) -> bool {
+    pub(crate) fn enabled(&self) -> bool {
         !self.api_key.is_empty()
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct EmbeddingConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct EmbeddingConfig {
     /// Embedding API key，为空则禁用 embedding
     #[serde(default)]
     pub api_key: String,
@@ -313,13 +301,13 @@ impl Default for EmbeddingConfig {
 }
 
 impl EmbeddingConfig {
-    pub fn enabled(&self) -> bool {
+    pub(crate) fn enabled(&self) -> bool {
         !self.api_key.is_empty()
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct StyleConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct StyleConfig {
     /// 单条回复最大字数，默认 30
     #[serde(default = "default_max_reply_chars")]
     pub max_reply_chars: usize,
@@ -329,15 +317,6 @@ pub struct StyleConfig {
     /// 标点风格: "casual"(不加句号，用换行分隔) | "formal"(正常标点)，默认 "casual"
     #[serde(default = "default_punctuation_style")]
     pub punctuation_style: String,
-    /// 默认回复风格描述
-    #[serde(default)]
-    pub reply_style: String,
-    /// 备选回复风格列表（按概率随机选择）
-    #[serde(default)]
-    pub multiple_reply_styles: Vec<String>,
-    /// 使用备选风格的概率 (0.0-1.0)，默认 0.3
-    #[serde(default = "default_style_random_probability")]
-    pub style_random_probability: f64,
 }
 
 impl Default for StyleConfig {
@@ -346,15 +325,12 @@ impl Default for StyleConfig {
             max_reply_chars: default_max_reply_chars(),
             omit_subject: true,
             punctuation_style: default_punctuation_style(),
-            reply_style: String::new(),
-            multiple_reply_styles: Vec::new(),
-            style_random_probability: default_style_random_probability(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct Messages {
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub(crate) struct Messages {
     #[serde(default)]
     pub start: StartStopMsg,
     #[serde(default)]
@@ -365,8 +341,8 @@ pub struct Messages {
     pub restart: StartStopMsg,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct StartStopMsg {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct StartStopMsg {
     #[serde(default = "default_msg_ok")]
     pub success: String,
     #[serde(default = "default_msg_already")]
@@ -382,8 +358,8 @@ impl Default for StartStopMsg {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct ForgetMsg {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct ForgetMsg {
     #[serde(default = "default_forget_success")]
     pub success: String,
     #[serde(default = "default_forget_fail")]
@@ -399,8 +375,8 @@ impl Default for ForgetMsg {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct LogConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct LogConfig {
     /// 是否启用日志文件输出，默认 true
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -418,8 +394,8 @@ impl Default for LogConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct AdminConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct AdminConfig {
     #[serde(default)]
     pub token: String,
     #[serde(default = "default_admin_port")]
@@ -442,8 +418,8 @@ impl Default for AdminConfig {
 // ── 防注入配置 ────────────────────────────────────────────────────
 // 注意：防注入系统始终开启，不可关闭
 
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct AntiInjectionConfig {
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub(crate) struct AntiInjectionConfig {
     /// 输入层配置
     #[serde(default)]
     pub input: InputFilterConfig,
@@ -458,8 +434,8 @@ pub struct AntiInjectionConfig {
     pub detection_whitelist: Vec<u64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct InputFilterConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct InputFilterConfig {
     /// 最大消息长度 (超过则截断)
     #[serde(default = "default_max_message_length")]
     pub max_message_length: usize,
@@ -478,8 +454,8 @@ impl Default for InputFilterConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct OutputFilterConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct OutputFilterConfig {
     /// 检测到问题时的处理: "replace" | "block"
     /// 最低等级为 "replace"，可配置为 "block"
     #[serde(default = "default_output_action")]
@@ -494,8 +470,8 @@ impl Default for OutputFilterConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct BehaviorConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct BehaviorConfig {
     /// 是否启用频率限制
     #[serde(default = "default_true")]
     pub rate_limit: bool,
@@ -532,7 +508,7 @@ impl Default for BehaviorConfig {
 // ── 配额配置 ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct QuotaConfig {
+pub(crate) struct QuotaConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default = "default_segment_minutes")]
@@ -542,7 +518,7 @@ pub struct QuotaConfig {
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct QuotaSegment {
+pub(crate) struct QuotaSegment {
     pub start_hour: u32,
     pub end_hour: u32,
     pub max_replies: u32,
@@ -560,8 +536,8 @@ impl Default for QuotaConfig {
 
 // ── 人类化行为配置 ──────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct HumanityConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct HumanityConfig {
     // 社交电量
     #[serde(default = "default_true")]
     pub social_battery_enabled: bool,
@@ -597,8 +573,6 @@ pub struct HumanityConfig {
     // 变速回复
     #[serde(default = "default_true")]
     pub response_timing_enabled: bool,
-    #[serde(default = "default_thinking_pause_probability")]
-    pub thinking_pause_probability: f32,
     #[serde(default = "default_base_typing_speed")]
     pub base_typing_speed: f32,
 
@@ -616,14 +590,6 @@ pub struct HumanityConfig {
 
     // 回复人性扰动（已移除：随机口头禅、感叹号手术、句子截断、错别字注入）
     // 表达的自然感由表达管线本身负责
-
-    // 内心独白
-    #[serde(default = "default_true")]
-    pub inner_thought_enabled: bool,
-    #[serde(default = "default_inner_thought_interval_min")]
-    pub inner_thought_interval_min: u64,
-    #[serde(default = "default_inner_thought_interval_max")]
-    pub inner_thought_interval_max: u64,
 
     // PTSD 式闪回：情绪冲击极强的记忆被眼前字眼勾起时，以小概率突现
     #[serde(default = "default_flashback_probability")]
@@ -663,16 +629,12 @@ impl Default for HumanityConfig {
             cognitive_biases: CognitiveBiasesConfig::default(),
             attention_enabled: true,
             response_timing_enabled: true,
-            thinking_pause_probability: default_thinking_pause_probability(),
             base_typing_speed: default_base_typing_speed(),
             unpredictability_enabled: true,
             whim_probability: default_whim_probability(),
             opinion_drift_rate: default_opinion_drift_rate(),
             forgetting_rate: default_forgetting_rate(),
             association_jump_probability: default_association_jump_probability(),
-            inner_thought_enabled: true,
-            inner_thought_interval_min: default_inner_thought_interval_min(),
-            inner_thought_interval_max: default_inner_thought_interval_max(),
             flashback_probability: default_flashback_probability(),
             flashback_impact_threshold: default_flashback_impact_threshold(),
             wish_enabled: true,
@@ -682,12 +644,10 @@ impl Default for HumanityConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct CognitiveBiasesConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct CognitiveBiasesConfig {
     #[serde(default = "default_confirmation_bias")]
     pub confirmation_bias: f32,
-    #[serde(default = "default_recency_bias")]
-    pub recency_bias: f32,
     #[serde(default = "default_mood_congruence")]
     pub mood_congruence: f32,
     #[serde(default = "default_anchoring_strength")]
@@ -700,7 +660,6 @@ impl Default for CognitiveBiasesConfig {
     fn default() -> Self {
         Self {
             confirmation_bias: default_confirmation_bias(),
-            recency_bias: default_recency_bias(),
             mood_congruence: default_mood_congruence(),
             anchoring_strength: default_anchoring_strength(),
             availability_heuristic: default_availability_heuristic(),
@@ -746,9 +705,6 @@ fn default_max_history() -> usize {
 fn default_batch_timeout() -> u64 {
     2000
 }
-fn default_typing_speed() -> f64 {
-    5.0
-}
 fn default_max_typing_delay() -> u64 {
     4000
 }
@@ -757,9 +713,6 @@ fn default_reply_follow_up_secs() -> u64 {
 }
 fn default_action_descriptions() -> bool {
     false
-}
-fn default_reply_cooldown_secs() -> u64 {
-    15
 }
 fn default_voice_max_rounds() -> u32 {
     3
@@ -845,14 +798,8 @@ fn default_flashback_probability() -> f32 {
 fn default_flashback_impact_threshold() -> f32 {
     6.0
 }
-fn default_decay_rate() -> f32 {
-    0.15
-}
 fn default_decay_delay() -> u64 {
     60
-}
-fn default_neutral_threshold() -> f32 {
-    0.15
 }
 fn default_affinity_threshold() -> f32 {
     3.0
@@ -874,9 +821,6 @@ fn default_max_reply_chars() -> usize {
 }
 fn default_punctuation_style() -> String {
     "casual".into()
-}
-fn default_style_random_probability() -> f64 {
-    0.3
 }
 fn default_vision_base_url() -> String {
     "https://api.deepseek.com".into()
@@ -959,9 +903,6 @@ fn default_circadian_phase_offset() -> f32 {
 fn default_confirmation_bias() -> f32 {
     0.3
 }
-fn default_recency_bias() -> f32 {
-    0.4
-}
 fn default_mood_congruence() -> f32 {
     0.5
 }
@@ -970,9 +911,6 @@ fn default_anchoring_strength() -> f32 {
 }
 fn default_availability_heuristic() -> f32 {
     0.4
-}
-fn default_thinking_pause_probability() -> f32 {
-    0.15
 }
 fn default_base_typing_speed() -> f32 {
     5.0
@@ -993,16 +931,10 @@ fn default_association_jump_probability() -> f32 {
 fn default_speak_gate() -> f32 {
     crate::mind::social::DEFAULT_SPEAK_GATE
 }
-fn default_inner_thought_interval_min() -> u64 {
-    300
-}
-fn default_inner_thought_interval_max() -> u64 {
-    900
-}
 
 /// 表情包配置
-#[derive(Debug, Clone, Deserialize)]
-pub struct StickerConfig {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct StickerConfig {
     /// 是否开启自动收集表情包（steal_emoji）
     #[serde(default = "default_steal_emoji")]
     pub steal_emoji: bool,

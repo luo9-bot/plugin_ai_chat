@@ -1,13 +1,13 @@
 //! 对话处理模块：消息入口、批次处理、回复生成
 
-pub mod attention;
-pub mod batch;
-pub mod handler;
-pub mod interruption;
-pub mod perception;
-pub mod turn;
+pub(crate) mod attention;
+pub(crate) mod batch;
+pub(crate) mod handler;
+pub(crate) mod interruption;
+pub(crate) mod perception;
+pub(crate) mod turn;
 
-use crate::{config, is_admin, mind, read_shared_state, with_shared_state, with_state};
+use crate::{batches, config, gate_read, is_admin, mind, read_shared_state, with_shared_state};
 use tracing::{debug, info, warn};
 
 /// 零容忍（方案书 §7.3）：确认注入一次 = 永久拉黑 + 残留清洗。
@@ -22,7 +22,7 @@ fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, 
         return;
     }
     // 永久拉黑（运行时 + 持久）
-    with_state(|s| s.add_blacklist(user_id));
+    crate::set_blacklisted(crate::db::Actor::Command, user_id, true);
     crate::anti_injection::ban_user(user_id);
     // 残留清洗：他不能再留在她的世界里
     mind::persons::purge_user_want_to_say(user_id);
@@ -38,7 +38,7 @@ fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, 
     warn!(user_id, "零容忍：确认注入，永久拉黑并清洗残留");
 }
 
-pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
+pub(crate) fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, group_id, content = trimmed, "recv: group msg");
 
@@ -65,7 +65,7 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     }
 
     // ── 黑名单拦截 (完全忽略) ──
-    if with_state(|s| s.is_blacklisted(user_id)) {
+    if gate_read(|g| g.is_blacklisted(user_id)) {
         debug!(user_id, group_id, "blocked message from blacklisted user");
         return;
     }
@@ -131,29 +131,21 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     if is_admin(user_id) {
         match trimmed {
             "start" | "开启对话" => {
-                let already = with_state(|s| s.active_groups.contains(&group_id));
-                if already {
+                if !crate::toggle_group_chat(crate::db::Actor::Command, group_id, true) {
                     info!(user_id, group_id, "cmd: group already active");
                     crate::sender::send_msg(group_id, user_id, &config::get().messages.start.redo);
                     return;
                 }
-                with_state(|s| {
-                    s.active_groups.insert(group_id);
-                });
                 info!(user_id, group_id, "cmd: activated group");
                 crate::sender::send_msg(group_id, user_id, &config::get().messages.start.success);
                 return;
             }
             "end" | "关闭对话" => {
-                let active = with_state(|s| s.active_groups.contains(&group_id));
-                if !active {
+                if !crate::toggle_group_chat(crate::db::Actor::Command, group_id, false) {
                     info!(user_id, group_id, "cmd: group not active");
                     crate::sender::send_msg(group_id, user_id, &config::get().messages.stop.redo);
                     return;
                 }
-                with_state(|s| {
-                    s.active_groups.remove(&group_id);
-                });
                 info!(user_id, group_id, "cmd: deactivated group");
                 crate::sender::send_msg(group_id, user_id, &config::get().messages.stop.success);
                 return;
@@ -169,8 +161,7 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     }
 
     // ── 群组未激活则不处理 ──
-    let group_active = with_state(|s| s.active_groups.contains(&group_id));
-    if !group_active {
+    if !gate_read(|g| g.is_group_active(group_id)) {
         return;
     }
 
@@ -184,7 +175,7 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     // 去除图片 CQ 码后再做情绪分析和工作记忆记录
     let text_only = crate::vision::strip_image_cq(trimmed);
     crate::emotion::analyze_user_message(user_id, &text_only);
-    let record_ts = crate::working_memory::record(
+    let entry_id = crate::working_memory::record(
         group_id,
         user_id,
         if text_only.is_empty() {
@@ -217,7 +208,7 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
         } else {
             &text_only
         },
-        record_ts,
+        entry_id,
     );
 
     // ── 概率式中断记账：她正在生成回复时又来了新消息 ──
@@ -241,10 +232,10 @@ pub fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {
     }
 
     // ── 所有消息加入批次，由 AI 决策是否回复 ──
-    with_state(|s| s.append_batch(group_id, user_id, trimmed, record_ts));
+    batches(|b| b.append(group_id, user_id, trimmed, entry_id));
 }
 
-pub fn handle_private_msg(user_id: u64, msg: &str) {
+pub(crate) fn handle_private_msg(user_id: u64, msg: &str) {
     let trimmed = msg.trim();
     info!(user_id, content = trimmed, "recv: private msg");
 
@@ -279,7 +270,7 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
         }
 
         // 运行时黑名单检查 (命令添加的)
-        if with_state(|s| s.is_blacklisted(user_id)) {
+        if gate_read(|g| g.is_blacklisted(user_id)) {
             debug!(user_id, "blocked private message from blacklisted user");
             return;
         }
@@ -360,7 +351,7 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
         return;
     }
 
-    if with_state(|s| s.active.contains(&user_id)) {
+    if gate_read(|g| g.is_private_active(user_id)) {
         crate::emotion::analyze_user_message(user_id, trimmed);
 
         // 表情包自动注册（同群聊逻辑）
@@ -371,36 +362,27 @@ pub fn handle_private_msg(user_id: u64, msg: &str) {
             });
         }
 
-        with_state(|s| s.append_batch(0, user_id, trimmed, 0));
+        batches(|b| b.append(0, user_id, trimmed, 0));
     }
 }
 
 // ── 控制命令 ────────────────────────────────────────────────────
 
-pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<String> {
+pub(crate) fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option<String> {
     match msg {
         "开!" | "开启对话" => {
-            let already = with_state(|s| s.active.contains(&user_id));
-            if already {
+            if !crate::toggle_private_chat(crate::db::Actor::Command, user_id, true) {
                 info!(user_id, "cmd: already active");
                 return Some(config::get().messages.start.redo.clone());
             }
-            with_state(|s| {
-                s.active.insert(user_id);
-            });
             info!(user_id, "cmd: activated private chat");
             Some(config::get().messages.start.success.clone())
         }
         "停!" | "关闭对话" => {
-            let active = with_state(|s| s.active.contains(&user_id));
-            if !active {
+            if !crate::toggle_private_chat(crate::db::Actor::Command, user_id, false) {
                 info!(user_id, "cmd: not active");
                 return Some(config::get().messages.stop.redo.clone());
             }
-            with_state(|s| {
-                s.active.remove(&user_id);
-                s.batches.remove(&(0, user_id));
-            });
             info!(user_id, "cmd: deactivated private chat");
             Some(config::get().messages.stop.success.clone())
         }
@@ -417,7 +399,7 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
                 .collect::<Vec<_>>()
                 .join("\n");
             with_shared_state(|s| s.forget_user_shared(user_id));
-            with_state(|s| s.forget_user_local(user_id));
+            batches(|b| b.forget_user(user_id));
             info!(user_id, "cmd: forgot conversation");
             Some(format!(
                 "{}\n\n{}",
@@ -429,7 +411,7 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
             let has = read_shared_state(|s| s.contexts.contains_key(&(0, user_id)));
             if has {
                 with_shared_state(|s| s.forget_user_shared(user_id));
-                with_state(|s| s.forget_user_local(user_id));
+                batches(|b| b.forget_user(user_id));
                 crate::memory::forget_all(user_id);
                 info!(user_id, "cmd: restarted conversation");
                 Some(config::get().messages.restart.success.clone())
@@ -444,10 +426,10 @@ pub fn handle_control_command(_group_id: u64, user_id: u64, msg: &str) -> Option
 
 // ── 通用管理员命令 (群聊/私聊均可使用) ──────────────────────────
 
-pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
+pub(crate) fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<String> {
     match msg {
         "查看群聊" => {
-            let groups = with_state(|s| s.active_groups.iter().copied().collect::<Vec<u64>>());
+            let groups = crate::get_active_groups();
             if groups.is_empty() {
                 return Some("当前没有开启的群聊".into());
             }
@@ -459,7 +441,7 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
             ));
         }
         "查看用户" => {
-            let users = with_state(|s| s.active.iter().copied().collect::<Vec<u64>>());
+            let users = crate::get_active_users();
             if users.is_empty() {
                 return Some("当前没有开启私聊的用户".into());
             }
@@ -471,7 +453,7 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
             ));
         }
         "查看黑名单" => {
-            let blocked = with_state(|s| s.blacklist.iter().copied().collect::<Vec<u64>>());
+            let blocked = crate::get_blacklist();
             if blocked.is_empty() {
                 return Some("黑名单为空".into());
             }
@@ -484,13 +466,10 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "开启群聊:") {
         return Some(match res {
             Ok(group_id) => {
-                if with_state(|s| s.active_groups.contains(&group_id)) {
-                    format!("群{}已经是开启状态", group_id)
-                } else {
-                    with_state(|s| {
-                        s.active_groups.insert(group_id);
-                    });
+                if crate::toggle_group_chat(crate::db::Actor::Command, group_id, true) {
                     format!("已开启群{}", group_id)
+                } else {
+                    format!("群{}已经是开启状态", group_id)
                 }
             }
             Err(e) => e,
@@ -500,13 +479,10 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "关闭群聊:") {
         return Some(match res {
             Ok(group_id) => {
-                if !with_state(|s| s.active_groups.contains(&group_id)) {
-                    format!("群{}未开启", group_id)
-                } else {
-                    with_state(|s| {
-                        s.active_groups.remove(&group_id);
-                    });
+                if crate::toggle_group_chat(crate::db::Actor::Command, group_id, false) {
                     format!("已关闭群{}", group_id)
+                } else {
+                    format!("群{}未开启", group_id)
                 }
             }
             Err(e) => e,
@@ -516,13 +492,10 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "开启用户:") {
         return Some(match res {
             Ok(uid) => {
-                if with_state(|s| s.active.contains(&uid)) {
-                    format!("用户{}已开启", uid)
-                } else {
-                    with_state(|s| {
-                        s.active.insert(uid);
-                    });
+                if crate::toggle_private_chat(crate::db::Actor::Command, uid, true) {
                     format!("已开启用户{}", uid)
+                } else {
+                    format!("用户{}已开启", uid)
                 }
             }
             Err(e) => e,
@@ -532,14 +505,10 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "关闭用户:") {
         return Some(match res {
             Ok(uid) => {
-                if !with_state(|s| s.active.contains(&uid)) {
-                    format!("用户{}未开启", uid)
-                } else {
-                    with_state(|s| {
-                        s.active.remove(&uid);
-                        s.batches.remove(&(0, uid));
-                    });
+                if crate::toggle_private_chat(crate::db::Actor::Command, uid, false) {
                     format!("已关闭用户{}", uid)
+                } else {
+                    format!("用户{}未开启", uid)
                 }
             }
             Err(e) => e,
@@ -549,14 +518,12 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "拉黑:") {
         return Some(match res {
             Ok(uid) => {
-                if with_state(|s| s.is_blacklisted(uid)) {
+                if gate_read(|g| g.is_blacklisted(uid)) {
                     format!("用户{}已在黑名单中", uid)
                 } else {
-                    with_state(|s| {
-                        s.add_blacklist(uid);
-                        s.active.remove(&uid);
-                        s.forget_user_local(uid);
-                    });
+                    crate::set_blacklisted(crate::db::Actor::Command, uid, true);
+                    crate::toggle_private_chat(crate::db::Actor::Command, uid, false);
+                    batches(|b| b.forget_user(uid));
                     with_shared_state(|s| s.forget_user_shared(uid));
                     crate::mind::social::purge_user(uid);
                     format!("已拉黑用户{}，该用户的所有消息将被忽略", uid)
@@ -569,12 +536,10 @@ pub fn handle_admin_command(msg: &str, _group_id: u64, user_id: u64) -> Option<S
     if let Some(res) = crate::util::parse_uid_arg(msg, "移除黑名单:") {
         return Some(match res {
             Ok(uid) => {
-                if !with_state(|s| s.is_blacklisted(uid)) {
+                if !gate_read(|g| g.is_blacklisted(uid)) {
                     format!("用户{}不在黑名单中", uid)
                 } else {
-                    with_state(|s| {
-                        s.remove_blacklist(uid);
-                    });
+                    crate::set_blacklisted(crate::db::Actor::Command, uid, false);
                     format!("已将用户{}移出黑名单", uid)
                 }
             }

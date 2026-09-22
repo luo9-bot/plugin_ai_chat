@@ -11,7 +11,7 @@ use std::f32::consts::PI;
 
 /// 昼夜节律状态（实时计算，不持久化）
 #[derive(Debug, Clone)]
-pub struct CircadianRhythm {
+pub(crate) struct CircadianRhythm {
     /// 当前精力水平 (0.0-1.0)
     pub energy_level: f32,
     /// 思维清晰度 (0.0-1.0)
@@ -47,15 +47,12 @@ impl Default for CircadianRhythm {
 /// - 耐心：下午最低（午後疲倦），早晨和深夜较高
 /// - 社交意愿：下午和傍晚最高
 /// - 幽默感：晚上较高
-pub fn calculate() -> CircadianRhythm {
+pub(crate) fn calculate() -> CircadianRhythm {
     let cfg = config::get();
     let h = &cfg.humanity;
 
-    // 从Unix时间戳计算CST时间（UTC+8）
-    let now_secs = crate::util::now_secs();
-    let cst_secs = now_secs + 8 * 3600; // UTC+8
-    let day_secs = cst_secs % 86400;
-    let time_of_day = day_secs as f32 / 3600.0;
+    // 本地时刻（东八区投影只有 `util` 一处定义）
+    let time_of_day = crate::util::secs_of_day_cst(crate::util::now_secs()) as f32 / 3600.0;
 
     // 正弦曲线基础相位：峰值在14:00（下午2点），谷底在2:00（凌晨2点）
     let base_phase = (time_of_day - 14.0) * PI / 12.0;
@@ -95,94 +92,22 @@ pub fn calculate() -> CircadianRhythm {
     }
 }
 
-/// 获取昼夜节律的自然语言上下文（注入 prompt）
-///
-/// 重要：不注入数值，只用自然语言描述当前状态
-pub fn get_circadian_context(rhythm: &CircadianRhythm) -> String {
-    let mut lines = Vec::new();
-
-    // 时间段基础描述
-    let time_desc = if rhythm.current_hour < 6.0 {
-        "现在是凌晨，夜深人静"
-    } else if rhythm.current_hour < 9.0 {
-        "现在是早晨，新的一天刚开始"
-    } else if rhythm.current_hour < 12.0 {
-        "现在是上午"
-    } else if rhythm.current_hour < 14.0 {
-        "现在是中午"
-    } else if rhythm.current_hour < 18.0 {
-        "现在是下午"
-    } else if rhythm.current_hour < 22.0 {
-        "现在是晚上"
-    } else {
-        "现在是深夜"
-    };
-
-    let mut descriptors = Vec::new();
-
-    // 精力描述
-    if rhythm.energy_level < 0.2 {
-        descriptors.push("你感到非常疲惫，几乎没有精力");
-    } else if rhythm.energy_level < 0.4 {
-        descriptors.push("你有些疲倦，精力不太充沛");
-    } else if rhythm.energy_level > 0.8 {
-        descriptors.push("你精力充沛，状态很好");
-    } else if rhythm.energy_level > 0.6 {
-        descriptors.push("你精神不错");
-    }
-
-    // 思维清晰度描述
-    if rhythm.cognitive_clarity < 0.3 {
-        descriptors.push("思维不太清晰，反应可能有些迟钝");
-    } else if rhythm.cognitive_clarity > 0.75 {
-        descriptors.push("思路很清晰，可以深入思考");
-    }
-
-    // 社交意愿描述
-    if rhythm.sociability < 0.25 {
-        descriptors.push("不太想和人社交，更喜欢安静");
-    } else if rhythm.sociability > 0.75 {
-        descriptors.push("很想和人聊天，社交意愿很强");
-    }
-
-    // 幽默感描述
-    if rhythm.humor_sensitivity > 0.7 {
-        descriptors.push("今天的幽默感很活跃，可能会更爱开玩笑");
-    }
-
-    // 耐心描述
-    if rhythm.patience_level < 0.3 {
-        descriptors.push("耐心不太好，对无聊的话题可能更容易不耐烦");
-    } else if rhythm.patience_level > 0.75 {
-        descriptors.push("今天很有耐心，可以听别人慢慢说");
-    }
-
-    lines.push(format!(
-        "# 时间与状态\n{}。{}",
-        time_desc,
-        descriptors.join("。")
-    ));
-
-    lines.join("\n")
-}
-
 /// 检查当前是否在免打扰时段（结合 proactive 配置）
-pub fn is_quiet_hours() -> bool {
+///
+/// 判定规则只有一处实现：[`crate::util::hour_in_window`]。
+/// 这里曾经与 `mind::wake::is_night()` 各写一遍同样的 if/else——两份
+/// 语义相同的代码，任何一侧改动都会让"她睡了没"在不同模块里给出不同答案。
+pub(crate) fn is_quiet_hours() -> bool {
     let cfg = config::get();
-    let hour = crate::util::current_hour_cst();
-    let quiet_start = cfg.proactive.quiet_start;
-    let quiet_end = cfg.proactive.quiet_end;
-
-    if quiet_start > quiet_end {
-        // 跨天：如 23-7
-        hour >= quiet_start || hour < quiet_end
-    } else {
-        hour >= quiet_start && hour < quiet_end
-    }
+    crate::util::hour_in_window(
+        crate::util::current_hour_cst(),
+        cfg.proactive.quiet_start,
+        cfg.proactive.quiet_end,
+    )
 }
 
 /// 获取节律对回复行为的影响权重（用于变速回复等其他模块）
-pub fn get_energy_multiplier() -> f32 {
+pub(crate) fn get_energy_multiplier() -> f32 {
     let rhythm = calculate();
     // 综合精力+清晰度
     (rhythm.energy_level * 0.6 + rhythm.cognitive_clarity * 0.4).clamp(0.3, 1.0)

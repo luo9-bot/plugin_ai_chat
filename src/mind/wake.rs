@@ -25,7 +25,7 @@ const MAX_PLANS: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WakeKind {
+pub(crate) enum WakeKind {
     /// 走神/想起：可以说话也可以只是想想
     Idle,
     /// 睡前整理：教养兜底的每日回神，只整理不发言
@@ -39,7 +39,7 @@ pub enum WakeKind {
 /// 夜间是睡眠不是免打扰。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Urgency {
+pub(crate) enum Urgency {
     /// 马上想（几分钟内的事）
     Now,
     /// 稍后想（今天之内）
@@ -68,7 +68,7 @@ fn backoff_secs(urgency: Urgency, attempts: u8) -> u64 {
 
 /// 一个"想起"：她在某次回神里留给未来的自己
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WakePlan {
+pub(crate) struct WakePlan {
     pub id: u64,
     pub kind: WakeKind,
     /// 到期时间（unix 秒）
@@ -98,7 +98,7 @@ fn default_max_attempts() -> u8 {
 }
 
 impl WakePlan {
-    pub fn new(kind: WakeKind, due_at: u64, reason: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: WakeKind, due_at: u64, reason: impl Into<String>) -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         let id = util::now_millis() ^ NEXT_ID.fetch_add(1, Ordering::Relaxed);
         WakePlan {
@@ -116,22 +116,12 @@ impl WakePlan {
         }
     }
 
-    pub fn with_target(mut self, group_id: Option<u64>, user_id: u64) -> Self {
-        self.target_group = group_id;
-        self.target_user = if group_id.is_none() {
-            Some(user_id)
-        } else {
-            None
-        };
-        self
-    }
-
-    pub fn with_about(mut self, user_id: u64) -> Self {
+    pub(crate) fn with_about(mut self, user_id: u64) -> Self {
         self.about_user = Some(user_id);
         self
     }
 
-    pub fn with_urgency(mut self, urgency: Urgency) -> Self {
+    pub(crate) fn with_urgency(mut self, urgency: Urgency) -> Self {
         self.urgency = urgency;
         self
     }
@@ -159,28 +149,17 @@ fn load_plans() -> Vec<WakePlan> {
 }
 
 fn save_plans(plans: &[WakePlan]) {
-    if let Some(parent) = wake_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "wake: 创建目录失败");
-        return;
-    }
     let Ok(json) = serde_json::to_string_pretty(plans) else {
         warn!("wake: 意图堆序列化失败");
         return;
     };
-    let tmp = wake_path().with_extension("json.tmp");
-    if fs::write(&tmp, json).is_err() {
-        warn!("wake: 意图堆写入临时文件失败");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp, wake_path()) {
+    if let Err(e) = crate::util::atomic_write(wake_path(), json) {
         warn!(error = %e, "wake: 意图堆落盘失败");
     }
 }
 
 /// 挂起一个想起
-pub fn add(plan: WakePlan) {
+pub(crate) fn add(plan: WakePlan) {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans = load_plans();
     plans.push(plan);
@@ -200,7 +179,7 @@ fn remove_by_id(plans: &mut Vec<WakePlan>, id: u64) {
 }
 
 /// 到期的想起（紧迫的在前，同级按到期时间）
-pub fn due(now: u64) -> Vec<WakePlan> {
+pub(crate) fn due(now: u64) -> Vec<WakePlan> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans: Vec<WakePlan> = load_plans()
         .into_iter()
@@ -211,7 +190,7 @@ pub fn due(now: u64) -> Vec<WakePlan> {
 }
 
 /// 全部想起（admin API 用，按到期时间排序）
-pub fn all() -> Vec<WakePlan> {
+pub(crate) fn all() -> Vec<WakePlan> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans = load_plans();
     plans.sort_by_key(|p| p.due_at);
@@ -219,7 +198,7 @@ pub fn all() -> Vec<WakePlan> {
 }
 
 /// 关闭（移除）一个想起（admin 手动操作）
-pub fn close(id: u64) -> bool {
+pub(crate) fn close(id: u64) -> bool {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans = load_plans();
     let before = plans.len();
@@ -232,7 +211,7 @@ pub fn close(id: u64) -> bool {
 }
 
 /// 她目前惦记的、关于某人的心事（原话列表，供感官包"你惦记的"字段）
-pub fn pending_reasons_for(user_id: u64) -> Vec<String> {
+pub(crate) fn pending_reasons_for(user_id: u64) -> Vec<String> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let now = util::now_secs();
     load_plans()
@@ -247,7 +226,7 @@ pub fn pending_reasons_for(user_id: u64) -> Vec<String> {
 }
 
 /// 零容忍清洗：清除与该用户相关的一切心事与待办
-pub fn purge_loops_about(uid: u64) {
+pub(crate) fn purge_loops_about(uid: u64) {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans = load_plans();
     let before = plans.len();
@@ -265,30 +244,18 @@ pub fn purge_loops_about(uid: u64) {
 // ── 夜间门控：她真的睡了 ────────────────────────────────────────
 
 /// 免打扰时段 = 她的睡眠时间（沿用 proactive 配置的免打扰时段）
-pub fn is_night() -> bool {
-    let hour = util::current_hour_cst() as i32;
-    let (start, end) = {
-        let cfg = config::get();
-        (
-            cfg.proactive.quiet_start as i32,
-            cfg.proactive.quiet_end as i32,
-        )
-    };
-    if start == end {
-        return false;
-    }
-    if start < end {
-        hour >= start && hour < end
-    } else {
-        // 跨午夜：23 -> 7
-        hour >= start || hour < end
-    }
+///
+/// 复用 `circadian::is_quiet_hours()` 的唯一判定，而不是在这里再写一遍
+/// 同样的 if/else：两份实现只要有一侧改动，"她睡了没"就会在不同模块里
+/// 给出不同答案。
+pub(crate) fn is_night() -> bool {
+    crate::circadian::is_quiet_hours()
 }
 
 // ── 睡前整理：教养兜底 ─────────────────────────────────────────
 
 /// 确保存在一个每日睡前整理的想起（今天 23:30，东八区）
-pub fn ensure_daily_digest(now: u64) {
+pub(crate) fn ensure_daily_digest(now: u64) {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut plans = load_plans();
     let horizon = now + 48 * 3600;
@@ -298,14 +265,13 @@ pub fn ensure_daily_digest(now: u64) {
     {
         return;
     }
-    // 下一个 23:30（东八区）：取当前本地时刻的天基准再偏移
-    let local_now = now + 8 * 3600;
-    let day_start = (local_now / 86400) * 86400;
-    let today_digest_cst = day_start + 23 * 3600 + 30 * 60;
-    let due_at = if today_digest_cst > local_now {
-        today_digest_cst - 8 * 3600
+    // 下一个 23:30（东八区）。日期边界只在 `util` 里定义，这里不再手工
+    // 做 `now + 8h` / `- 8h` 的偏移运算。
+    let today_digest = util::cst_time_on_same_day(now, 23, 30);
+    let due_at = if today_digest > now {
+        today_digest
     } else {
-        today_digest_cst + 86400 - 8 * 3600
+        today_digest + 86400
     };
     let mut plan = WakePlan::new(WakeKind::Digest, due_at, "睡前把今天过一遍");
     plan.id = util::now_millis() ^ 0xD1_6E_57;
@@ -320,7 +286,7 @@ static LAST_CLEANUP_DAY: AtomicU64 = AtomicU64::new(0);
 
 /// 一次回神的产物：走神（可发言）或睡前整理（日记/档案/心事/小结）
 #[derive(Debug)]
-pub enum WakeProduct {
+pub(crate) enum WakeProduct {
     Idle(WakeTurn),
     Digest(crate::voice::DigestOutcome),
 }
@@ -329,7 +295,7 @@ pub enum WakeProduct {
 ///
 /// 夜间（免打扰时段）Idle 想起静默留到早上；睡前整理（Digest）是就寝
 /// 动作，允许在夜间执行。发言与登记由调用方执行（发送通道在插件层）。
-pub fn tick() -> Vec<(WakePlan, WakeProduct)> {
+pub(crate) fn tick() -> Vec<(WakePlan, WakeProduct)> {
     let now = util::now_secs();
 
     // 意识流过期清理：每天一次
@@ -457,7 +423,7 @@ fn build_wake_input(plan: &WakePlan) -> String {
 /// 读取侧过滤：老数据（滤壳上线前落盘的）同样不能进 prompt。
 ///
 /// `filter_shell_level` 为 "off" 时不过滤，与其它通道保持一致。
-pub fn sanitize_reasons(reasons: impl IntoIterator<Item = String>) -> Vec<String> {
+pub(crate) fn sanitize_reasons(reasons: impl IntoIterator<Item = String>) -> Vec<String> {
     if crate::config::get().conversation.filter_shell_level == "off" {
         return reasons.into_iter().collect();
     }

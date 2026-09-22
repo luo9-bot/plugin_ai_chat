@@ -1,118 +1,119 @@
-use std::path::Path;
+//! 构建脚本：保证 `frontend/dist/index.html` 存在且是新的。
+//!
+//! **不再生成内嵌 UI 模块。** `src/admin/ui.rs` 现在用
+//! `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/frontend/dist/index.html"))`
+//! 直接引用产物，于是"前端变了但内嵌 UI 没更新"由 rustc 自己的依赖跟踪
+//! 保证——构建脚本只有在 cargo 判定需要时才运行，靠它维护产物会漏。
+//!
+//! 这里只负责一件事：产物缺失或比源码旧时重建它，且**失败必须让构建失败**。
+
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-fn find_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                find_files(&path, files);
-            } else {
-                files.push(path);
-            }
+/// 前端产物：单文件 HTML（vite-singlefile 已把 JS/CSS 内联）
+const DIST_HTML: &str = "frontend/dist/index.html";
+/// 前端源码目录；不存在时说明这是纯 Rust 打包，跳过前端环节
+const FRONTEND_SRC: &str = "frontend/src";
+/// 与源码一起决定"是否需要重建"的前端配置
+const FRONTEND_CONFIGS: [&str; 2] = ["frontend/package.json", "frontend/vite.config.js"];
+
+fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(&path, files);
+        } else {
+            files.push(path);
         }
     }
 }
 
-fn sources_changed_since(stamp: SystemTime) -> bool {
-    let src_dir = Path::new("frontend/src");
-    if !src_dir.exists() {
-        return false;
-    }
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// 前端源码里最新的修改时间；没有可监视文件时返回 `None`
+fn newest_frontend_mtime() -> Option<SystemTime> {
     let mut files = Vec::new();
-    find_files(src_dir, &mut files);
-    // 也监视配置文件
-    for extra in ["frontend/package.json", "frontend/vite.config.js"] {
-        if Path::new(extra).exists() {
-            files.push(std::path::PathBuf::from(extra));
-        }
+    collect_files(Path::new(FRONTEND_SRC), &mut files);
+    files.extend(
+        FRONTEND_CONFIGS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists()),
+    );
+    files.iter().filter_map(|f| modified(f)).max()
+}
+
+/// 前端源码是否比产物新（产物缺失也算新）
+fn frontend_needs_rebuild() -> bool {
+    let Some(source_mtime) = newest_frontend_mtime() else {
+        return false;
+    };
+    match modified(Path::new(DIST_HTML)) {
+        Some(dist_mtime) => source_mtime > dist_mtime,
+        None => true,
     }
-    files.iter().any(|f| {
-        std::fs::metadata(f)
-            .and_then(|m| m.modified())
-            .map(|t| t > stamp)
-            .unwrap_or(false)
-    })
+}
+
+/// 构建前端。失败即返回 `Err`：`cargo:warning` 不会让构建失败，
+/// 而"沿用旧 dist"会让前端改动静默失效。
+fn build_frontend() -> Result<(), String> {
+    // Windows 上 npm 是 .cmd，需要经 cmd 执行
+    let mut command = if cfg!(target_os = "windows") {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/c", "npm", "run", "build"]);
+        cmd
+    } else {
+        let mut cmd = std::process::Command::new("npm");
+        cmd.args(["run", "build"]);
+        cmd
+    };
+
+    let status = command
+        .current_dir("frontend")
+        .status()
+        .map_err(|e| format!("无法执行 `npm run build`：{e}"))?;
+
+    if !status.success() {
+        return Err(format!("`npm run build` 失败（{status}）"));
+    }
+    Ok(())
 }
 
 fn main() {
-    let dist = Path::new("frontend/dist/index.html");
-    let out = Path::new("src/admin/ui.rs");
-    let stamp = Path::new("frontend/.last-build");
+    // 只监视影响"产物是否需要重建"的输入；产物本身由 rustc 的
+    // `include_str!` 依赖跟踪，不需要在这里重复声明
+    println!("cargo:rerun-if-changed={FRONTEND_SRC}");
+    for config in FRONTEND_CONFIGS {
+        println!("cargo:rerun-if-changed={config}");
+    }
+    println!("cargo:rerun-if-changed=build.rs");
 
-    // ── 1. 检测前端源文件是否变化，自动编译前端 ──
-    let stamp_time = std::fs::metadata(stamp)
-        .and_then(|m| m.modified())
-        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let has_frontend_sources = Path::new(FRONTEND_SRC).exists();
+    if !has_frontend_sources {
+        // 纯 Rust 打包：没有前端源码可构建，产物由调用方提供
+        return;
+    }
 
-    if sources_changed_since(stamp_time) {
-        println!("cargo:warning=Frontend sources changed, running npm build...");
-        // Windows 上 npm 是 .cmd 文件，需要通过 shell 执行
-        let (cmd, args) = if cfg!(target_os = "windows") {
-            ("cmd", vec!["/c", "npm", "run", "build"])
-        } else {
-            ("npm", vec!["run", "build"])
-        };
-        let status = std::process::Command::new(cmd)
-            .args(&args)
-            .current_dir("frontend")
-            .status();
-        match status {
-            Ok(s) if s.success() => {
-                // 删除后重建以确保修改时间更新（Windows 上写入相同内容不会更新 mtime）
-                let _ = std::fs::remove_file(stamp);
-                std::fs::write(stamp, "").ok();
-                println!("cargo:warning=Frontend build succeeded");
-            }
-            Ok(s) => {
-                println!(
-                    "cargo:warning=Frontend build failed (exit code: {:?}), using existing dist",
-                    s.code()
-                );
-            }
-            Err(e) => {
-                println!("cargo:warning=Failed to run npm build: {e}, using existing dist");
-            }
+    if frontend_needs_rebuild() {
+        println!("cargo:warning=前端源码有变更，正在重建 dist ...");
+        if let Err(error) = build_frontend() {
+            panic!(
+                "前端构建失败：{error}\n\
+                 内嵌 UI 会停留在旧版本，因此这里直接失败而不是沿用旧 dist。\n\
+                 修复方式：cd frontend && npm ci && npm run build"
+            );
         }
     }
 
-    // ── 2. 将 dist/index.html 写入 admin_ui.rs ──
-    let should_copy = if dist.exists() {
-        if out.exists() {
-            let dist_meta = std::fs::metadata(dist).unwrap();
-            let out_meta = std::fs::metadata(out).unwrap();
-            dist_meta.modified().unwrap() > out_meta.modified().unwrap()
-        } else {
-            true
-        }
-    } else {
-        false
-    };
-
-    if should_copy {
-        let html = std::fs::read_to_string(dist).expect("failed to read frontend/dist/index.html");
-        let rs = format!("pub const HTML: &str = r##\"{}\"##;\n", html);
-        let size = rs.len();
-        std::fs::write(out, &rs).expect("failed to write src/admin/ui.rs");
-        println!(
-            "cargo:warning=admin_ui.rs regenerated from dist ({:.1} KB)",
-            size as f64 / 1024.0
+    if !Path::new(DIST_HTML).exists() {
+        panic!(
+            "{DIST_HTML} 不存在，`src/admin/ui.rs` 通过 include_str! 引用它。\n\
+             请先运行：cd frontend && npm ci && npm run build"
         );
     }
-
-    // 如果 admin/ui.rs 不存在且 dist 也不存在，创建占位
-    if !out.exists() {
-        let fallback = "pub const HTML: &str = r##\"<!DOCTYPE html><html><body><h1>Frontend not built. Run: cd frontend && npm run build</h1></body></html>\"##;\n";
-        std::fs::write(out, fallback).expect("failed to write placeholder admin/ui.rs");
-    }
-
-    // ── 3. 告诉 cargo 监视哪些文件 ──
-    // 前端源码目录（文件增删会触发，但修改不会——用步骤1的时间戳检测覆盖）
-    println!("cargo:rerun-if-changed=frontend/src");
-    // dist 产物
-    println!("cargo:rerun-if-changed=frontend/dist/index.html");
-    // 输出文件
-    println!("cargo:rerun-if-changed=src/admin/ui.rs");
-    // build.rs 自身
-    println!("cargo:rerun-if-changed=build.rs");
 }

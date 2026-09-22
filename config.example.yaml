@@ -112,7 +112,6 @@ conversation:
   # AI 回复按 |^| 分割为多条消息，每条之间根据长度计算延迟
   # 越快越像秒回，越慢越像真人在打字
   # 建议 3.0 ~ 8.0
-  typing_speed: 5.0
 
   # 打字延迟上限 (毫秒)
   # 单条消息的最大等待时间，防止长消息等待过久
@@ -126,7 +125,6 @@ conversation:
 
   # 对同一用户的回复冷却时间 (秒)
   # 防止对同一用户连续回复刷屏
-  reply_cooldown_secs: 15
 
   # 群聊语音循环的最大轮数（工具调用轮次）
   # 常规回复 1 轮即可完成；查询记忆/发表情包会增加轮次
@@ -193,7 +191,6 @@ emotion:
   # 情绪衰减速率 (每小时衰减的强度值)
   # 越高情绪恢复平静越快
   # 0.1 = 约10小时从满强度恢复，0.3 = 约3小时
-  decay_rate: 0.15
 
   # 情绪衰减延迟 (秒)
   # 此时间内情绪不衰减，保持刚变化后的状态
@@ -201,7 +198,6 @@ emotion:
 
   # 平静恢复阈值
   # 情绪强度低于此值时自动恢复为 Neutral
-  neutral_threshold: 0.15
 
   # 亲近感阈值 (次/小时)
   # 互动频率超过此值时，AI 会表现得更亲近
@@ -241,7 +237,6 @@ humanity:
   cognitive_biases_enabled: true
   cognitive_biases:
     confirmation_bias: 0.3         # 确认偏误
-    recency_bias: 0.4              # 近因效应
     mood_congruence: 0.5           # 情绪一致性
     anchoring_strength: 0.3        # 锚定效应
     availability_heuristic: 0.4    # 可得性启发
@@ -251,7 +246,6 @@ humanity:
 
   # 变速回复：动态打字延迟（拟人节奏，不做内容手术）
   response_timing_enabled: true
-  thinking_pause_probability: 0.15   # 思考暂停概率
   base_typing_speed: 5.0           # 基础打字速度
 
   # 不可预测性：概率性观点漂移和遗忘
@@ -262,9 +256,6 @@ humanity:
   association_jump_probability: 0.05  # 联想跳跃概率
 
   # 内心独白
-  inner_thought_enabled: true
-  inner_thought_interval_min: 300  # 最小间隔(秒)
-  inner_thought_interval_max: 900  # 最大间隔(秒)
 
   # PTSD 式闪回：情绪冲击达到阈值的记忆平时被压着，
   # 被眼前字眼勾起时以小概率毫无来由地突现（情绪一致时概率×2）
@@ -363,6 +354,16 @@ anti_injection:
     auto_ban_threshold: 10
   # 检测白名单：这些用户仍会进行防注入检测和违规记录，但不会被封禁
   detection_whitelist: []
+
+
+# ── 表情包 ───────────────────────────────────────────────────────
+sticker:
+  # 是否开启自动收集表情包
+  steal_emoji: true
+  # 非内置表情包最大注册数量
+  max_reg_num: 64
+  # 超过最大数量时是否自动替换（淘汰最不常用的）
+  do_replace: true
 
 
 # ── 用户访问控制 ─────────────────────────────────────────────────

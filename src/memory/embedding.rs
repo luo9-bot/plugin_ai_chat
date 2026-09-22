@@ -3,21 +3,17 @@
 //! 调用火山引擎多模态向量化 API 生成文本向量。
 //! API 文档: https://www.volcengine.com/docs/82379/1409291
 
-use std::time::Duration;
 use tracing::{debug, warn};
 
 /// Embedding 向量维度（doubao-embedding-vision 默认输出 2048 维）
 const EMBEDDING_DIMENSION: usize = 2048;
 
-/// 调用 Embedding API 生成单个文本的向量
-pub fn embed_text(text: &str) -> Option<Vec<f32>> {
-    let cfg = crate::config::get();
-    if !cfg.embedding.enabled() {
-        return None;
-    }
-
-    embed_single(text)
-}
+/// 单次向量化请求的超时（秒）
+///
+/// 每个文本是一次独立请求（该 API 不支持批量返回），所以这个值同时决定了
+/// 一批 N 条文本的最坏耗时 N × 该值。选 10 秒是因为向量化是后台补数据，
+/// 单个文本不值得等更久。
+const EMBEDDING_TIMEOUT_SECS: u64 = 10;
 
 /// 调用多模态向量化 API，对单个文本生成向量
 fn embed_single(text: &str) -> Option<Vec<f32>> {
@@ -50,33 +46,16 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 
     debug!(model = %cfg.embedding.model, "embedding: sending request");
 
-    // 使用 10 秒超时，避免阻塞消息处理
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(10)))
-            .build(),
-    );
+    // 10 秒超时 + 复用连接池：一批文本会连续发 N 次请求，
+    // 每次重新握手在"后台补向量"这个场景下纯属浪费
+    let agent = crate::util::agent(crate::util::AgentSpec::requiring_success(
+        EMBEDDING_TIMEOUT_SECS,
+    ));
 
-    let mut resp = match agent
-        .post(&url)
-        .header(
-            "Authorization",
-            &format!("Bearer {}", cfg.embedding.api_key),
-        )
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-    {
-        Ok(r) => r,
-        Err(e) => {
-            warn!(error = %e, "embedding: request failed");
-            return None;
-        }
-    };
-
-    let resp_str = match resp.body_mut().read_to_string() {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(error = %e, "embedding: read response failed");
+    let resp_str = match crate::util::post_json(&agent, &url, &cfg.embedding.api_key, &json_body) {
+        Ok(body) => body,
+        Err(error) => {
+            warn!(error = %error, "embedding: request failed");
             return None;
         }
     };
@@ -123,7 +102,7 @@ fn embed_single(text: &str) -> Option<Vec<f32>> {
 /// 注意：多模态向量化 API 不支持旧版批量返回格式，
 /// 每个 input 数组整体只返回一个向量，因此需要逐个调用。
 /// 为避免内存溢出，限制每批最大处理数量。
-pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
+pub(crate) fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
     let cfg = crate::config::get();
     if !cfg.embedding.enabled() || texts.is_empty() {
         return vec![None; texts.len()];
@@ -153,32 +132,11 @@ pub fn embed_batch(texts: &[String]) -> Vec<Option<Vec<f32>>> {
 }
 
 /// L2 归一化向量
-pub fn l2_normalize(vector: &mut [f32]) {
+pub(crate) fn l2_normalize(vector: &mut [f32]) {
     let norm: f32 = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-10 {
         for x in vector.iter_mut() {
             *x /= norm;
         }
     }
-}
-
-/// 计算两个向量的余弦相似度
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-
-    let dot: f64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(x, y)| (*x as f64) * (*y as f64))
-        .sum();
-    let norm_a: f64 = a.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
-    let norm_b: f64 = b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
-
-    if norm_a < 1e-10 || norm_b < 1e-10 {
-        return 0.0;
-    }
-
-    dot / (norm_a * norm_b)
 }

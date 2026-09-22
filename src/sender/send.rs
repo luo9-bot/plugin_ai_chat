@@ -11,7 +11,6 @@
 
 use luo9_sdk::Bot;
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -58,12 +57,12 @@ fn lock_conversation(key: u64) -> MutexGuard<'static, ()> {
 fn raw_send_msg(group_id: u64, user_id: u64, text: &str) {
     if group_id > 0 {
         info!(group_id, user_id, content = text, "send: group msg");
-        let msg = CString::new(text).unwrap();
+        let msg = crate::util::to_c_string(text);
         Bot::send_group_msg(group_id, msg);
         crate::working_memory::record_bot_reply(group_id, text);
     } else {
         info!(user_id, content = text, "send: private msg");
-        let msg = CString::new(text).unwrap();
+        let msg = crate::util::to_c_string(text);
         Bot::send_private_msg(user_id, msg);
     }
 }
@@ -97,7 +96,7 @@ fn current_timing() -> ResponseTiming {
 /// 发送消息，带打字模拟延迟（阻塞当前线程）
 ///
 /// `incoming` 是这条回复在回应的原文——用来估算"读完对方的话"的时间。
-pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str, incoming: &str) {
+pub(crate) fn send_with_typing(group_id: u64, user_id: u64, reply: &str, incoming: &str) {
     let _guard = lock_conversation(conversation_key(group_id, user_id));
     let cfg = config::get();
     let timing = current_timing();
@@ -128,7 +127,7 @@ pub fn send_with_typing(group_id: u64, user_id: u64, reply: &str, incoming: &str
 }
 
 /// 发送消息 (无延迟)，自动处理 |^| 和换行分割
-pub fn send_msg(group_id: u64, user_id: u64, text: &str) {
+pub(crate) fn send_msg(group_id: u64, user_id: u64, text: &str) {
     let normalized = normalize_segment_sep(text);
     let segments = split_segments(&normalized);
     for segment in &segments {
@@ -150,14 +149,6 @@ fn send_msg_rhythmic(group_id: u64, user_id: u64, text: &str) {
     }
 }
 
-/// 发送带 @ 的群消息
-pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
-    let full = format!("[CQ:at,qq={}]\n{}", user_id, text);
-    info!(group_id, user_id, content = text, "send: at msg");
-    let msg = CString::new(full).unwrap();
-    Bot::send_group_msg(group_id, msg);
-}
-
 /// 安全发送 AI 生成的消息：clean_reply + check_output + 分割 + 打字延迟
 ///
 /// `incoming` 是她正在回应的原文（用于估算阅读时间）；传空串表示
@@ -166,7 +157,7 @@ pub fn send_at_msg(group_id: u64, user_id: u64, text: &str) {
 /// **本函数不阻塞**：安全检查在这里同步做完，节奏等待与实际发送交给
 /// 独立线程。这样群聊的串行决策线程不会因为"她正在打字"而卡住，
 /// 后到的消息能立刻进入下一轮判断。返回 false 表示内容被安全系统拦截。
-pub fn safe_send(group_id: u64, user_id: u64, reply: &str, incoming: &str) -> bool {
+pub(crate) fn safe_send(group_id: u64, user_id: u64, reply: &str, incoming: &str) -> bool {
     let cleaned = clean_reply(reply);
     let cfg = config::get();
     let check = anti_injection::check_output(user_id, &cleaned, &cfg.anti_injection);
@@ -194,7 +185,7 @@ fn spawn_typed_send(group_id: u64, user_id: u64, reply: String, incoming: String
 }
 
 /// 安静版安全发送：无打字延迟，同样不阻塞调用方
-pub fn safe_send_quiet(group_id: u64, user_id: u64, reply: &str) -> bool {
+pub(crate) fn safe_send_quiet(group_id: u64, user_id: u64, reply: &str) -> bool {
     let cleaned = clean_reply(reply);
     let cfg = config::get();
     let check = anti_injection::check_output(user_id, &cleaned, &cfg.anti_injection);

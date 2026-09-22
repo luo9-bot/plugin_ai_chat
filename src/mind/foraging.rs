@@ -55,7 +55,7 @@ fn with_state<R>(f: impl FnOnce(&mut HashMap<u64, UnreadState>) -> R) -> R {
 }
 
 /// 把未读状态落盘（周期检查调用；深读后也会调用）
-pub fn flush() {
+pub(crate) fn flush() {
     let snapshot = with_state(|state| state.clone());
     if snapshot.is_empty() {
         return;
@@ -68,7 +68,7 @@ pub fn flush() {
     }
     match serde_json::to_string(&snapshot) {
         Ok(json) => {
-            if let Err(e) = fs::write(foraging_path(), json) {
+            if let Err(e) = crate::util::atomic_write(foraging_path(), json) {
                 warn!(error = %e, "foraging: 未读状态落盘失败");
             }
         }
@@ -77,7 +77,7 @@ pub fn flush() {
 }
 
 /// 主线程记账：这个群又有一条消息经过（纯内存，零 IO）
-pub fn note_message(group_id: u64) {
+pub(crate) fn note_message(group_id: u64) {
     if !config::get().humanity.foraging_enabled {
         return;
     }
@@ -89,7 +89,7 @@ pub fn note_message(group_id: u64) {
 /// 感官事实：哪些群攒了多少条没细看的消息（回神输入用）
 ///
 /// 只报过了门槛的群——太少的噪音不递给她。
-pub fn unread_lines() -> Vec<String> {
+pub(crate) fn unread_lines() -> Vec<String> {
     if !config::get().humanity.foraging_enabled {
         return Vec::new();
     }
@@ -112,7 +112,7 @@ pub fn unread_lines() -> Vec<String> {
 /// 深读：她翻一个群的记录（回神动作 `catch_up` 的执行体）
 ///
 /// 返回转述好的对话（机械事实），并把计数清零、刷新深读时间。
-pub fn catch_up(group_id: u64) -> String {
+pub(crate) fn catch_up(group_id: u64) -> String {
     let since = with_state(|state| state.entry(group_id).or_default().last_read_at);
 
     // 取上次深读之后的消息（多取一些再裁到最新的一段）

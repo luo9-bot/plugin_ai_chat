@@ -12,7 +12,7 @@ use tracing::warn;
 ///
 /// `gate`：perception / translation / inner_dialog / consolidation / persona
 /// `action`：zero_tolerance_blacklist / rejected / quarantined / warned …
-pub fn log_event(user_id: u64, gate: &str, action: &str, detail: &str) {
+pub(crate) fn log_event(user_id: u64, gate: &str, action: &str, detail: &str) {
     let entry = serde_json::json!({
         "time": crate::util::now_secs(),
         "user_id": user_id,
@@ -43,7 +43,7 @@ pub fn log_event(user_id: u64, gate: &str, action: &str, detail: &str) {
 }
 
 /// 最近的审计事件（admin API 用，新在前）
-pub fn tail(n: usize) -> Vec<serde_json::Value> {
+pub(crate) fn tail(n: usize) -> Vec<serde_json::Value> {
     let path = config::data_dir().join("mind").join("security_log.jsonl");
     let Ok(content) = fs::read_to_string(&path) else {
         return Vec::new();

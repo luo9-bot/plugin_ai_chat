@@ -15,7 +15,7 @@ use crate::util;
 const MAX_ENTRIES: usize = 20_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiaryEntry {
+pub(crate) struct DiaryEntry {
     /// 形如 "2026-06-28#3"
     pub id: String,
     /// 东八区日期 "YYYY-MM-DD"
@@ -52,20 +52,10 @@ fn load_index() -> Vec<DiaryEntry> {
 }
 
 fn save_index(entries: &[DiaryEntry]) {
-    if let Some(parent) = index_path().parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        warn!(error = %e, "diary: 创建目录失败");
-        return;
-    }
     match serde_json::to_string_pretty(entries) {
         Ok(json) => {
-            let tmp = index_path().with_extension("json.tmp");
-            if fs::write(&tmp, json)
-                .and_then(|_| fs::rename(&tmp, index_path()))
-                .is_err()
-            {
-                warn!("diary: 索引落盘失败");
+            if let Err(e) = crate::util::atomic_write(index_path(), json) {
+                warn!(error = %e, "diary: 索引落盘失败");
             }
         }
         Err(e) => warn!(error = %e, "diary: 索引序列化失败"),
@@ -73,7 +63,7 @@ fn save_index(entries: &[DiaryEntry]) {
 }
 
 /// 写入一批日记（睡前整理调用）
-pub fn add(entries: Vec<DiaryEntry>) {
+pub(crate) fn add(entries: Vec<DiaryEntry>) {
     if entries.is_empty() {
         return;
     }
@@ -123,14 +113,14 @@ pub fn add(entries: Vec<DiaryEntry>) {
 }
 
 /// 最近的日记（旧在前）
-pub fn recent(n: usize) -> Vec<DiaryEntry> {
+pub(crate) fn recent(n: usize) -> Vec<DiaryEntry> {
     let index = load_index();
     let start = index.len().saturating_sub(n);
     index[start..].to_vec()
 }
 
 /// 涉及某人的日记条数（清洗用）
-pub fn purge_about(uid: u64) -> usize {
+pub(crate) fn purge_about(uid: u64) -> usize {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut index = load_index();
     let before = index.len();

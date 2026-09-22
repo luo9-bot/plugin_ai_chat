@@ -6,24 +6,69 @@
 //! - 查询向量通过后台线程异步生成并缓存
 //! - 向量不可用时优雅降级（返回空，让上层用 BM25）
 
-use std::collections::HashMap;
+use crate::util::MutexExt;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tracing::debug;
 
 /// 向量检索结果
-pub struct VectorResult {
+pub(crate) struct VectorResult {
     pub id: String,
     pub score: f64,
 }
 
 // ── 查询向量缓存（内存 + 磁盘） ────────────────────────────────
 
-static QUERY_CACHE: Mutex<Option<HashMap<String, Vec<f32>>>> = Mutex::new(None);
+/// 缓存：键是**规范化后的查询**，另加一个插入顺序队列用于淘汰
+struct QueryCache {
+    entries: HashMap<String, Vec<f32>>,
+    /// 插入顺序（先进先出）。原先的淘汰是 `keys().take(n)`——HashMap 的
+    /// 迭代序是任意的，因此"淘汰四分之一"实际淘汰谁不可预测。
+    order: VecDeque<String>,
+}
+
+impl QueryCache {
+    fn from_entries(entries: HashMap<String, Vec<f32>>) -> Self {
+        let order = entries.keys().cloned().collect();
+        Self { entries, order }
+    }
+
+    fn get(&self, key: &str) -> Option<&Vec<f32>> {
+        self.entries.get(key)
+    }
+
+    fn insert(&mut self, key: String, embedding: Vec<f32>, capacity: usize) {
+        if self.entries.insert(key.clone(), embedding).is_none() {
+            self.order.push_back(key);
+        }
+        // 超容量就按插入顺序淘汰最旧的
+        while self.entries.len() > capacity {
+            match self.order.pop_front() {
+                Some(oldest) => {
+                    self.entries.remove(&oldest);
+                }
+                None => break,
+            }
+        }
+    }
+}
+
+static QUERY_CACHE: Mutex<Option<QueryCache>> = Mutex::new(None);
 const MAX_CACHE_SIZE: usize = 512;
 
 fn cache_path() -> PathBuf {
     crate::config::data_dir().join("query_embeddings.bin")
+}
+
+/// 缓存键：规范化后的查询
+///
+/// 原先直接用**原始查询字符串**当键，而线上几乎不会有两条完全相同的消息，
+/// 于是缓存永远 miss——`vector_weight = 0.7` 实际作用在一个空列表上
+/// （设计书 §5.2d）。规范化去掉 CQ 码、折叠空白、统一小写之后，
+/// 同一话题的重复提问才会真正命中。
+fn cache_key(query: &str) -> String {
+    crate::util::normalize_cache_key(query)
 }
 
 /// 从磁盘加载查询向量缓存
@@ -110,50 +155,44 @@ fn save_cache_to_disk(cache: &HashMap<String, Vec<f32>>) {
         }
     }
 
-    std::fs::write(&path, buf).ok();
+    if let Err(error) = crate::util::atomic_write(&path, buf) {
+        tracing::warn!(error = %error, "写盘失败");
+    }
 }
 
 /// 初始化查询向量缓存（从磁盘加载）
-pub fn init_query_cache() {
+pub(crate) fn init_query_cache() {
     let cache = load_cache_from_disk();
-    let mut guard = QUERY_CACHE.lock().unwrap();
-    *guard = Some(cache);
+    let mut guard = QUERY_CACHE.lock_recover();
+    *guard = Some(QueryCache::from_entries(cache));
 }
 
 /// 获取缓存的查询向量（非阻塞，只读缓存）
-pub fn get_cached_query_embedding(query: &str) -> Option<Vec<f32>> {
-    let guard = QUERY_CACHE.lock().unwrap();
-    guard.as_ref()?.get(query).cloned()
+pub(crate) fn get_cached_query_embedding(query: &str) -> Option<Vec<f32>> {
+    let guard = QUERY_CACHE.lock_recover();
+    guard.as_ref()?.get(&cache_key(query)).cloned()
 }
 
 /// 缓存查询向量（内存 + 异步写磁盘）
-pub fn cache_query_embedding(query: String, embedding: Vec<f32>) {
+pub(crate) fn cache_query_embedding(query: String, embedding: Vec<f32>) {
     let should_save = {
-        let mut guard = QUERY_CACHE.lock().unwrap();
-        let cache = guard.get_or_insert_with(load_cache_from_disk);
+        let mut guard = QUERY_CACHE.lock_recover();
+        let cache = guard.get_or_insert_with(|| QueryCache::from_entries(load_cache_from_disk()));
 
-        // 容量控制：超过上限时清理旧条目
-        if cache.len() >= MAX_CACHE_SIZE {
-            let keys: Vec<String> = cache.keys().take(MAX_CACHE_SIZE / 4).cloned().collect();
-            for k in keys {
-                cache.remove(&k);
-            }
-        }
-
-        cache.insert(query, embedding);
-        cache.len().is_multiple_of(32) // 每 32 次写入保存一次
+        cache.insert(cache_key(&query), embedding, MAX_CACHE_SIZE);
+        cache.entries.len().is_multiple_of(32) // 每 32 次写入保存一次
     };
 
     if should_save {
-        let guard = QUERY_CACHE.lock().unwrap();
-        if let Some(ref cache) = *guard {
-            save_cache_to_disk(cache);
+        let guard = QUERY_CACHE.lock_recover();
+        if let Some(cache) = guard.as_ref() {
+            save_cache_to_disk(&cache.entries);
         }
     }
 }
 
 /// 后台生成查询向量（由调用方在独立线程中执行）
-pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
+pub(crate) fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
     let cfg = crate::config::get();
     if !cfg.embedding.enabled() {
         return None;
@@ -173,16 +212,16 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
 
     let json_body = serde_json::to_string(&request_body).ok()?;
 
-    let mut resp = ureq::post(&url)
-        .header(
-            "Authorization",
-            &format!("Bearer {}", cfg.embedding.api_key),
-        )
-        .header("Content-Type", "application/json")
-        .send(json_body.as_bytes())
-        .ok()?;
+    // 超时来自 `ai.request_timeout`：embedding 也在消息处理路径上，
+    // 一个没有上限的请求会把整个串行队列拖住
+    let resp_str = crate::util::post_json(
+        &crate::ai::no_error_agent(),
+        &url,
+        &cfg.embedding.api_key,
+        &json_body,
+    )
+    .ok()?;
 
-    let resp_str = resp.body_mut().read_to_string().ok()?;
     let v: serde_json::Value = serde_json::from_str(&resp_str).ok()?;
 
     let embedding = v
@@ -210,7 +249,11 @@ pub fn generate_query_embedding(query: &str) -> Option<Vec<f32>> {
 }
 
 /// 向量搜索：计算余弦相似度
-pub fn search(query: &[f32], embeddings: &[(String, Vec<f32>)], top_k: usize) -> Vec<VectorResult> {
+pub(crate) fn search(
+    query: &[f32],
+    embeddings: &[(String, Vec<f32>)],
+    top_k: usize,
+) -> Vec<VectorResult> {
     if query.is_empty() || embeddings.is_empty() {
         return Vec::new();
     }
@@ -247,4 +290,56 @@ pub fn search(query: &[f32], embeddings: &[(String, Vec<f32>)], top_k: usize) ->
 
 fn l2_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 缓存键折叠同一件事的不同写法——这是"向量路径恒为空"的修法
+    #[test]
+    fn equivalent_queries_share_one_cache_entry() {
+        assert_eq!(cache_key("猫粮买哪种 "), cache_key("猫粮买哪种"));
+        assert_eq!(cache_key("猫粮  买哪种"), cache_key("猫粮\n买哪种"));
+        assert_eq!(
+            cache_key("[CQ:at,qq=1] 猫粮买哪种"),
+            cache_key("猫粮买哪种")
+        );
+        assert_eq!(cache_key("Rust 怎么装"), cache_key("rust 怎么装"));
+    }
+
+    /// 淘汰按插入顺序，而不是 HashMap 的任意顺序
+    #[test]
+    fn eviction_drops_the_oldest_not_an_arbitrary_key() {
+        let mut cache = QueryCache {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        };
+        let capacity = 3;
+        for key in ["a", "b", "c", "d"] {
+            cache.insert(key.to_string(), vec![1.0], capacity);
+        }
+
+        assert_eq!(cache.entries.len(), capacity, "容量必须被守住");
+        assert!(cache.get("a").is_none(), "最旧的应被淘汰");
+        for key in ["b", "c", "d"] {
+            assert!(cache.get(key).is_some(), "{key} 不该被淘汰");
+        }
+    }
+
+    /// 重复插入同一个键不该在顺序队列里留下两份
+    #[test]
+    fn reinserting_a_key_keeps_a_single_order_slot() {
+        let mut cache = QueryCache {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        };
+        cache.insert("a".to_string(), vec![1.0], 2);
+        cache.insert("b".to_string(), vec![2.0], 2);
+        cache.insert("a".to_string(), vec![3.0], 2);
+        assert_eq!(cache.order.len(), 2, "同一个键不该在顺序队列里出现两次");
+        cache.insert("c".to_string(), vec![4.0], 2);
+        assert!(cache.get("a").is_none(), "a 最早插入，应先被淘汰");
+        assert_eq!(cache.get("b"), Some(&vec![2.0]));
+    }
 }

@@ -1,174 +1,186 @@
 //! Token 用量 + Prompt 统计追踪
 //!
-//! 持久化到 data_dir/api_usage.json
+//! 用量是**追加流**，不是"读 10000 条 + 改 + 写回"的文档：旧实现每次模型
+//! 调用后都重写整份 `api_usage.json`（上限 10,000 条），而模型调用本身
+//! 是这条管线上最频繁的事情之一。现在明细进 `api_usage` 表（一条 INSERT），
+//! 终身累计进 `api_usage_total` 表（一条 UPSERT）——两者都是 O(1)。
+//!
+//! 累计与明细刻意分表：明细会被裁剪到 10,000 条，而"一共花了多少 token"
+//! 不该因此缩水。
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
+use crate::db::ApiUsage;
 
-/// 单次 API 调用记录
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiCallRecord {
-    pub timestamp: u64,
-    pub model: String,
-    pub prompt_name: String,
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-    pub prompt_cache_hit: u32,
-    pub prompt_cache_miss: u32,
-}
-
-/// 聚合统计
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AggregatedStats {
-    pub total_calls: u64,
-    pub total_prompt_tokens: u64,
-    pub total_completion_tokens: u64,
-    pub total_cache_hit: u64,
-    pub total_cache_miss: u64,
-    pub by_prompt: HashMap<String, PromptStat>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PromptStat {
-    pub calls: u64,
-    pub prompt_tokens: u64,
-    pub completion_tokens: u64,
-    pub total_tokens: u64,
-    pub cache_hit: u64,
-    pub cache_miss: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UsageStore {
-    pub records: Vec<ApiCallRecord>,
-    pub aggregated: AggregatedStats,
-}
-
-impl UsageStore {
-    fn path() -> std::path::PathBuf {
-        crate::config::data_dir().join("api_usage.json")
+/// 记录一次调用
+pub(crate) fn record_call(
+    prompt_name: &str,
+    model: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    cache_hit: u32,
+    cache_miss: u32,
+) {
+    let usage = ApiUsage {
+        ts: crate::util::now_secs() as i64,
+        model: model.to_string(),
+        prompt_name: prompt_name.to_string(),
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cache_hit,
+        cache_miss,
+    };
+    if let Err(error) = crate::db::db().record_api_usage(&usage, crate::db::API_USAGE_KEEP) {
+        tracing::warn!(%error, "tracking: 用量写入失败");
     }
+}
 
-    pub fn load() -> Self {
-        let path = Self::path();
-        match fs::read_to_string(&path) {
-            Ok(c) => serde_json::from_str(&c).unwrap_or_default(),
-            Err(_) => Self::default(),
+/// 统计摘要（供 `/api/analytics`）
+///
+/// 返回的 JSON 形状与前端既有约定一致，因此这里的改动对界面是透明的。
+pub(crate) fn summary() -> serde_json::Value {
+    let db = crate::db::db();
+
+    let totals = match db.api_usage_totals() {
+        Ok(totals) => totals,
+        Err(error) => {
+            tracing::warn!(%error, "tracking: 读取累计用量失败");
+            Default::default()
         }
-    }
+    };
+    let by_prompt = db.api_usage_by_prompt().unwrap_or_default();
+    let recent = db.api_usage_recent(50).unwrap_or_default();
 
-    fn save(&self) {
-        let path = Self::path();
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            fs::write(path, json).ok();
-        }
-    }
-
-    pub fn record_call(
-        prompt_name: &str,
-        model: &str,
-        prompt_tokens: u32,
-        completion_tokens: u32,
-        total_tokens: u32,
-        cache_hit: u32,
-        cache_miss: u32,
-    ) {
-        let mut store = Self::load();
-        let now = crate::util::now_secs();
-
-        // 添加记录（最多保留 10000 条防无限增长）
-        store.records.push(ApiCallRecord {
-            timestamp: now,
-            model: model.to_string(),
-            prompt_name: prompt_name.to_string(),
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            prompt_cache_hit: cache_hit,
-            prompt_cache_miss: cache_miss,
-        });
-        if store.records.len() > 10000 {
-            store.records.drain(0..store.records.len() - 10000);
-        }
-
-        // 更新聚合
-        let a = &mut store.aggregated;
-        a.total_calls += 1;
-        a.total_prompt_tokens += prompt_tokens as u64;
-        a.total_completion_tokens += completion_tokens as u64;
-        a.total_cache_hit += cache_hit as u64;
-        a.total_cache_miss += cache_miss as u64;
-
-        let ps = a.by_prompt.entry(prompt_name.to_string()).or_default();
-        ps.calls += 1;
-        ps.prompt_tokens += prompt_tokens as u64;
-        ps.completion_tokens += completion_tokens as u64;
-        ps.total_tokens += total_tokens as u64;
-        ps.cache_hit += cache_hit as u64;
-        ps.cache_miss += cache_miss as u64;
-
-        store.save();
-    }
-
-    /// 获取统计摘要（用于 API）
-    pub fn summary() -> serde_json::Value {
-        let store = Self::load();
-        let a = &store.aggregated;
-
-        // 按 prompt 排序并格式化
-        let mut sorted: Vec<(&String, &PromptStat)> = a.by_prompt.iter().collect();
-        sorted.sort_by(|a, b| b.1.total_tokens.cmp(&a.1.total_tokens));
-
-        let prompts: Vec<serde_json::Value> = sorted
-            .iter()
-            .map(|(name, s)| {
-                serde_json::json!({
-                    "name": name,
-                    "calls": s.calls,
-                    "prompt_tokens": s.prompt_tokens,
-                    "completion_tokens": s.completion_tokens,
-                    "total_tokens": s.total_tokens,
-                    "cache_hit": s.cache_hit,
-                    "cache_miss": s.cache_miss,
-                    "avg_total": if s.calls > 0 { s.total_tokens / s.calls } else { 0 },
-                })
+    let prompts: Vec<serde_json::Value> = by_prompt
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "name": entry.prompt_name,
+                "calls": entry.calls,
+                "prompt_tokens": entry.prompt_tokens,
+                "completion_tokens": entry.completion_tokens,
+                "total_tokens": entry.total_tokens,
+                "cache_hit": entry.cache_hit,
+                "cache_miss": entry.cache_miss,
+                "avg_total": if entry.calls > 0 { entry.total_tokens / entry.calls } else { 0 },
             })
-            .collect();
-
-        // 最近记录（取最后 50 条反向）
-        let recent: Vec<serde_json::Value> = store
-            .records
-            .iter()
-            .rev()
-            .take(50)
-            .map(|r| {
-                serde_json::json!({
-                    "time": r.timestamp,
-                    "model": r.model,
-                    "prompt": r.prompt_name,
-                    "prompt_tokens": r.prompt_tokens,
-                    "completion_tokens": r.completion_tokens,
-                    "total_tokens": r.total_tokens,
-                    "cache_hit": r.prompt_cache_hit,
-                    "cache_miss": r.prompt_cache_miss,
-                })
-            })
-            .collect();
-
-        serde_json::json!({
-            "total_calls": a.total_calls,
-            "total_prompt_tokens": a.total_prompt_tokens,
-            "total_completion_tokens": a.total_completion_tokens,
-            "total_tokens": a.total_prompt_tokens + a.total_completion_tokens,
-            "total_cache_hit": a.total_cache_hit,
-            "total_cache_miss": a.total_cache_miss,
-            "cache_hit_ratio": if (a.total_cache_hit + a.total_cache_miss) > 0 {
-                format!("{:.1}%", a.total_cache_hit as f64 / (a.total_cache_hit + a.total_cache_miss) as f64 * 100.0)
-            } else { "0%".into() },
-            "by_prompt": prompts,
-            "recent": recent,
         })
+        .collect();
+
+    let recent: Vec<serde_json::Value> = recent
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "time": row.ts,
+                "model": row.model,
+                "prompt": row.prompt_name,
+                "prompt_tokens": row.prompt_tokens,
+                "completion_tokens": row.completion_tokens,
+                "total_tokens": row.total_tokens,
+                "cache_hit": row.cache_hit,
+                "cache_miss": row.cache_miss,
+            })
+        })
+        .collect();
+
+    let cache_total = totals.cache_hit + totals.cache_miss;
+    serde_json::json!({
+        "total_calls": totals.calls,
+        "total_prompt_tokens": totals.prompt_tokens,
+        "total_completion_tokens": totals.completion_tokens,
+        "total_tokens": totals.prompt_tokens + totals.completion_tokens,
+        "total_cache_hit": totals.cache_hit,
+        "total_cache_miss": totals.cache_miss,
+        "cache_hit_ratio": if cache_total > 0 {
+            format!("{:.1}%", totals.cache_hit as f64 / cache_total as f64 * 100.0)
+        } else {
+            "0%".to_string()
+        },
+        "by_prompt": prompts,
+        "recent": recent,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 追加流：写进去就能读出来，且累计与明细一致
+    ///
+    /// 断言全部基于**增量**：状态库落在真实 data 目录，
+    /// `api_usage_total` 是终身累计，会跨测试运行累积。
+    #[test]
+    fn recorded_calls_show_up_in_both_detail_and_totals() {
+        let db = crate::db::db();
+        let marker = "tracking_test_prompt";
+
+        let entry_calls = |db: &crate::db::Db| -> u64 {
+            db.api_usage_by_prompt()
+                .unwrap_or_default()
+                .iter()
+                .find(|entry| entry.prompt_name == marker)
+                .map(|entry| entry.calls)
+                .unwrap_or(0)
+        };
+        let entry_tokens = |db: &crate::db::Db| -> u64 {
+            db.api_usage_by_prompt()
+                .unwrap_or_default()
+                .iter()
+                .find(|entry| entry.prompt_name == marker)
+                .map(|entry| entry.total_tokens)
+                .unwrap_or(0)
+        };
+
+        let before = db.api_usage_totals().expect("累计");
+        let before_entry_calls = entry_calls(db);
+        let before_entry_tokens = entry_tokens(db);
+
+        record_call(marker, "test-model", 10, 5, 15, 3, 7);
+        record_call(marker, "test-model", 20, 10, 30, 1, 9);
+
+        let after = db.api_usage_totals().expect("累计");
+        assert_eq!(after.calls, before.calls + 2, "累计调用数应 +2");
+        assert_eq!(after.prompt_tokens, before.prompt_tokens + 30);
+        assert_eq!(after.completion_tokens, before.completion_tokens + 15);
+        assert_eq!(after.cache_hit, before.cache_hit + 4);
+        assert_eq!(after.cache_miss, before.cache_miss + 16);
+
+        assert_eq!(
+            entry_calls(db) - before_entry_calls,
+            2,
+            "按 prompt 分组的调用数应 +2"
+        );
+        assert_eq!(
+            entry_tokens(db) - before_entry_tokens,
+            45,
+            "按 prompt 分组的 token 数应 +45"
+        );
+
+        let recent = db.api_usage_recent(10).expect("明细");
+        assert!(
+            recent.iter().any(|row| row.prompt_name == marker),
+            "明细里应能看到刚写入的调用"
+        );
+    }
+
+    /// 摘要的形状是前端契约：字段名与类型都不能变
+    #[test]
+    fn summary_keeps_the_frontend_contract() {
+        let summary = summary();
+        for key in [
+            "total_calls",
+            "total_prompt_tokens",
+            "total_completion_tokens",
+            "total_tokens",
+            "total_cache_hit",
+            "total_cache_miss",
+            "cache_hit_ratio",
+            "by_prompt",
+            "recent",
+        ] {
+            assert!(summary.get(key).is_some(), "摘要缺少字段 {key}");
+        }
+        assert!(summary["by_prompt"].is_array());
+        assert!(summary["recent"].is_array());
     }
 }

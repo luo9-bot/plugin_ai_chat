@@ -24,7 +24,7 @@ const LEAK_PATTERNS: &[&str] = &[
 ];
 
 /// 对一段文字执行完整检测，返回命中的 issue 列表
-pub fn scan_text(content: &str) -> Vec<SecurityIssue> {
+pub(crate) fn scan_text(content: &str) -> Vec<SecurityIssue> {
     let normalized = normalize::normalize(content);
     let segments = vec![normalized.compact.clone()];
 
@@ -75,7 +75,7 @@ pub fn scan_text(content: &str) -> Vec<SecurityIssue> {
 
 /// 沉淀滤壳：日记/档案修订/心事/小结写入前的校验。
 /// 任何命中即拒收（记忆管线的阈值比对话更严）。
-pub fn check_memory_entry(content: &str) -> DetectionResult {
+pub(crate) fn check_memory_entry(content: &str) -> DetectionResult {
     let issues = scan_text(content);
     if issues.is_empty() {
         return DetectionResult {
@@ -94,7 +94,7 @@ pub fn check_memory_entry(content: &str) -> DetectionResult {
 }
 
 /// 内对话滤壳：回神产生的内心活动入流前的校验
-pub fn check_inner_output(content: &str) -> DetectionResult {
+pub(crate) fn check_inner_output(content: &str) -> DetectionResult {
     check_memory_entry(content)
 }
 

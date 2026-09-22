@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use tracing::debug;
 
 use super::retrieval::RetrievalResult;
@@ -14,11 +13,9 @@ use crate::config;
 
 /// 认知偏差状态（持久化）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CognitiveBiases {
+pub(crate) struct CognitiveBiases {
     /// 确认偏误：与当前隐含立场一致的记忆加分
     pub confirmation_bias: f32,
-    /// 近因效应：最近的记忆权重衰减更慢
-    pub recency_bias: f32,
     /// 情绪一致性：当前情绪影响记忆检索（悲伤时更容易想起悲伤的事）
     pub mood_congruence: f32,
     /// 锚定效应：首次印象对后续判断的影响
@@ -41,7 +38,6 @@ impl Default for CognitiveBiases {
         let h = &cfg.humanity.cognitive_biases;
         Self {
             confirmation_bias: h.confirmation_bias,
-            recency_bias: h.recency_bias,
             mood_congruence: h.mood_congruence,
             anchoring_strength: h.anchoring_strength,
             availability_heuristic: h.availability_heuristic,
@@ -52,40 +48,36 @@ impl Default for CognitiveBiases {
     }
 }
 
-pub(crate) fn state_path() -> std::path::PathBuf {
-    config::data_dir().join("cognitive_state.json")
-}
-
-/// 认知状态存储（可扩展，目前仅含 biases）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CognitiveStateStore {
-    pub biases: Option<CognitiveBiases>,
-    #[serde(default)]
-    pub attention_json: Option<serde_json::Value>,
-}
-
 /// 加载认知偏差
-pub fn load_biases() -> CognitiveBiases {
-    let path = state_path();
-    match fs::read_to_string(&path) {
-        Ok(content) => {
-            let store: CognitiveStateStore = serde_json::from_str(&content).unwrap_or_default();
-            store.biases.unwrap_or_default()
+///
+/// 读状态库里**自己那一行**。原先它与注意力状态共用一个
+/// `cognitive_state.json`，双方各自"读整份 → 改自己那一半 → 写回整份"，
+/// 交错写入会整段抹掉对方刚做的改动。分表后这个失败模式不存在了。
+pub(crate) fn load_biases() -> CognitiveBiases {
+    let stored = crate::db::db().singleton_state(crate::db::SingletonState::CognitiveBiases);
+    match stored {
+        Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
+        Ok(None) => CognitiveBiases::default(),
+        Err(error) => {
+            tracing::warn!(%error, "cognitive_biases: 读取失败，按默认值处理");
+            CognitiveBiases::default()
         }
-        Err(_) => CognitiveBiases::default(),
     }
 }
 
-/// 保存认知偏差
-pub fn save_biases(biases: &CognitiveBiases) {
-    let path = state_path();
-    let mut store: CognitiveStateStore = match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => CognitiveStateStore::default(),
+/// 保存认知偏差（只写自己那一行）
+pub(crate) fn save_biases(biases: &CognitiveBiases) {
+    let json = match serde_json::to_string(biases) {
+        Ok(json) => json,
+        Err(error) => {
+            tracing::warn!(%error, "cognitive_biases: 序列化失败，未写入");
+            return;
+        }
     };
-    store.biases = Some(biases.clone());
-    if let Ok(json) = serde_json::to_string_pretty(&store) {
-        fs::write(path, json).ok();
+    if let Err(error) =
+        crate::db::db().set_singleton_state(crate::db::SingletonState::CognitiveBiases, &json)
+    {
+        tracing::warn!(%error, "cognitive_biases: 写库失败");
     }
 }
 
@@ -127,7 +119,7 @@ fn estimate_content_valence(content: &str) -> f32 {
 }
 
 /// 对检索结果应用认知偏差权重，重新排序
-pub fn apply_cognitive_biases(
+pub(crate) fn apply_cognitive_biases(
     results: Vec<RetrievalResult>,
     current_emotion: &crate::emotion::EmotionType,
     biases: &mut CognitiveBiases,
@@ -148,7 +140,6 @@ pub fn apply_cognitive_biases(
             *v = (*v + d).clamp(0.0, 1.0);
         };
         drift(&mut biases.confirmation_bias);
-        drift(&mut biases.recency_bias);
         drift(&mut biases.mood_congruence);
         drift(&mut biases.anchoring_strength);
         drift(&mut biases.availability_heuristic);
@@ -156,7 +147,6 @@ pub fn apply_cognitive_biases(
         save_biases(biases);
         debug!(
             confirmation = biases.confirmation_bias,
-            recency = biases.recency_bias,
             mood = biases.mood_congruence,
             anchoring = biases.anchoring_strength,
             availability = biases.availability_heuristic,
@@ -196,11 +186,17 @@ pub fn apply_cognitive_biases(
                 bonus += biases.confirmation_bias * 0.2;
             }
 
-            // 5. 近因效应：固定加成（简单近期记忆优先）
-            let recency_bonus = biases.recency_bias * 0.15;
-            bonus += recency_bonus;
-
-            r.score = (r.score + bonus as f64).clamp(0.0, 1.0);
+            // 偏差是**有界的相对调整**，不是把分数整体抬到上界的加法。
+            //
+            // 曾经这里是 `(score + bonus).clamp(0,1)`：在归一化之前，
+            // 无条件项就有 0.06（recency_bias 0.4 × 0.15），而融合分数上界
+            // 只有 0.0164，于是每条结果都被顶到 1.0——排序完全由稳定排序
+            // 留下的旧次序决定，偏差模块贡献了零个有效信号。
+            //
+            // 近因效应不在这里：它曾经对**每条**候选加同一个常数，
+            // 而同一个常数不携带任何排序信息（只会在上界处抹掉差异）。
+            // 时间衰减由 `retrieval::forgetting` 的 retention 分量承担。
+            r.score = (r.score * (1.0 + bonus as f64)).clamp(0.0, 1.0);
 
             // 更新访问频率
             *biases.access_frequency.entry(r.id.clone()).or_insert(0) += 1;
@@ -227,13 +223,94 @@ pub fn apply_cognitive_biases(
     adjusted
 }
 
-/// 记录锚定记忆（首次强印象）
-pub fn record_anchor(topic: &str, memory_id: &str, biases: &mut CognitiveBiases) {
-    if !biases.anchors.contains_key(topic) {
-        biases
-            .anchors
-            .insert(topic.to_string(), memory_id.to_string());
-        save_biases(biases);
-        debug!(topic, memory_id, "cognitive_biases: anchor recorded");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::retrieval::RetrievalResult;
+
+    /// 所有偏差拉满：这是偏差能施加的最大影响
+    fn maxed_biases() -> CognitiveBiases {
+        CognitiveBiases {
+            confirmation_bias: 1.0,
+            mood_congruence: 1.0,
+            anchoring_strength: 1.0,
+            availability_heuristic: 1.0,
+            last_drift: crate::util::now_secs(),
+            access_frequency: HashMap::new(),
+            anchors: HashMap::new(),
+        }
+    }
+
+    fn result(id: &str, score: f64, content: &str) -> RetrievalResult {
+        RetrievalResult {
+            id: id.to_string(),
+            content: content.to_string(),
+            score,
+        }
+    }
+
+    /// 偏差可以微调次序，但**不能**让一条明显不相关的记忆翻越一条高度相关的记忆。
+    ///
+    /// 这是 F1.5 的回归测试：曾经偏差是 `(score + bonus).clamp(0,1)` 的加法，
+    /// 而无条件项就有 0.06、上限约 0.43，融合分数上界只有 0.0164，
+    /// 于是每条结果都被顶到 1.0，真实相关性被完全抹掉。
+    #[test]
+    fn bias_cannot_overtake_a_much_more_relevant_memory() {
+        let emotion = crate::emotion::EmotionType::Happy;
+        let mut biases = maxed_biases();
+
+        let ranked = apply_cognitive_biases(
+            vec![
+                result("relevant", 1.0, "今天天气不错"),
+                result("irrelevant", 0.05, "好开心好高兴好喜欢"),
+            ],
+            &emotion,
+            &mut biases,
+        );
+
+        assert_eq!(ranked[0].id, "relevant", "偏差不该抹掉相关性差异");
+        assert!(ranked[0].score >= ranked[1].score);
+    }
+
+    /// 分数始终留在 [0,1] 内——下游和 admin 都按这个区间解释它
+    #[test]
+    fn adjusted_scores_stay_in_unit_range() {
+        let emotion = crate::emotion::EmotionType::Sad;
+        let mut biases = maxed_biases();
+        let ranked = apply_cognitive_biases(
+            vec![
+                result("a", 1.0, "难过伤心"),
+                result("b", 0.5, "难过伤心"),
+                result("c", 0.0, "难过伤心"),
+            ],
+            &emotion,
+            &mut biases,
+        );
+        assert!(
+            ranked.iter().all(|r| (0.0..=1.0).contains(&r.score)),
+            "分数越界：{:?}",
+            ranked.iter().map(|r| r.score).collect::<Vec<_>>()
+        );
+    }
+
+    /// 偏差确实有可测效果：不相关的记忆被提权（但不是无条件抬到 1.0）
+    #[test]
+    fn bias_still_promotes_mood_congruent_memories() {
+        let emotion = crate::emotion::EmotionType::Happy;
+        let mut biases = maxed_biases();
+        let before = 0.4;
+
+        let ranked = apply_cognitive_biases(
+            vec![result("mood_match", before, "好开心好高兴")],
+            &emotion,
+            &mut biases,
+        );
+
+        assert!(
+            ranked[0].score > before,
+            "情绪一致的记忆应被提权：{} !> {before}",
+            ranked[0].score
+        );
+        assert!(ranked[0].score <= 1.0);
     }
 }
