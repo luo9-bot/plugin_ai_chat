@@ -81,10 +81,23 @@ impl TurnFocus {
             .any(|d| d.has_text() && d.user_id != self.primary)
     }
 
+    /// 这批消息中是否有人明确在叫其他群友。
+    pub(crate) fn addresses_others(&self) -> bool {
+        !self.other_targeted_by.is_empty()
+    }
+
     pub(crate) fn is_solely_for_others(&self) -> bool {
-        !self.is_called()
-            && self.digests.iter().any(|d| d.has_text())
-            && self.digests.iter().filter(|d| d.has_text()).all(|d| !d.at_targets.is_empty())
+        if self.is_called() || !self.followed_up_by.is_empty() {
+            return false;
+        }
+        let text_digests: Vec<&UtteranceDigest> =
+            self.digests.iter().filter(|digest| digest.has_text()).collect();
+        !text_digests.is_empty()
+            && text_digests.iter().all(|digest| {
+                !digest.at_targets.is_empty()
+                    && digest.at_targets.iter().all(|target| *target != 0)
+            })
+            && self.addresses_others()
     }
 
     /// 评分用的"被点名"加成：叫她的人或刚回过的人越多越该说话。
@@ -338,7 +351,12 @@ mod tests {
 
     #[test]
     fn does_not_interrupt_messages_addressed_to_other_members() {
-        let batch = vec![u(11, "[CQ:at,qq=22] 你看这个", 100)];
+        let batch = vec![u_mentioning(
+            11,
+            "[CQ:at,qq=22] 你看这个",
+            "@群友 你看这个",
+            100,
+        )];
         let focus = focus_batch(&batch, 999, "洛玖", &never);
         assert!(focus.addresses_others());
         assert!(focus.is_solely_for_others());
@@ -347,9 +365,25 @@ mod tests {
 
     #[test]
     fn bot_mention_wins_when_message_mentions_bot_and_another_member() {
-        let batch = vec![u(11, "[CQ:at,qq=999][CQ:at,qq=22] 一起看看", 100)];
+        let batch = vec![u_mentioning(
+            11,
+            "[CQ:at,qq=999][CQ:at,qq=22] 一起看看",
+            "@洛玖 @群友 一起看看",
+            100,
+        )];
         let focus = focus_batch(&batch, 999, "洛玖", &never);
         assert!(focus.is_called());
+        assert!(focus.addresses_others());
+        assert!(!focus.is_solely_for_others());
+    }
+
+    #[test]
+    fn mixed_batch_is_not_misclassified_as_only_for_others() {
+        let batch = vec![
+            u_mentioning(11, "[CQ:at,qq=22] 你看这个", "@群友 你看这个", 100),
+            u(33, "我也想看看", 101),
+        ];
+        let focus = focus_batch(&batch, 999, "洛玖", &never);
         assert!(focus.addresses_others());
         assert!(!focus.is_solely_for_others());
     }

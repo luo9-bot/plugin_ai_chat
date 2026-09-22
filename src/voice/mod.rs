@@ -51,6 +51,8 @@ fn report_silence(scope: &str, cause: &SilenceCause, id: u64) {
 /// 开口调用的最终决策（对话路径）
 #[derive(Debug)]
 pub(crate) enum VoiceAction {
+    /// 模型调用失败或输出不可用；这一轮可以重试。
+    Failed,
     /// 她要说的话（可能是多条，用 |^| 或换行分隔）
     Reply(String),
     /// 这一轮她选择沉默
@@ -817,7 +819,11 @@ pub(crate) fn speak_group(
         },
         Utterance::Silent(cause) => {
             report_silence("group", &cause, group_id);
-            VoiceAction::Silent
+            if cause.is_deliberate() {
+                VoiceAction::Silent
+            } else {
+                VoiceAction::Failed
+            }
         }
     }
 }
@@ -903,7 +909,11 @@ pub(crate) fn speak_private(
         },
         Utterance::Silent(cause) => {
             report_silence("private", &cause, user_id);
-            VoiceAction::Silent
+            if cause.is_deliberate() {
+                VoiceAction::Silent
+            } else {
+                VoiceAction::Failed
+            }
         }
     }
 }

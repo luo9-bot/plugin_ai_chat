@@ -260,10 +260,9 @@ pub(crate) fn process_message(user_id: u64, message: &str) {
         )
         .with_about(user_id);
         if let Some(source) = crate::mind::recall::source_for(&line) {
-            event = event.with_recall(
-                crate::mind::recall::recall_id(user_id, 0, &line),
-                source,
-            );
+            let id = crate::mind::recall::recall_id(user_id, 0, &line);
+            recall_ids.push(id.clone());
+            event = event.with_recall(id, source);
         }
         crate::mind::stream::push(event);
     }
@@ -723,10 +722,9 @@ fn speak_and_deliver_group(
         )
         .with_about(primary);
         if let Some(source) = crate::mind::recall::source_for(&line) {
-            event = event.with_recall(
-                crate::mind::recall::recall_id(primary, group_id, &line),
-                source,
-            );
+            let id = crate::mind::recall::recall_id(primary, group_id, &line);
+            recall_ids.push(id.clone());
+            event = event.with_recall(id, source);
         }
         crate::mind::stream::push(event);
     }

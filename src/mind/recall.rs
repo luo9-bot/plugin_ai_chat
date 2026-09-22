@@ -16,17 +16,95 @@ use crate::mind::stream::{self, StreamKind};
 use crate::util;
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
+use std::fmt::Write;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 const RECALL_COOLDOWN_SECS: u64 = 24 * 3600;
 const MAX_RECALLS_PER_TURN: usize = 3;
 static RECENT_RECALLS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+static COMPLETED_RECALLS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn completed_path() -> PathBuf {
+    crate::config::data_dir()
+        .join("mind")
+        .join("recall_status.json")
+}
+
+fn completed_store() -> &'static Mutex<HashMap<String, u64>> {
+    COMPLETED_RECALLS.get_or_init(|| {
+        let loaded = std::fs::read_to_string(completed_path())
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        Mutex::new(loaded)
+    })
+}
 
 pub(crate) fn recall_id(user_id: u64, group_id: u64, content: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(format!("{user_id}:{group_id}:").as_bytes());
     hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let mut id = String::with_capacity(40);
+    for byte in hasher.finalize() {
+        write!(&mut id, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    id
+}
+
+pub(crate) fn is_completed(id: &str) -> bool {
+    completed_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains_key(id)
+}
+
+pub(crate) fn completed_at(id: &str) -> Option<u64> {
+    completed_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(id)
+        .copied()
+}
+
+/// 只有表达轮次正常完成后，才把本轮联想标记为已处理。
+pub(crate) fn complete_turn(ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let now = util::now_secs();
+    let mut store = completed_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut updated = store.clone();
+    for id in ids {
+        updated.entry(id.clone()).or_insert(now);
+    }
+    let bytes = match serde_json::to_vec(&updated) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(%error, "recall: completion serialization failed");
+            return;
+        }
+    };
+    match crate::util::atomic_write(completed_path(), bytes) {
+        Ok(()) => *store = updated,
+        Err(error) => tracing::warn!(%error, "recall: completion could not be saved"),
+    }
+}
+
+/// 表达轮次失败时释放内存冷却，让同一联想可以在下次重试。
+pub(crate) fn release_turn(ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let mut recent = RECENT_RECALLS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for id in ids {
+        recent.remove(id);
+    }
 }
 
 pub(crate) fn source_for(text: &str) -> Option<&'static str> {
@@ -70,7 +148,10 @@ fn has_recall_topic(text: &str) -> bool {
 
 fn should_emit(user_id: u64, group_id: u64, content: &str) -> bool {
     let now = util::now_secs();
-    let key = format!("{user_id}:{group_id}:{}", content.chars().take(120).collect::<String>());
+    let key = recall_id(user_id, group_id, content);
+    if is_completed(&key) {
+        return false;
+    }
     let mut recent = RECENT_RECALLS.get_or_init(|| Mutex::new(HashMap::new()))
         .lock().unwrap_or_else(|e| e.into_inner());
     recent.retain(|_, ts| now.saturating_sub(*ts) < RECALL_COOLDOWN_SECS);
@@ -265,5 +346,14 @@ mod tests {
         assert!(!has_recall_topic("嗯"));
         assert!(!has_recall_topic("今天"));
         assert!(has_recall_topic("今晚喝可乐"));
+    }
+
+    #[test]
+    fn recall_ids_are_stable_sha1_hex() {
+        let first = recall_id(1, 2, "same memory");
+        assert_eq!(first, recall_id(1, 2, "same memory"));
+        assert_ne!(first, recall_id(1, 3, "same memory"));
+        assert_eq!(first.len(), 40);
+        assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

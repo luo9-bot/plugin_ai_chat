@@ -142,12 +142,10 @@ fn load(timeframe: Timeframe) -> Plan {
         .unwrap_or_default()
 }
 
-fn save(timeframe: Timeframe, plan: &Plan) {
-    if let Ok(json) = serde_json::to_string_pretty(plan)
-        && let Err(error) = crate::util::atomic_write(path_of(timeframe), json.as_bytes())
-    {
-        tracing::warn!(error = %error, "状态写盘失败");
-    }
+fn save(timeframe: Timeframe, plan: &Plan) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(plan)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    crate::util::atomic_write(path_of(timeframe), json)
 }
 
 /// 当前周期标识
@@ -720,7 +718,7 @@ mod tests {
             ..plan_of(Timeframe::Week)
         };
         stale.items = plan_of(Timeframe::Week).items;
-        save(Timeframe::Week, &stale);
+        save(Timeframe::Week, &stale).expect("测试计划应能写盘");
 
         assert!(ensure_plan(Timeframe::Week), "跨周期需要重新生成");
         assert!(

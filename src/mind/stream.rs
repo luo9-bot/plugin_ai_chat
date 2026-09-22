@@ -43,7 +43,6 @@ pub(crate) struct BodySignal {
 pub(crate) struct RecallMeta {
     pub id: String,
     pub source: String,
-    pub completed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,16 +77,11 @@ impl StreamEvent {
         self
     }
 
-    pub(crate) fn with_recall(mut self, id: String, source: &str) -> Self {
-        self.recall = Some(RecallMeta {
-            id,
-            source: source.to_string(),
-            completed: true,
-        });
-        self
-    }
-
-    pub fn with_recall(mut self, id: impl Into<String>, source: impl Into<String>) -> Self {
+    pub(crate) fn with_recall(
+        mut self,
+        id: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         self.recall = Some(RecallMeta {
             id: id.into(),
             source: source.into(),

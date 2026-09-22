@@ -1305,7 +1305,8 @@ fn stream_event_json(event: &crate::mind::StreamEvent) -> serde_json::Value {
         value["recall"] = serde_json::json!({
             "id": recall.id,
             "source": recall.source,
-            "completed": recall.completed,
+            "completed": crate::mind::recall::is_completed(&recall.id),
+            "completed_at": crate::mind::recall::completed_at(&recall.id),
         });
     }
     value
