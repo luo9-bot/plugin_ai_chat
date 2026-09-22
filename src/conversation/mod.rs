@@ -10,8 +10,10 @@ pub(crate) mod turn;
 use crate::{batches, config, gate_read, is_admin, mind, read_shared_state, with_shared_state};
 use tracing::{debug, info, warn};
 
-/// 零容忍（方案书 §7.3）：确认注入一次 = 永久拉黑 + 残留清洗。
-/// Block/Ban/SilentBan 均视为确认；Warn 灰区走"玻璃瓶"由她自己产生厌恶。
+/// 记录高风险处置，但不把一次消息拦截升级成永久黑名单。
+///
+/// 消息处置和关系处罚分开：误判只能影响这一条消息；只有行为信誉系统
+/// 在多次高严重度证据下才会进入自动封禁状态，永久黑名单仍由人工维护。
 fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, issues: &[String]) {
     if !matches!(
         action,
@@ -21,21 +23,13 @@ fn enforce_zero_tolerance(user_id: u64, action: &crate::anti_injection::Action, 
     ) {
         return;
     }
-    // 永久拉黑（运行时 + 持久）
-    crate::set_blacklisted(crate::db::Actor::Command, user_id, true);
-    crate::anti_injection::ban_user(user_id);
-    // 残留清洗：他不能再留在她的世界里
-    mind::persons::purge_user_want_to_say(user_id);
-    mind::diary::purge_about(user_id);
-    mind::wake::purge_loops_about(user_id);
-    mind::social::purge_user(user_id);
     mind::security::log_event(
         user_id,
         "perception",
-        "zero_tolerance_blacklist",
+        "automatic_restriction",
         &issues.join(";"),
     );
-    warn!(user_id, "零容忍：确认注入，永久拉黑并清洗残留");
+    warn!(user_id, ?action, "高风险消息已拦截，未自动加入永久黑名单");
 }
 
 pub(crate) fn handle_group_msg(group_id: u64, user_id: u64, msg: &str) {

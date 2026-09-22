@@ -124,9 +124,10 @@ impl UserBehavior {
         if severity >= 3.0 {
             self.high_severity_count += 1;
         }
-        // 内容信誉下降：高严重度违规立即产生显著惩罚
-        let base_penalty = 0.15 * severity;
-        let repeat_factor = 1.0 + self.violation_count as f32 * 0.2;
+        // 单次误判只造成温和影响；重复放大以高严重度次数为依据，
+        // 不让普通灰区消息把信誉快速打穿。
+        let base_penalty = 0.08 * severity.clamp(0.0, 4.0);
+        let repeat_factor = 1.0 + self.high_severity_count.min(3) as f32 * 0.1;
         let penalty = base_penalty * repeat_factor;
         self.reputation.content = (self.reputation.content - penalty).max(0.0);
         self.reputation.trust = (self.reputation.trust - penalty * 0.6).max(0.0);
@@ -151,7 +152,7 @@ impl UserBehavior {
 
     /// 是否应该静默封禁
     pub(crate) fn should_silent_ban(&self) -> bool {
-        self.reputation.content < 0.3 && self.high_severity_count >= 2
+        self.reputation.content < 0.2 && self.high_severity_count >= 3
     }
 }
 
@@ -397,7 +398,7 @@ pub(crate) fn check_and_apply_silent_ban(user_id: u64) -> bool {
 /// 检查是否应该自动封禁并执行
 pub(crate) fn check_and_apply_auto_ban(user_id: u64, threshold: u32) -> bool {
     with_behavior_mut(user_id, |b| {
-        if b.violation_count >= threshold {
+        if b.violation_count >= threshold && b.high_severity_count >= 3 {
             b.banned = true;
             b.vision_disabled = true;
             warn!(user_id, violations = b.violation_count, "用户被完全封禁");
