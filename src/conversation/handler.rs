@@ -350,7 +350,6 @@ fn finish_private_reply(user_id: u64, user_message: &str, reply: &str) {
     crate::person_info::relationship::record_interaction(user_id, true);
     crate::reply_effect::record_reply(0, user_id, reply, None);
     crate::working_memory::mark_replied(0, user_id);
-    crate::activity::check_bot_message(user_id, reply);
 
     // 后处理任务不阻塞，放入后台线程
     let msg = user_message.to_string();
@@ -860,7 +859,6 @@ fn finish_group_reply(group_id: u64, primary: u64, utterances: &[GroupUtterance]
     crate::mind::social::record_bot_speech(group_id, reply);
 
     crate::reply_effect::record_reply(group_id, primary, reply, archive_reply_id);
-    crate::activity::check_bot_message(primary, reply);
 
     // 后处理任务不阻塞，逐用户放入后台线程
     let rep = reply.to_string();

@@ -53,6 +53,7 @@ pub(crate) mod util;
 pub(crate) mod vision;
 pub(crate) mod voice;
 pub(crate) mod working_memory;
+pub(crate) mod world;
 
 // ── 测试模式下的 stub ────────────────────────────────────────
 #[cfg(not(feature = "plugin"))]
@@ -806,8 +807,11 @@ fn run_periodic_maintenance() {
     // 刷新挂起的 embedding 批量写入
     memory::flush_pending_embeddings();
 
-    // 检查活动进度（完成的活动会记录，供生命事件路径触发）
+    // 活动到点收尾（手上的事不该永远拤着）
     activity::check_activity_progress();
+
+    // 真实世界巡视：直播间状态/弹幕（网络 IO 不进主循环；自带节流与防重入）
+    std::thread::spawn(crate::world::tick);
 
     // 计划：跨周期就开一份新的，需要时让 AI 生成内容
     //

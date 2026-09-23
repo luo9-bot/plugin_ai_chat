@@ -65,6 +65,9 @@ pub(crate) struct Config {
     /// 人类化行为配置
     #[serde(default)]
     pub humanity: HumanityConfig,
+    /// 真实世界输入：她关注的直播间等（空 = 没有外部世界这回事）
+    #[serde(default)]
+    pub world: WorldConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -238,6 +241,51 @@ pub(crate) struct SearchConfig {
     pub api_url: String,
     #[serde(default)]
     pub api_key: String,
+}
+
+/// 真实世界输入配置：她能看到的真实世界（目前是 B 站直播间）
+///
+/// 活动必须有真实素材才是真的：看直播时她看到的标题、在线人数、弹幕
+/// 都来自这里巡视到的真实房间，而不是模型现编。
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct WorldConfig {
+    /// 是否巡视真实世界（false 时活动只剩她自己的行为，没有外部素材）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 她关注的直播间（空 = 没有看直播这回事）
+    #[serde(default)]
+    pub live_rooms: Vec<LiveRoomConfig>,
+    /// 巡视节奏（秒，下限 30）
+    #[serde(default = "default_world_poll_interval")]
+    pub poll_interval_secs: u64,
+    /// 开播/下播时允许她主动发言的群（0 = 只在心里想，不外发）
+    #[serde(default)]
+    pub announce_group: u64,
+}
+
+/// 一个她关注的直播间
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct LiveRoomConfig {
+    /// B 站直播间号
+    pub room_id: u64,
+    /// 她怎么称呼这个主播（接口不给名字，由配置给出）
+    #[serde(default)]
+    pub name: String,
+}
+
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            live_rooms: Vec::new(),
+            poll_interval_secs: default_world_poll_interval(),
+            announce_group: 0,
+        }
+    }
+}
+
+fn default_world_poll_interval() -> u64 {
+    60
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

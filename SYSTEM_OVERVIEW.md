@@ -200,7 +200,8 @@ observe 纯内存更新（主循环零 IO），周期 tick（60s）统一衰减�
 | 配额系统 | `quota/` | 用户配额、分段消息、兴趣追踪 |
 | Token 追踪 | `tracking.rs` | API 调用记录、Token 用量统计 |
 | 回复效果追踪 | `reply_effect/` | ASI 评分、LLM Judge、观察窗口 |
-| 活动生命周期 | `activity/` | 日常生活模拟（训练/吃饭/睡觉/工作/外出/洗澡） |
+| 活动生命周期 | `activity/` | **真实活动引擎**：`do_activity` 工具开合；活动有真实素材（世界层弹幕/标题）、占用注意力、下播/到点收尾（v4，替换旧关键词嗅探） |
+| 真实世界输入 | `world/` | B 站直播间巡视：真实开播/下播事件入流 + 感官唤醒；弹幕作为观看素材（过防注入滤壳） |
 | 人物档案 | `person_info/` | 用户关系、记忆点、群昵称 |
 | 视觉处理 | `vision/` | 图片 CQ 码解析、图片 URL 提取 |
 | Emoji 处理 | `emoji/` | Unicode emoji 过滤、纯 emoji 检测 |

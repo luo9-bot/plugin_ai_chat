@@ -119,6 +119,7 @@ pub(crate) fn init() {
                     auto_start_users: Vec::new(),
                     auto_start_groups: Vec::new(),
                     humanity: HumanityConfig::default(),
+                    world: WorldConfig::default(),
                 }
             }
         },
@@ -153,6 +154,7 @@ pub(crate) fn init() {
                 auto_start_users: Vec::new(),
                 auto_start_groups: Vec::new(),
                 humanity: HumanityConfig::default(),
+                world: WorldConfig::default(),
             }
         }
     };

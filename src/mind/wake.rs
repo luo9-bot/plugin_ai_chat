@@ -401,6 +401,11 @@ fn build_wake_input(plan: &WakePlan) -> String {
         sections.push(wishes);
     }
 
+    // 手上正在做的事：回神常发生在做事中途，带着真实素材
+    if let Some(block) = crate::activity::context_block() {
+        sections.push(block);
+    }
+
     // 信息觅食：哪些群攒了没细看的消息——看不看由她自己决定
     let unread = crate::mind::foraging::unread_lines();
     if !unread.is_empty() {

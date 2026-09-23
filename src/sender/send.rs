@@ -90,6 +90,9 @@ fn current_timing() -> ResponseTiming {
         0.7
     };
     timing.update_modifiers(battery_level, circadian_energy, attention_level);
+    // 手上的事占着注意力：回消息慢半拍是真实的代价，不是抖动参数
+    let absorbed = 1.0 - 0.35 * crate::activity::occupancy();
+    timing.speed_modifier = (timing.speed_modifier * absorbed).clamp(0.3, 1.5);
     timing
 }
 

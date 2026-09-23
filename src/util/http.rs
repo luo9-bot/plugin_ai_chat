@@ -157,6 +157,28 @@ pub(crate) fn get_bytes(url: &str) -> Result<Vec<u8>, HttpError> {
         .map_err(|error| HttpError::Body(Box::new(error)))
 }
 
+/// 世界层公开接口（直播间状态/弹幕）的墙钟上限（秒）
+pub(crate) const WORLD_FETCH_TIMEOUT_SECS: u64 = 15;
+
+/// GET 一个公开接口的文本（世界层用）
+///
+/// 带浏览器 UA 与直播站 Referer：B 站等站点会拒绝无 UA 的裸请求。
+pub(crate) fn get_text(url: &str) -> Result<String, HttpError> {
+    let mut response = agent(AgentSpec::requiring_success(WORLD_FETCH_TIMEOUT_SECS))
+        .get(url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
+        .header("Referer", "https://live.bilibili.com/")
+        .call()
+        .map_err(|error| HttpError::Transport(Box::new(error)))?;
+    response
+        .body_mut()
+        .read_to_string()
+        .map_err(|error| HttpError::Body(Box::new(error)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

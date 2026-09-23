@@ -59,6 +59,15 @@ pub(crate) fn body_signals() -> Vec<BodySignal> {
         }
     }
 
+    // 分心：手上的事占着她的注意力（数值存在，解释不存在）
+    let absorbed = crate::activity::occupancy();
+    if absorbed > 0.0 {
+        signals.push(BodySignal {
+            name: "分心".into(),
+            level: absorbed,
+        });
+    }
+
     signals
 }
 

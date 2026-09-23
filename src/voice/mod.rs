@@ -245,6 +245,65 @@ fn search_web_tool() -> Tool {
     }
 }
 
+/// 活动工具：她开始做/放下手上的事（行为本身，不是台词）
+///
+/// 这是「活动」唯一的开合入口：旧版从她话里嗅关键词（"休息"→ 睡 8 小时），
+/// 说出来的事没有内容也没有代价。现在开合是动作，素材是真的（看直播时
+/// 递进来的弹幕/标题来自真实房间），占用注意力也是真的。
+fn do_activity_tool() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: crate::ai::FunctionDef {
+            name: "do_activity".to_string(),
+            description:
+                "开始或放下你手上正在做的事（看直播、打游戏、看书、运动、吃饭、工作学习、出门、洗澡、睡觉、其他）。只有你真的开始做、或真的停下来时才调用——这是行为本身，不是为了说得像真的。开始后这件事真的占着你：回消息会慢、话会短，被打断也正常。看直播只能看你关注的、此刻真的在播的房间，你会看到真实的标题、在线人数和弹幕。"
+                    .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["start", "stop"]},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["watch_live", "gaming", "reading", "training", "eating", "working", "outing", "bathing", "sleeping", "other"],
+                        "description": "做什么（action=start 时需要）"
+                    },
+                    "title": {"type": "string", "description": "简短说明具体是什么事（看直播可不填，自动看你关注的房间）"}
+                },
+                "required": ["action"]
+            }),
+        },
+    }
+}
+
+fn execute_do_activity(args: &serde_json::Value) -> ToolOutcome {
+    match args.get("action").and_then(|v| v.as_str()).unwrap_or("").trim() {
+        "stop" => ToolOutcome::Continue(match crate::activity::stop() {
+            Some(text) => text,
+            None => "你手上本来就没有在做的事。".into(),
+        }),
+        "start" => {
+            let token = args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("other")
+                .trim();
+            let Some(kind) = crate::activity::ActivityKind::from_token(token) else {
+                return ToolOutcome::Continue(format!(
+                    "不认识的 kind：{token}。可用：watch_live、gaming、reading、training、eating、working、outing、bathing、sleeping、other。"
+                ));
+            };
+            let title = args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            ToolOutcome::Continue(crate::activity::begin(kind, &title))
+        }
+        _ => ToolOutcome::Continue("do_activity 需要 action：start 或 stop。".into()),
+    }
+}
+
 /// 计划工具集（她自己看清单、记进展、勾掉完成）
 ///
 /// 抽取出来是因为表达与回神两条路径都要给她同一套：
@@ -265,6 +324,7 @@ fn voice_tools() -> Vec<Tool> {
         send_sticker_tool(),
         finish_tool(),
         plan_next_tool(),
+        do_activity_tool(),
     ];
     tools.extend(plan_tools());
     if config::get().search.enabled {
@@ -520,6 +580,7 @@ fn execute_tool(
                 .to_string();
             execute_search(&query)
         }
+        "do_activity" => execute_do_activity(args),
         "finish" => {
             debug!(
                 group_id,
@@ -558,7 +619,7 @@ fn execute_tool(
             ToolOutcome::Continue("已记下这个安排。你可以继续说话，或调用 finish。".into())
         }
         _ => ToolOutcome::Continue(
-            "未知工具，可用工具：query_memory、send_sticker、finish、plan_next、check_plan、add_plan、note_progress、finish_plan。".into(),
+            "未知工具，可用工具：query_memory、send_sticker、finish、plan_next、do_activity、check_plan、add_plan、note_progress、finish_plan。".into(),
         ),
     }
 }
@@ -681,6 +742,12 @@ fn stream_user_content(new_perceptions: &str) -> String {
             .collect::<Vec<_>>()
             .join("、");
         sections.push(format!("身体：{rendered}"));
+    }
+
+    // 她手上正在做的事：真实素材随行——她说起这件事时引用的细节是真的，
+    // 而且这件事真的占着她的注意力
+    if let Some(block) = crate::activity::context_block() {
+        sections.push(block);
     }
 
     if !new_perceptions.is_empty() {
@@ -961,7 +1028,12 @@ pub(crate) fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
     }
 
     // 阶段二：决定行动
-    let mut decision_tools: Vec<Tool> = vec![say_tool(true), finish_tool(), plan_next_tool()];
+    let mut decision_tools: Vec<Tool> = vec![
+        say_tool(true),
+        finish_tool(),
+        plan_next_tool(),
+        do_activity_tool(),
+    ];
     // 回神是她回看自己一天的时刻，也是她勾掉计划最自然的时机
     decision_tools.extend(plan_tools());
     if config::get().humanity.foraging_enabled {
@@ -1029,6 +1101,7 @@ pub(crate) fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
                 *captured_wake.borrow_mut() = Some((secs.min(48 * 3600), reason));
                 ToolOutcome::Continue("已记下这个安排。现在收尾：say 或 finish。".into())
             }
+            "do_activity" => execute_do_activity(args),
             "catch_up" => {
                 let gid = args.get("group_id").and_then(|v| v.as_u64()).unwrap_or(0);
                 if gid == 0 {
@@ -1037,7 +1110,7 @@ pub(crate) fn wake_think(input: &str, allow_speak: bool) -> WakeTurn {
                 ToolOutcome::Continue(crate::mind::foraging::catch_up(gid))
             }
             _ => ToolOutcome::Continue(
-                "未知工具，可用：say、finish、plan_next、catch_up、check_plan、add_plan、note_progress、finish_plan。".into(),
+                "未知工具，可用：say、finish、plan_next、do_activity、catch_up、check_plan、add_plan、note_progress、finish_plan。".into(),
             ),
         }
         },

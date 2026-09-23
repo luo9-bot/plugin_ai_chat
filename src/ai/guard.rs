@@ -21,6 +21,7 @@ pub(crate) const ALL_TOOL_NAMES: &[&str] = &[
     "send_sticker",
     "search_web",
     "catch_up",
+    "do_activity",
     // 睡前整理
     "write_diary",
     "update_person",
