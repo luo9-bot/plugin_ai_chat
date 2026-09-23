@@ -424,6 +424,12 @@ pub(crate) fn context_block() -> Option<String> {
         let rendered: Vec<&str> = session.facts[start..].iter().map(String::as_str).collect();
         lines.push(format!("刚刚真实发生：\n{}", rendered.join("\n")));
     }
+    // 此刻现场：量出来的在线轨迹 + 弹幕节奏——她说起这场时的“热闹/冷清”是有依据的
+    if let Some(room_id) = session.room_id
+        && let Some(texture) = crate::world::live_texture(room_id)
+    {
+        lines.push(format!("此刻现场：{texture}"));
+    }
     Some(lines.join("\n"))
 }
 

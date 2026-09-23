@@ -750,6 +750,12 @@ fn stream_user_content(new_perceptions: &str) -> String {
         sections.push(block);
     }
 
+    // 她关注的直播间此刻 + 记得 + 预期：一个活在世界里的存在，对关注的
+    // 地方是有连续感的（熟脸、作息、这一场与平常的不同）
+    if let Some(block) = crate::world::context_block() {
+        sections.push(block);
+    }
+
     if !new_perceptions.is_empty() {
         sections.push(format!("# 刚刚发生（需要你回应/决定）\n{new_perceptions}"));
     }

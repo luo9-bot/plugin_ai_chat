@@ -24,6 +24,10 @@ use tracing::{debug, info, warn};
 use crate::config;
 use crate::util;
 
+/// 世界模型：把一次次巡视沉淀成房间的「记得」与「预期」——熟脸、作息、
+/// 与平常的偏差、现场质感。它把世界层从「此刻的快照」拓展成「她住在这里」。
+pub(crate) mod model;
+
 /// 一条弹幕（转述前的原始事实）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Danmaku {
@@ -294,6 +298,49 @@ fn take_unseen(seen: &mut Vec<String>, batch: &[Danmaku], cap: usize) -> Vec<Dan
     fresh
 }
 
+/// 看直播时随行的现场质感（在线轨迹 + 弹幕节奏，全是量出来的数）
+pub(crate) fn live_texture(room_id: u64) -> Option<String> {
+    model::texture_line(room_id)
+}
+
+/// 她关注的直播间的「此刻 + 记得 + 预期」概况（感官事实，零抒情）
+///
+/// 不在看的时候也递给她：一个活在世界里的存在，对关注的地方是有连续感的——
+/// 记得主播的作息、认得常来的面孔、看得见这一场与平常的不同。
+pub(crate) fn context_block() -> Option<String> {
+    let cfg = config::get();
+    if !cfg.world.enabled || cfg.world.live_rooms.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["# 你关注的直播间".to_string()];
+    let mut any = false;
+    for room in live_brief() {
+        let name = &room.name;
+        let mut seg: Vec<String> = Vec::new();
+        match room.state.as_ref() {
+            Some(s) if s.is_live() => {
+                seg.push(format!("「{name}」在播 {}", s.brief()));
+                if let Some(t) = model::texture_line(room.room_id) {
+                    seg.push(t);
+                }
+                if let Some(a) = model::absence_line(room.room_id) {
+                    seg.push(a);
+                }
+            }
+            _ => seg.push(format!("「{name}」这会儿没在播")),
+        }
+        if let Some(r) = model::rhythm_line(room.room_id) {
+            seg.push(r);
+        }
+        if let Some(f) = model::familiarity_line(room.room_id) {
+            seg.push(f);
+        }
+        lines.push(seg.join("；"));
+        any = true;
+    }
+    any.then(|| lines.join("\n"))
+}
+
 // ── 巡视 ────────────────────────────────────────────────────────
 
 /// 周期入口：按 `world.poll_interval_secs` 的节奏巡一圈
@@ -428,8 +475,17 @@ fn dispatch_room(
             );
             push_sensation(line);
             info!(room_id, name, title = %state.title, "world: 开播");
-            // 感官唤醒：reason 是转述的事实，看不看由她自己决定
-            let reason = format!("感官：你关注的主播「{name}」开播了：{}", state.brief());
+            // 世界模型：记一场，量出「这场与平常的偏差」——晚开/早开是真实事实
+            let deviations = model::note_live_start(room_id, &state.title, now);
+            for fact in &deviations {
+                push_sensation(format!("[直播间·{name}] {fact}"));
+            }
+            // 感官唤醒：reason 是转述的事实，看不看由她自己决定；
+            // 有偏差时一并带上，她一眼看得见「今晚不太一样」在哪
+            let mut reason = format!("感官：你关注的主播「{name}」开播了：{}", state.brief());
+            for fact in &deviations {
+                reason.push_str(&format!("。{fact}"));
+            }
             let mut plan = crate::mind::WakePlan::new(crate::mind::WakeKind::Idle, now, reason)
                 .with_urgency(crate::mind::Urgency::Soon);
             let announce = config::get().world.announce_group;
@@ -446,10 +502,21 @@ fn dispatch_room(
             );
             push_sensation(line);
             info!(room_id, name, "world: 下播");
+            // 世界模型：结算这一场，量出「这场比平常长/短」等事实
+            for fact in model::note_live_end(room_id, now) {
+                push_sensation(format!("[直播间·{name}] {fact}"));
+            }
             // 她若正在看这个房间，这件事到此为止
             crate::activity::on_live_ended(room_id);
         }
         Transition::None => {}
+    }
+
+    // 现场记账（世界模型）：在线采样 + 弹幕节奏 + 熟脸 + 这场出现过的人。
+    // 这是房间的客观记录，与她看没看无关（弹幕正文另论——不在场听不到）。
+    if state.is_live() {
+        let unames: Vec<String> = danmaku.iter().map(|d| d.uname.clone()).collect();
+        model::note_live_tick(room_id, state.online, &unames, now);
     }
 
     // 弹幕素材：递给正在看这个房间的她（她没在看就什么都没有——不在场听不到）
