@@ -36,3 +36,7 @@ luo9*.txt
 *.diff
 .npm-cache/
 *cache*/
+
+docs/
+
+package-lock.json
